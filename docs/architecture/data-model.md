@@ -1,7 +1,7 @@
 # Encore Data Model
 
-**Milestone:** 1 - Foundation
-**Status:** Draft
+**Milestone:** 2 - Library Management (Rooms Entities Implemented)
+**Status:** Active - Room database operational
 **Last Updated:** 2026-03-26
 
 ## Entity Relationship Overview
@@ -125,32 +125,202 @@ Tracks sync conflicts that require user resolution. Created when local and remot
 | resolved_at | Timestamp | NULLABLE | When user chose a version |
 | created_at | Timestamp | NOT NULL | Conflict detection time |
 
-## Room Database Schema (Android Client)
+## Room Database Schema (Android Client) - IMPLEMENTED ✓
 
-The local Room database mirrors the server schema with additional fields for offline operation:
+**Status:** Milestone 2 - Fully operational
+**Location:** `android/core/data/src/main/kotlin/com/encore/core/data/`
 
-### Additional Client-Side Fields
+### Implemented Entities
 
-All entities include:
-- `sync_status`: Enum ("synced", "pending_upload", "pending_delete")
-- `local_updated_at`: Timestamp of last local modification
-- `last_synced_at`: Timestamp of last successful sync
-
-### Indexes
+#### SongEntity
+**File:** `entities/SongEntity.kt`
 
 ```kotlin
-// Song indexes for fast search
-@Index(value = ["user_id", "title"])
-@Index(value = ["user_id", "artist"])
-@Index(value = ["user_id", "title", "artist"], unique = true)
-
-// SetEntry indexes for fast setlist loading
-@Index(value = ["set_id", "position"], unique = true)
-@Index(value = ["song_id"]) // Find all uses of a song
-
-// Sync indexes
-@Index(value = ["sync_status"])
+@Entity(
+    tableName = "songs",
+    indices = [
+        Index(value = ["user_id", "title"]),
+        Index(value = ["user_id", "artist"]),
+        Index(value = ["user_id", "title", "artist"], unique = true),
+        Index(value = ["sync_status"])
+    ]
+)
+data class SongEntity(
+    @PrimaryKey val id: String,                    // UUID string
+    val userId: String,                            // "local-user" in Milestone 2
+    val title: String,
+    val artist: String,
+    val currentKey: String?,                       // e.g., "G", "Dm", "C#m"
+    val markdownBody: String,                      // Full chart content
+    val originalImportBody: String?,               // Preserve initial import
+    val version: Int = 1,                          // Conflict detection
+    val createdAt: Long,                           // Unix timestamp millis
+    val updatedAt: Long,                           // Unix timestamp millis
+    val syncStatus: SyncStatus = SyncStatus.SYNCED,
+    val localUpdatedAt: Long,                      // Last local edit
+    val lastSyncedAt: Long? = null                 // Last sync time
+)
 ```
+
+#### SetlistEntity
+**File:** `entities/SetlistEntity.kt`
+
+```kotlin
+@Entity(
+    tableName = "setlists",
+    indices = [
+        Index(value = ["user_id"]),
+        Index(value = ["sync_status"])
+    ]
+)
+data class SetlistEntity(
+    @PrimaryKey val id: String,
+    val userId: String,
+    val name: String,
+    val version: Int = 1,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val syncStatus: SyncStatus = SyncStatus.SYNCED,
+    val localUpdatedAt: Long,
+    val lastSyncedAt: Long? = null
+)
+```
+
+#### SetEntity
+**File:** `entities/SetEntity.kt`
+
+```kotlin
+@Entity(
+    tableName = "sets",
+    foreignKeys = [
+        ForeignKey(
+            entity = SetlistEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["setlist_id"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [
+        Index(value = ["setlist_id", "number"], unique = true),
+        Index(value = ["setlist_id"])
+    ]
+)
+data class SetEntity(
+    @PrimaryKey val id: String,
+    val setlistId: String,
+    val number: Int,                               // 1, 2, 3, etc.
+    val colorToken: String?,                       // UI color hint
+    val createdAt: Long
+)
+```
+
+#### SetEntryEntity
+**File:** `entities/SetEntryEntity.kt`
+
+```kotlin
+@Entity(
+    tableName = "set_entries",
+    foreignKeys = [
+        ForeignKey(
+            entity = SetEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["set_id"],
+            onDelete = ForeignKey.CASCADE
+        ),
+        ForeignKey(
+            entity = SongEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["song_id"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [
+        Index(value = ["set_id", "position"], unique = true),
+        Index(value = ["song_id"]),
+        Index(value = ["set_id"])
+    ]
+)
+data class SetEntryEntity(
+    @PrimaryKey val id: String,
+    val setId: String,
+    val songId: String,
+    val position: Int,                             // 0-indexed
+    val createdAt: Long
+)
+```
+
+#### SyncStatus Enum
+**File:** `entities/SyncStatus.kt`
+
+```kotlin
+enum class SyncStatus {
+    SYNCED,           // In sync with server
+    PENDING_UPLOAD,   // Local changes need upload
+    PENDING_DELETE    // Marked for deletion
+}
+```
+
+### Type Converters
+
+**File:** `db/TypeConverters.kt`
+
+```kotlin
+class EncoreTypeConverters {
+    @TypeConverter
+    fun fromSyncStatus(status: SyncStatus): String = status.name
+
+    @TypeConverter
+    fun toSyncStatus(value: String): SyncStatus {
+        return try {
+            SyncStatus.valueOf(value)
+        } catch (e: IllegalArgumentException) {
+            SyncStatus.SYNCED  // Safe default
+        }
+    }
+}
+```
+
+**Note:** Room handles Long, Int, and String natively. Only custom enum types require converters.
+
+### Database Class
+
+**File:** `db/EncoreDatabase.kt`
+
+```kotlin
+@Database(
+    entities = [
+        SongEntity::class,
+        SetlistEntity::class,
+        SetEntity::class,
+        SetEntryEntity::class
+    ],
+    version = 1,
+    exportSchema = true
+)
+@TypeConverters(EncoreTypeConverters::class)
+abstract class EncoreDatabase : RoomDatabase() {
+    abstract fun songDao(): SongDao
+    abstract fun setlistDao(): SetlistDao
+    abstract fun setDao(): SetDao
+    abstract fun setEntryDao(): SetEntryDao
+
+    // Pre-populated with "Amazing Grace" demo song
+}
+```
+
+### Repositories
+
+**Files:** `repository/SongRepository.kt`, `repository/SetlistRepository.kt`
+
+- **SongRepository:** Search, upsert, duplicate detection
+- **SetlistRepository:** Complex relationship management, set renumbering, position compacting
+
+### Client-Side Fields (All Entities)
+
+All syncable entities include:
+- `syncStatus`: SyncStatus enum ("SYNCED", "PENDING_UPLOAD", "PENDING_DELETE")
+- `localUpdatedAt`: Long timestamp of last local modification
+- `lastSyncedAt`: Long? timestamp of last successful sync (nullable)
 
 ## Data Model Rules
 
@@ -179,4 +349,19 @@ For future schema changes:
 
 ---
 
-**Status:** Ready for implementation after final review.
+## Implementation Status
+
+**Milestone 2 (COMPLETED):**
+- ✓ Room entities: Song, Setlist, Set, SetEntry
+- ✓ SyncStatus enum with TypeConverters
+- ✓ DAOs with @Transaction queries
+- ✓ Repositories with business logic
+- ✓ Database pre-populated with "Amazing Grace" demo song
+- ✓ Library Screen UI with search
+
+**Future Milestones:**
+- User and Device entities (Milestone 4: Authentication)
+- ConflictRecord entity (Milestone 5: Sync)
+- Server-side PostgreSQL schema (Backend milestones)
+
+**Status:** Milestone 2 complete. Data layer operational and verified on physical tablet.

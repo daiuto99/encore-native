@@ -8,15 +8,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.navigation.compose.rememberNavController
 import com.encore.tablet.di.AppContainer
 import com.encore.tablet.di.ViewModelFactory
-import com.encore.tablet.navigation.EncoreNavHost
+import com.encore.tablet.ui.MainScreen
 
 /**
  * Main entry point for Encore Android tablet application.
  *
- * Milestone 2 - Library Management: Shows library screen with song list.
+ * Milestone 2 - Library Management: Shows library and setlists with bottom nav.
  */
 class MainActivity : ComponentActivity() {
 
@@ -37,11 +36,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    val navController = rememberNavController()
-                    EncoreNavHost(
-                        navController = navController,
-                        viewModelFactory = viewModelFactory
-                    )
+                    MainScreen(viewModelFactory = viewModelFactory)
                 }
             }
         }

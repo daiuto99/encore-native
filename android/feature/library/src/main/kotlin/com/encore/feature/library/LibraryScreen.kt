@@ -1,5 +1,7 @@
 package com.encore.feature.library
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,8 +25,11 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -32,11 +37,14 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -63,6 +71,39 @@ fun LibraryScreen(
 ) {
     val songs by viewModel.songs.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
+    val isImporting by viewModel.isImporting.collectAsState()
+    val importResult by viewModel.importResult.collectAsState()
+    val context = LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // File picker launcher for importing markdown files
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            viewModel.importSongs(context, uris)
+        }
+    }
+
+    // Show snackbar when import completes
+    LaunchedEffect(importResult) {
+        importResult?.let { result ->
+            val message = buildString {
+                if (result.addedCount > 0) {
+                    append("${result.addedCount} song${if (result.addedCount != 1) "s" else ""} imported")
+                }
+                if (result.skippedCount > 0) {
+                    if (result.addedCount > 0) append(", ")
+                    append("${result.skippedCount} duplicate${if (result.skippedCount != 1) "s" else ""} skipped")
+                }
+                if (result.addedCount == 0 && result.skippedCount == 0) {
+                    append("No files imported")
+                }
+            }
+            snackbarHostState.showSnackbar(message)
+            viewModel.clearImportResult()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -81,7 +122,10 @@ fun LibraryScreen(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = onImportClick,
+                onClick = {
+                    // Launch file picker for .md files (supports multi-select)
+                    filePickerLauncher.launch(arrayOf("*/*"))
+                },
                 containerColor = MaterialTheme.colorScheme.primary
             ) {
                 Icon(
@@ -89,6 +133,9 @@ fun LibraryScreen(
                     contentDescription = "Import Song"
                 )
             }
+        },
+        snackbarHost = {
+            SnackbarHost(hostState = snackbarHostState)
         }
     ) { paddingValues ->
         Column(
@@ -96,6 +143,13 @@ fun LibraryScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
+            // Progress indicator during import
+            if (isImporting) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
             // Search Bar
             SearchBar(
                 query = searchQuery,

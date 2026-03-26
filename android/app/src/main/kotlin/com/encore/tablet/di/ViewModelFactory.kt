@@ -2,8 +2,8 @@ package com.encore.tablet.di
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import com.encore.core.data.repository.SongRepository
 import com.encore.feature.library.LibraryViewModel
+import com.encore.feature.setlists.SetlistViewModel
 
 /**
  * Factory for creating ViewModels with dependencies.
@@ -19,6 +19,12 @@ class ViewModelFactory(
         return when {
             modelClass.isAssignableFrom(LibraryViewModel::class.java) -> {
                 LibraryViewModel(appContainer.songRepository) as T
+            }
+            modelClass.isAssignableFrom(SetlistViewModel::class.java) -> {
+                SetlistViewModel(
+                    appContainer.setlistRepository,
+                    appContainer.songRepository
+                ) as T
             }
             else -> throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
         }

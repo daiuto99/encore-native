@@ -1,0 +1,106 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Android
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+bin/
+gen/
+out/
+build/
+.gradle/
+local.properties
+*.iml
+.idea/
+.externalNativeBuild
+.cxx
+
+# Gradle
+.gradle
+gradle-app.setting
+!gradle-wrapper.jar
+!gradle-wrapper.properties
+build/
+
+# Android Studio
+captures/
+.navigation/
+*.hprof
+lint/
+
+# IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# Kotlin
+*.kotlin_module
+
+# Room database schemas (if auto-generated)
+android/app/schemas/
+
+# Secrets and credentials
+*.jks
+*.keystore
+google-services.json
+secrets.properties
+
+# Backend
+backend/build/
+backend/.gradle/
+backend/out/
+backend/*.db
+backend/*.log
+
+# Logs
+*.log
+logs/
+
+# Obsidian vault files (documentation tool)
+.obsidian/workspace*
+.obsidian/graph.json
+.obsidian/plugins/
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
+.temp/
+tmp/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Test results
+test-results/
+coverage/
+*.test
+*.spec
+
+# Package managers
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Misc
+*.orig
+.vscode/

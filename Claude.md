@@ -1,16 +1,24 @@
-# Encore Project Rules
+# ENCORE NATIVE ANDROID COMMAND CENTER
 
-## Product Vision
-- [cite_start]Rebuild Encore web MVP as a native Android tablet app. [cite: 56, 290]
-- [cite_start]Optimize for 11-inch screens in Portrait orientation. [cite: 149, 312]
-- [cite_start]Primary Goal: Stage reliability and offline-first performance. [cite: 59, 310]
+## 1. Primary Source of Truth
+- **Product Vision:** @docs/01_Encore_Product_Overview.md
+- **Technical Rules:** @docs/03_Encore_Technical_Specification.md (Follow Section 12 for Repo Structure)
+- **Roadmap:** @docs/05_Build_Roadmap.md (Do not skip milestones)
 
-## Technical Stack
-- [cite_start]Language: Kotlin with Jetpack Compose. [cite: 65]
-- [cite_start]Database: Room (Local) + PostgreSQL (Remote). [cite: 65]
-- [cite_start]Auth: Google Sign-In. [cite: 65, 182]
+## 2. Definition of Done (DoD)
+Before any task or milestone is marked "Complete," the following must be true:
+- **Builds:** The app must compile successfully: `./gradlew assembleDebug`.
+- **Checklist:** All items for the current milestone in @docs/06_Delivery_Checklist.md must be produced.
+- **Test:** The feature must pass the relevant P1 criteria in @docs/07_Acceptance_Test_Plan.md.
+- **Git:** Work must be on a feature branch with clean, descriptive commits.
 
-## Development Constraints
-- [cite_start]Use the phase-based roadmap in `@docs/04_Encore_Execution_Planning_Overview.md`. [cite: 17, 43]
-- [cite_start]Never overwrite data silently during sync; always prompt for conflicts. [cite: 94, 246]
-- [cite_start]Follow the repository structure defined in the Technical Spec. [cite: 122, 123]
+## 3. Technical Constraints
+- **Platform:** Native Android (Kotlin + Jetpack Compose).
+- **Device:** 11-inch Tablet, Portrait Orientation ONLY.
+- **Architecture:** Offline-first. Local Room DB is the master source during performance.
+- **Song Model:** Markdown-based. Master version applies globally.
+
+## 4. Operational Protocol
+- **Plan First:** Always enter "Plan Mode" to outline technical steps before editing files.
+- **No Hallucinations:** If a technical detail isn't in @docs/03_Encore_Technical_Specification.md, use Android "Modern Best Practices" and document the choice in `docs/decisions.md`.
+- **Sync Safety:** Never implement "Silent Overwrite." Refer to the Conflict Rules in the Functional Spec.

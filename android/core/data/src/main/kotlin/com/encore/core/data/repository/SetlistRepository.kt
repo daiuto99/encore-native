@@ -157,6 +157,15 @@ interface SetlistRepository {
      * @return Result indicating success or error
      */
     suspend fun reorderSongInSet(entryId: String, newPosition: Int): Result<Unit>
+
+    /**
+     * Get all sets that contain a specific song.
+     * Used for showing set membership badges in Library.
+     *
+     * @param songId Song UUID
+     * @return List of sets containing the song, ordered by set number
+     */
+    suspend fun getSetsContainingSong(songId: String): List<SetEntity>
 }
 
 /**
@@ -418,5 +427,9 @@ class SetlistRepositoryImpl(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    override suspend fun getSetsContainingSong(songId: String): List<SetEntity> {
+        return setDao.getSetsContainingSong(songId)
     }
 }

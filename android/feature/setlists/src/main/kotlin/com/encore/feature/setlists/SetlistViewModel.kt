@@ -2,11 +2,11 @@ package com.encore.feature.setlists
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.encore.core.data.entities.SetEntity
 import com.encore.core.data.entities.SetlistEntity
 import com.encore.core.data.relations.SetlistWithSets
 import com.encore.core.data.repository.SetlistRepository
 import com.encore.core.data.repository.SongRepository
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -83,6 +83,20 @@ class SetlistViewModel(
     }
 
     /**
+     * Add a song to a specific set.
+     *
+     * Used when adding songs from the setlist detail screen.
+     *
+     * @param setId Set UUID
+     * @param songId Song UUID
+     */
+    fun addSongToSpecificSet(setId: String, songId: String) {
+        viewModelScope.launch {
+            setlistRepository.addSongToSet(setId, songId)
+        }
+    }
+
+    /**
      * Get setlist with all songs in order.
      *
      * @param setlistId Setlist UUID
@@ -95,5 +109,16 @@ class SetlistViewModel(
                 started = SharingStarted.WhileSubscribed(5000),
                 initialValue = null
             )
+    }
+
+    /**
+     * Get all sets containing a specific song.
+     * Used for showing set membership badges in Library.
+     *
+     * @param songId Song UUID
+     * @return List of sets containing the song
+     */
+    suspend fun getSetsContainingSong(songId: String): List<SetEntity> {
+        return setlistRepository.getSetsContainingSong(songId)
     }
 }

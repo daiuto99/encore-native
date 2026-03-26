@@ -24,6 +24,7 @@ import com.encore.feature.library.LibraryViewModel
 import com.encore.feature.setlists.SetlistDetailScreen
 import com.encore.feature.setlists.SetlistScreen
 import com.encore.feature.setlists.SetlistViewModel
+import com.encore.tablet.di.AppContainer
 import com.encore.tablet.di.ViewModelFactory
 
 /**
@@ -46,6 +47,7 @@ object Routes {
 fun EncoreNavHost(
     navController: NavHostController,
     viewModelFactory: ViewModelFactory,
+    appContainer: AppContainer,
     modifier: Modifier = Modifier
 ) {
     // Shared ViewModels across navigation
@@ -106,6 +108,7 @@ fun EncoreNavHost(
             val setlistId = backStackEntry.arguments?.getString("setlistId") ?: return@composable
             SetlistDetailScreen(
                 viewModel = setlistViewModel,
+                songRepository = appContainer.songRepository,
                 setlistId = setlistId,
                 onNavigateBack = { navController.popBackStack() }
             )

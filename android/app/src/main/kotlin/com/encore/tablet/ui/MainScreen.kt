@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.encore.tablet.di.AppContainer
 import com.encore.tablet.di.ViewModelFactory
 import com.encore.tablet.navigation.EncoreNavHost
 import com.encore.tablet.navigation.Routes
@@ -28,7 +29,8 @@ import com.encore.tablet.navigation.Routes
  */
 @Composable
 fun MainScreen(
-    viewModelFactory: ViewModelFactory
+    viewModelFactory: ViewModelFactory,
+    appContainer: AppContainer
 ) {
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -97,6 +99,7 @@ fun MainScreen(
         EncoreNavHost(
             navController = navController,
             viewModelFactory = viewModelFactory,
+            appContainer = appContainer,
             modifier = Modifier.padding(paddingValues)
         )
     }

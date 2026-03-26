@@ -18,7 +18,10 @@ class ViewModelFactory(
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         return when {
             modelClass.isAssignableFrom(LibraryViewModel::class.java) -> {
-                LibraryViewModel(appContainer.songRepository) as T
+                LibraryViewModel(
+                    appContainer.songRepository,
+                    appContainer.setlistRepository
+                ) as T
             }
             modelClass.isAssignableFrom(SetlistViewModel::class.java) -> {
                 SetlistViewModel(

@@ -5,6 +5,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -41,16 +43,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.encore.core.data.entities.SetEntity
 import com.encore.core.data.entities.SongEntity
+import com.encore.core.ui.theme.SetColor
 
 /**
  * Library Screen - Main song library view.
@@ -58,6 +63,7 @@ import com.encore.core.data.entities.SongEntity
  * Features:
  * - Search bar with live filtering
  * - List of all songs (title, artist, key)
+ * - Set membership badges
  * - FAB for importing songs
  * - Tap song to view/edit (navigation wired in app module)
  *
@@ -167,6 +173,7 @@ fun LibraryScreen(
             } else {
                 SongList(
                     songs = songs,
+                    viewModel = viewModel,
                     onSongClick = onSongClick,
                     onAddToSetlist = onAddToSetlist,
                     modifier = Modifier.weight(1f)
@@ -225,6 +232,7 @@ fun SearchBar(
 @Composable
 fun SongList(
     songs: List<SongEntity>,
+    viewModel: LibraryViewModel,
     onSongClick: (String) -> Unit,
     onAddToSetlist: (String) -> Unit,
     modifier: Modifier = Modifier
@@ -239,6 +247,7 @@ fun SongList(
         ) { song ->
             SongListItem(
                 song = song,
+                viewModel = viewModel,
                 onClick = { onSongClick(song.id) },
                 onAddToSetlist = { onAddToSetlist(song.id) }
             )
@@ -248,15 +257,24 @@ fun SongList(
 }
 
 /**
- * Individual song list item card.
+ * Individual song list item card with set membership badges.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SongListItem(
     song: SongEntity,
+    viewModel: LibraryViewModel,
     onClick: () -> Unit,
     onAddToSetlist: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var sets by remember { mutableStateOf<List<SetEntity>>(emptyList()) }
+
+    // Fetch sets containing this song
+    LaunchedEffect(song.id) {
+        sets = viewModel.getSetsContainingSong(song.id)
+    }
+
     Card(
         modifier = modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
@@ -264,52 +282,98 @@ fun SongListItem(
             containerColor = MaterialTheme.colorScheme.surface
         )
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onClick)
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(16.dp)
         ) {
-            // Song info (title, artist)
-            Column(
-                modifier = Modifier.weight(1f)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = song.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = song.artist,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-            }
+                // Song info (title, artist)
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = song.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = song.artist,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
 
-            // Key badge
-            song.currentKey?.let { key ->
+                // Key badge
+                song.currentKey?.let { key ->
+                    Spacer(modifier = Modifier.width(8.dp))
+                    KeyBadge(key = key)
+                }
+
+                // Add to setlist button
                 Spacer(modifier = Modifier.width(8.dp))
-                KeyBadge(key = key)
+                IconButton(
+                    onClick = onAddToSetlist
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AddCircle,
+                        contentDescription = "Add to Setlist",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
 
-            // Add to setlist button
-            Spacer(modifier = Modifier.width(8.dp))
-            IconButton(
-                onClick = onAddToSetlist
-            ) {
-                Icon(
-                    imageVector = Icons.Default.AddCircle,
-                    contentDescription = "Add to Setlist",
-                    tint = MaterialTheme.colorScheme.primary
-                )
+            // Set membership badges
+            if (sets.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    sets.forEach { set ->
+                        SetMembershipBadge(
+                            setNumber = set.number,
+                            modifier = Modifier.padding(end = 4.dp, bottom = 4.dp)
+                        )
+                    }
+                }
             }
         }
+    }
+}
+
+/**
+ * Set membership badge showing which set(s) a song belongs to.
+ */
+@Composable
+fun SetMembershipBadge(
+    setNumber: Int,
+    modifier: Modifier = Modifier
+) {
+    val colorScheme = MaterialTheme.colorScheme
+    val badgeColor = SetColor.getSetBadgeColor(setNumber, colorScheme)
+    val textColor = SetColor.getSetBadgeTextColor(setNumber, colorScheme)
+
+    Surface(
+        modifier = modifier,
+        shape = MaterialTheme.shapes.extraSmall,
+        color = badgeColor
+    ) {
+        Text(
+            text = "Set $setNumber",
+            style = MaterialTheme.typography.labelSmall,
+            color = textColor,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+        )
     }
 }
 
@@ -504,11 +568,10 @@ private fun LibraryScreenContent(
             if (songs.isEmpty()) {
                 EmptyLibraryMessage(hasSearchQuery = searchQuery.isNotEmpty())
             } else {
-                SongList(
-                    songs = songs,
-                    onSongClick = onSongClick,
-                    onAddToSetlist = onAddToSetlist,
-                    modifier = Modifier.weight(1f)
+                // Note: Can't show badges in preview without ViewModel
+                Text(
+                    text = "Preview: ${songs.size} songs",
+                    modifier = Modifier.padding(16.dp)
                 )
             }
         }

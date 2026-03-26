@@ -36,7 +36,10 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    MainScreen(viewModelFactory = viewModelFactory)
+                    MainScreen(
+                        viewModelFactory = viewModelFactory,
+                        appContainer = appContainer
+                    )
                 }
             }
         }

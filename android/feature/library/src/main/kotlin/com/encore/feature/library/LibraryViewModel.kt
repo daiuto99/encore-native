@@ -6,8 +6,10 @@ import android.provider.OpenableColumns
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.encore.core.data.entities.SetEntity
 import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.entities.SyncStatus
+import com.encore.core.data.repository.SetlistRepository
 import com.encore.core.data.repository.SongRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,7 +34,8 @@ import java.util.UUID
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class LibraryViewModel(
-    private val songRepository: SongRepository
+    private val songRepository: SongRepository,
+    private val setlistRepository: SetlistRepository
 ) : ViewModel() {
 
     // Search query state (mutable for UI updates)
@@ -167,6 +170,17 @@ class LibraryViewModel(
      */
     fun clearImportResult() {
         _importResult.value = null
+    }
+
+    /**
+     * Get all sets that contain a specific song.
+     * Used for displaying set membership badges in library.
+     *
+     * @param songId Song UUID
+     * @return List of sets containing the song
+     */
+    suspend fun getSetsContainingSong(songId: String): List<SetEntity> {
+        return setlistRepository.getSetsContainingSong(songId)
     }
 
     /**

@@ -131,4 +131,19 @@ interface SetDao {
      */
     @Query("SELECT COUNT(*) FROM sets WHERE setlist_id = :setlistId")
     suspend fun getSetCount(setlistId: String): Int
+
+    /**
+     * Get all sets that contain a specific song.
+     * Used for showing set membership badges in Library.
+     *
+     * @param songId Song UUID
+     * @return List of sets containing the song, ordered by set number
+     */
+    @Query("""
+        SELECT DISTINCT sets.* FROM sets
+        INNER JOIN set_entries ON sets.id = set_entries.set_id
+        WHERE set_entries.song_id = :songId
+        ORDER BY sets.number ASC
+    """)
+    suspend fun getSetsContainingSong(songId: String): List<SetEntity>
 }

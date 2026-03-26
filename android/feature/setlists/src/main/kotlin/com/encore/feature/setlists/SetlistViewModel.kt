@@ -3,6 +3,7 @@ package com.encore.feature.setlists
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.encore.core.data.entities.SetlistEntity
+import com.encore.core.data.relations.SetlistWithSets
 import com.encore.core.data.repository.SetlistRepository
 import com.encore.core.data.repository.SongRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,7 +19,8 @@ import kotlinx.coroutines.launch
  * - List of all setlists
  * - Creating new setlists
  * - Deleting setlists
- * - Navigation to setlist detail
+ * - Adding songs to setlists
+ * - Setlist detail view
  */
 class SetlistViewModel(
     private val setlistRepository: SetlistRepository,
@@ -41,14 +43,11 @@ class SetlistViewModel(
      * Creates setlist with initial Set 1 automatically.
      *
      * @param name Setlist name
-     * @return Result with setlist ID or error
      */
-    fun createSetlist(name: String): StateFlow<Result<String>?> {
-        val result = MutableStateFlow<Result<String>?>(null)
+    fun createSetlist(name: String) {
         viewModelScope.launch {
-            result.value = setlistRepository.createSetlist(name)
+            setlistRepository.createSetlist(name)
         }
-        return result
     }
 
     /**
@@ -60,5 +59,41 @@ class SetlistViewModel(
         viewModelScope.launch {
             setlistRepository.deleteSetlist(setlist)
         }
+    }
+
+    /**
+     * Add a song to the first set of a setlist.
+     *
+     * Adds to end of Set 1 (most common use case).
+     *
+     * @param setlistId Setlist UUID
+     * @param songId Song UUID
+     */
+    fun addSongToSetlist(setlistId: String, songId: String) {
+        viewModelScope.launch {
+            // Get the setlist with sets
+            val setlistGroup = setlistRepository.getSetlistWithSets(setlistId)
+            if (setlistGroup != null && setlistGroup.sets.isNotEmpty()) {
+                // Add to first set (Set 1)
+                val firstSetData = setlistGroup.sets.first()
+                val firstSetId = firstSetData.set.id
+                setlistRepository.addSongToSet(firstSetId, songId)
+            }
+        }
+    }
+
+    /**
+     * Get setlist with all songs in order.
+     *
+     * @param setlistId Setlist UUID
+     * @return Flow of setlist with sets and songs
+     */
+    fun getSetlistWithSongs(setlistId: String): StateFlow<SetlistWithSets?> {
+        return setlistRepository.observeSetlistWithSets(setlistId)
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = null
+            )
     }
 }

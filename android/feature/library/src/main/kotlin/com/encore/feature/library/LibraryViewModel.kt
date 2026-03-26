@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.entities.SyncStatus
 import com.encore.core.data.repository.SongRepository
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -29,6 +30,7 @@ import java.util.UUID
  *
  * Follows offline-first pattern with Flow-based reactive updates.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class LibraryViewModel(
     private val songRepository: SongRepository
 ) : ViewModel() {
@@ -117,22 +119,11 @@ class LibraryViewModel(
                         val key = parseKey(content)
                         val now = System.currentTimeMillis()
 
-                        // Check if duplicate before creating entity
+                        // Check if duplicate - skip to prevent overwrites
                         val existingDuplicate = songRepository.findDuplicate(title, artist, "local-user")
                         if (existingDuplicate != null) {
-                            // Force update existing song with new key and content
-                            val updatedSong = existingDuplicate.copy(
-                                currentKey = key,
-                                markdownBody = content,
-                                updatedAt = now,
-                                localUpdatedAt = now,
-                                version = existingDuplicate.version + 1
-                            )
-                            val result = songRepository.upsertSong(updatedSong)
-                            if (result.isSuccess) {
-                                addedCount++
-                                Log.d(TAG, "Force updated existing song: $title - $artist (Key: ${key ?: "none"})")
-                            }
+                            skippedCount++
+                            Log.d(TAG, "Duplicate skipped: $title - $artist")
                             return@forEach
                         }
 

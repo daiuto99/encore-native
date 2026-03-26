@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
@@ -67,7 +68,7 @@ import com.encore.core.data.entities.SongEntity
 fun LibraryScreen(
     viewModel: LibraryViewModel,
     onSongClick: (String) -> Unit = {},
-    onImportClick: () -> Unit = {}
+    onAddToSetlist: (String) -> Unit = {}
 ) {
     val songs by viewModel.songs.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
@@ -167,6 +168,7 @@ fun LibraryScreen(
                 SongList(
                     songs = songs,
                     onSongClick = onSongClick,
+                    onAddToSetlist = onAddToSetlist,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -224,6 +226,7 @@ fun SearchBar(
 fun SongList(
     songs: List<SongEntity>,
     onSongClick: (String) -> Unit,
+    onAddToSetlist: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -236,7 +239,8 @@ fun SongList(
         ) { song ->
             SongListItem(
                 song = song,
-                onClick = { onSongClick(song.id) }
+                onClick = { onSongClick(song.id) },
+                onAddToSetlist = { onAddToSetlist(song.id) }
             )
             Spacer(modifier = Modifier.height(8.dp))
         }
@@ -250,12 +254,11 @@ fun SongList(
 fun SongListItem(
     song: SongEntity,
     onClick: () -> Unit,
+    onAddToSetlist: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
+        modifier = modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
@@ -264,6 +267,7 @@ fun SongListItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .clickable(onClick = onClick)
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -290,8 +294,20 @@ fun SongListItem(
 
             // Key badge
             song.currentKey?.let { key ->
-                Spacer(modifier = Modifier.width(16.dp))
+                Spacer(modifier = Modifier.width(8.dp))
                 KeyBadge(key = key)
+            }
+
+            // Add to setlist button
+            Spacer(modifier = Modifier.width(8.dp))
+            IconButton(
+                onClick = onAddToSetlist
+            ) {
+                Icon(
+                    imageVector = Icons.Default.AddCircle,
+                    contentDescription = "Add to Setlist",
+                    tint = MaterialTheme.colorScheme.primary
+                )
             }
         }
     }
@@ -417,7 +433,7 @@ fun LibraryScreenPreview() {
             onSearchQueryChange = {},
             onClearSearch = {},
             onSongClick = {},
-            onImportClick = {}
+            onAddToSetlist = {}
         )
     }
 }
@@ -437,7 +453,7 @@ fun LibraryScreenEmptyPreview() {
             onSearchQueryChange = {},
             onClearSearch = {},
             onSongClick = {},
-            onImportClick = {}
+            onAddToSetlist = {}
         )
     }
 }
@@ -453,7 +469,7 @@ private fun LibraryScreenContent(
     onSearchQueryChange: (String) -> Unit,
     onClearSearch: () -> Unit,
     onSongClick: (String) -> Unit,
-    onImportClick: () -> Unit
+    onAddToSetlist: (String) -> Unit
 ) {
     Scaffold(
         topBar = {
@@ -469,17 +485,6 @@ private fun LibraryScreenContent(
                     titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
                 )
             )
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = onImportClick,
-                containerColor = MaterialTheme.colorScheme.primary
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Import Song"
-                )
-            }
         }
     ) { paddingValues ->
         Column(
@@ -502,6 +507,7 @@ private fun LibraryScreenContent(
                 SongList(
                     songs = songs,
                     onSongClick = onSongClick,
+                    onAddToSetlist = onAddToSetlist,
                     modifier = Modifier.weight(1f)
                 )
             }

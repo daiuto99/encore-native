@@ -3,21 +3,21 @@ package com.encore.core.data.relations
 import androidx.room.Embedded
 import androidx.room.Relation
 import com.encore.core.data.entities.SetEntity
-import com.encore.core.data.entities.SetEntryEntity
 
 /**
- * Room relationship class for a Set with all its SetEntries.
+ * Room relationship class for a Set with all its SetEntries and Songs.
  *
- * SetEntries maintain song ordering via the position field.
- * Use this with SetEntryWithSong to get full ordered song data.
+ * This uses nested @Relation to fetch SetEntryWithSong objects
+ * (entries with their associated songs), maintaining position ordering.
  */
 data class SetWithEntries(
     @Embedded
     val set: SetEntity,
 
     @Relation(
+        entity = com.encore.core.data.entities.SetEntryEntity::class,
         parentColumn = "id",
         entityColumn = "set_id"
     )
-    val entries: List<SetEntryEntity>
+    val entries: List<SetEntryWithSong>
 )

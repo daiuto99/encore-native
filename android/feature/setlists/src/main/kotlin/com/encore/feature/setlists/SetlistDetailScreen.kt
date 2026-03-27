@@ -63,7 +63,8 @@ fun SetlistDetailScreen(
     viewModel: SetlistViewModel,
     songRepository: com.encore.core.data.repository.SongRepository,
     setlistId: String,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    onSongClick: (String) -> Unit = {}
 ) {
     val setlistWithSongs by viewModel.getSetlistWithSongs(setlistId).collectAsState()
     var showSongSelectionDialog by remember { mutableStateOf(false) }
@@ -125,6 +126,7 @@ fun SetlistDetailScreen(
                         selectedSetId = setId
                         showSongSelectionDialog = true
                     },
+                    onSongClick = onSongClick,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(paddingValues)
@@ -153,6 +155,7 @@ fun SetlistDetailScreen(
 fun SetlistContent(
     sets: List<SetWithEntries>,
     onAddToSet: (String) -> Unit,
+    onSongClick: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -165,7 +168,8 @@ fun SetlistContent(
                 setNumber = setWithEntries.set.number,
                 setId = setWithEntries.set.id,
                 songs = setWithEntries.entries,
-                onAddToSet = onAddToSet
+                onAddToSet = onAddToSet,
+                onSongClick = onSongClick
             )
         }
     }
@@ -180,6 +184,7 @@ fun SetSection(
     setId: String,
     songs: List<SetEntryWithSong>,
     onAddToSet: (String) -> Unit,
+    onSongClick: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colorScheme = MaterialTheme.colorScheme
@@ -222,9 +227,11 @@ fun SetSection(
             songs.sortedBy { it.entry.position }.forEach { entryWithSong ->
                 SetlistSongCard(
                     position = entryWithSong.entry.position + 1, // Display as 1-indexed
+                    songId = entryWithSong.song.id,
                     title = entryWithSong.song.title,
                     artist = entryWithSong.song.artist,
-                    key = entryWithSong.song.currentKey
+                    key = entryWithSong.song.currentKey,
+                    onClick = { onSongClick(entryWithSong.song.id) }
                 )
                 Spacer(modifier = Modifier.height(8.dp))
             }
@@ -238,13 +245,16 @@ fun SetSection(
 @Composable
 fun SetlistSongCard(
     position: Int,
+    songId: String,
     title: String,
     artist: String,
     key: String?,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
+        onClick = onClick,
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface

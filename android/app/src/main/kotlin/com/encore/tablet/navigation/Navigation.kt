@@ -21,6 +21,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.encore.feature.library.LibraryScreen
 import com.encore.feature.library.LibraryViewModel
+import com.encore.feature.performance.SongDetailScreen
+import com.encore.feature.performance.SongDetailViewModel
 import com.encore.feature.setlists.SetlistDetailScreen
 import com.encore.feature.setlists.SetlistScreen
 import com.encore.feature.setlists.SetlistViewModel
@@ -34,8 +36,10 @@ object Routes {
     const val LIBRARY = "library"
     const val SETLISTS = "setlists"
     const val SETLIST_DETAIL = "setlist/{setlistId}"
+    const val SONG_DETAIL = "song/{songId}"
 
     fun setlistDetail(setlistId: String) = "setlist/$setlistId"
+    fun songDetail(songId: String) = "song/$songId"
 }
 
 /**
@@ -67,8 +71,7 @@ fun EncoreNavHost(
             LibraryScreen(
                 viewModel = viewModel,
                 onSongClick = { songId ->
-                    // TODO: Navigate to song detail in future milestone
-                    // navController.navigate("song/$songId")
+                    navController.navigate(Routes.songDetail(songId))
                 },
                 onAddToSetlist = { songId ->
                     songToAdd = songId
@@ -110,13 +113,28 @@ fun EncoreNavHost(
                 viewModel = setlistViewModel,
                 songRepository = appContainer.songRepository,
                 setlistId = setlistId,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.popBackStack() },
+                onSongClick = { songId ->
+                    navController.navigate(Routes.songDetail(songId))
+                }
             )
         }
 
-        // Future routes will be added here:
-        // - Song Detail Screen
-        // - Performance Mode Screen
+        // Song Detail Screen (Performance / Teleprompter Mode)
+        composable(
+            route = Routes.SONG_DETAIL,
+            arguments = listOf(
+                navArgument("songId") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val songId = backStackEntry.arguments?.getString("songId") ?: return@composable
+            val viewModel: SongDetailViewModel = viewModel(factory = viewModelFactory)
+            SongDetailScreen(
+                viewModel = viewModel,
+                songId = songId,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
     }
 }
 

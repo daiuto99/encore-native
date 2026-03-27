@@ -4,10 +4,10 @@ Native Android tablet application for Encore - A live performance tool for music
 
 ## Project Overview
 
-**Version:** 1.0.0-milestone1
+**Version:** 1.0.0-milestone2
 **Platform:** Native Android (Kotlin + Jetpack Compose)
 **Target Device:** 11-inch Android tablet, Portrait orientation
-**Architecture:** Offline-first with manual sync
+**Architecture:** Offline-first with reactive UI and manual sync
 
 ## Documentation
 
@@ -19,25 +19,70 @@ Native Android tablet application for Encore - A live performance tool for music
 - [Data Model](docs/architecture/data-model.md)
 - [Navigation Map](docs/architecture/navigation-map.md)
 - [API Contracts](docs/api/contracts.md)
+- [Milestone 2 Plan](docs/milestones/MILESTONE_2_PLAN.md)
+
+## Current Features
+
+**Milestone 2 Progress: 7/10 Tasks Complete**
+
+### ✅ Markdown Import (Multi-Select)
+- **Google Drive / SAF Integration:** Select multiple `.md` files from device storage
+- **Obsidian-Compatible Parser:** Automatically detects `**Key:** G` metadata format
+- **Duplicate Detection:** Skip-on-duplicate prevents accidental overwrites
+- **Batch Import:** Import 10+ songs at once with progress indicator
+- **Smart Feedback:** Snackbar shows "X imported, Y skipped" summary
+
+### ✅ Song Library
+- **Reactive Search:** Live filtering as you type (title/artist)
+- **Key Badges:** Visual indicators for song keys (G, Dm, C#m, etc.)
+- **Set Membership Badges:** Small chips showing "Set 1", "Set 2" where songs are used
+- **Add to Setlist:** Quick (+) button on each song card
+- **Offline-First:** All data stored in Room database with instant access
+
+### ✅ Setlist Management
+- **Color-Coded Sets:** Material 3 tonal palettes provide visual distinction (6-color rotation)
+- **Set Organization:** Group songs into Set 1, Set 2, Set 3, etc.
+- **In-Set Adding:** Search and add songs to specific sets
+- **Position Ordering:** Songs maintain order within sets
+- **Nested Relations:** Efficient database queries for complete setlist hierarchies
+
+### ✅ Obsidian Integration
+- **Format Compatibility:** Import files created in Obsidian Chord Sheets
+- **Metadata Preservation:** Extracts `**Key:**`, `**Artist:**`, `**Title:**` with bold markers
+- **Section Markers:** Preserves `<span style="color:blue">Verse 1</span>` HTML tags
+- **Chord Notation:** Maintains `[G]`, `[Dm]`, `[C#m]` inline chord format
+- **No Data Loss:** Original import body stored for reference
+
+### ⏳ Coming Soon
+- Song Detail Screen with full markdown rendering
+- Edit Mode for markdown charts
+- Transposition engine
+- Google Sign-In authentication
+- Cloud sync with conflict resolution
 
 ## Current Milestone
 
-**Milestone 1: Foundation / Architecture** - ✅ COMPLETE (2026-03-26)
+**Milestone 2: Library Management** - 🔄 IN PROGRESS (7/10 tasks complete)
 
-See [MILESTONE_1_COMPLETE.md](MILESTONE_1_COMPLETE.md) for full completion report.
+See [MILESTONE_2_PLAN.md](docs/milestones/MILESTONE_2_PLAN.md) for detailed task breakdown.
 
-**Key Deliverables:**
-- [x] Architecture diagram
-- [x] Data model / schema documentation
-- [x] Navigation map
-- [x] Backend stack decision (Kotlin Ktor)
-- [x] Parser/render spike (mikepenz/multiplatform-markdown-renderer)
-- [x] Runnable test build with markdown rendering proof
-- [x] Known risks / open questions list
+**Completed Tasks:**
+- [x] Room entities (Song, Setlist, Set, SetEntry)
+- [x] DAOs with nested @Transaction queries
+- [x] Database & TypeConverters
+- [x] Repositories with business logic
+- [x] Library Screen UI with search and set badges
+- [x] Import Flow with SAF multi-select and Obsidian parser
+- [x] Setlist Management UI with color-coded sets
 
-**Next Milestone:** Milestone 2 - Core Library + Setlist Management
+**Next Tasks:**
+- [ ] Song Detail Screen with markdown rendering
+- [ ] Edit Mode with markdown editing
+- [ ] Testing & Polish
 
-See [Delivery Checklist](docs/06_Delivery_Checklist.md) for complete milestone requirements.
+**Previous Milestone:** Milestone 1 - Foundation ✅ COMPLETE
+
+See [MILESTONE_1_COMPLETE.md](MILESTONE_1_COMPLETE.md) for Milestone 1 completion report.
 
 ## Prerequisites
 

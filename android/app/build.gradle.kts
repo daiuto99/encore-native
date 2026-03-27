@@ -63,6 +63,7 @@ dependencies {
     // Feature modules
     implementation(project(":feature:library"))
     implementation(project(":feature:setlists"))
+    implementation(project(":feature:performance"))
 
     // Core Android dependencies
     implementation("androidx.core:core-ktx:1.12.0")

@@ -2,30 +2,37 @@ package com.encore.feature.library
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -34,153 +41,565 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.encore.core.data.entities.SetEntity
 import com.encore.core.data.entities.SongEntity
 import com.encore.core.ui.theme.SetColor
+import kotlin.math.roundToInt
 
 /**
- * Library Screen - Main song library view.
+ * Library Screen - Standalone full-screen version (used by Navigation graph).
  *
- * Features:
- * - Search bar with live filtering
- * - List of all songs (title, artist, key)
- * - Set membership badges
- * - FAB for importing songs
- * - Tap song to view/edit (navigation wired in app module)
- *
- * Milestone 2: Library Management
+ * For embedding in Command Center, use [LibraryListContent] instead.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
     viewModel: LibraryViewModel,
     onSongClick: (String) -> Unit = {},
-    onAddToSetlist: (String) -> Unit = {}
+    onAddToSetlist: (String) -> Unit = {},
+    setFilter: Int? = null
 ) {
     val songs by viewModel.songs.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val isImporting by viewModel.isImporting.collectAsState()
     val importResult by viewModel.importResult.collectAsState()
+    val statusMessage by viewModel.statusMessage.collectAsState()
+    val activeSetFilter by viewModel.setFilter.collectAsState()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // File picker launcher for importing markdown files
+    LaunchedEffect(setFilter) { viewModel.updateSetFilter(setFilter) }
+
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
-        if (uris.isNotEmpty()) {
-            viewModel.importSongs(context, uris)
-        }
+        if (uris.isNotEmpty()) viewModel.importSongs(context, uris)
     }
 
-    // Show snackbar when import completes
     LaunchedEffect(importResult) {
         importResult?.let { result ->
             val message = buildString {
-                if (result.addedCount > 0) {
-                    append("${result.addedCount} song${if (result.addedCount != 1) "s" else ""} imported")
-                }
+                if (result.addedCount > 0) append("${result.addedCount} song(s) imported")
                 if (result.skippedCount > 0) {
                     if (result.addedCount > 0) append(", ")
-                    append("${result.skippedCount} duplicate${if (result.skippedCount != 1) "s" else ""} skipped")
+                    append("${result.skippedCount} duplicate(s) skipped")
                 }
-                if (result.addedCount == 0 && result.skippedCount == 0) {
-                    append("No files imported")
-                }
+                if (result.addedCount == 0 && result.skippedCount == 0) append("No files imported")
             }
             snackbarHostState.showSnackbar(message)
             viewModel.clearImportResult()
         }
     }
 
+    LaunchedEffect(statusMessage) {
+        statusMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearStatusMessage()
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = {
-                    Text(
-                        text = "Library",
-                        style = MaterialTheme.typography.headlineMedium
-                    )
-                },
+                title = { Text("Song Library", style = MaterialTheme.typography.titleLarge) },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
                 )
             )
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = {
-                    // Launch file picker for .md files (supports multi-select)
-                    filePickerLauncher.launch(arrayOf("*/*"))
-                },
+                onClick = { filePickerLauncher.launch(arrayOf("*/*")) },
                 containerColor = MaterialTheme.colorScheme.primary
             ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Import Song"
-                )
+                Icon(imageVector = Icons.Default.Add, contentDescription = "Import Song")
             }
         },
-        snackbarHost = {
-            SnackbarHost(hostState = snackbarHostState)
-        }
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Progress indicator during import
-            if (isImporting) {
-                LinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-
-            // Search Bar
+            if (isImporting) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             SearchBar(
                 query = searchQuery,
                 onQueryChange = { viewModel.updateSearchQuery(it) },
                 onClearClick = { viewModel.clearSearch() },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp)
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
             )
-
-            // Song List
             if (songs.isEmpty()) {
                 EmptyLibraryMessage(hasSearchQuery = searchQuery.isNotEmpty())
             } else {
                 SongList(
                     songs = songs,
                     viewModel = viewModel,
+                    activeSetFilter = activeSetFilter,
                     onSongClick = onSongClick,
-                    onAddToSetlist = onAddToSetlist,
+                    onDeleteSong = { song -> viewModel.deleteSong(song) },
+                    onRemoveFromSet = { songId, setNum -> viewModel.removeSongFromSetNumber(songId, setNum) },
+                    onAddToSet = { songId -> /* handled inside item with dialog */ },
+                    onReorder = { songId, toIdx -> viewModel.reorderSong(songId, toIdx) },
                     modifier = Modifier.weight(1f)
                 )
             }
         }
     }
+}
+
+/**
+ * Embeddable library content — no Scaffold, no TopAppBar.
+ * Used by Command Center to avoid nested Scaffold issues.
+ */
+@Composable
+fun LibraryListContent(
+    viewModel: LibraryViewModel,
+    onSongClick: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val songs by viewModel.songs.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    val isImporting by viewModel.isImporting.collectAsState()
+    val importResult by viewModel.importResult.collectAsState()
+    val statusMessage by viewModel.statusMessage.collectAsState()
+    val activeSetFilter by viewModel.setFilter.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(importResult) {
+        importResult?.let { result ->
+            val msg = buildString {
+                if (result.addedCount > 0) append("${result.addedCount} imported")
+                if (result.skippedCount > 0) {
+                    if (result.addedCount > 0) append(", ")
+                    append("${result.skippedCount} skipped")
+                }
+            }.ifEmpty { "No files imported" }
+            snackbarHostState.showSnackbar(msg)
+            viewModel.clearImportResult()
+        }
+    }
+
+    LaunchedEffect(statusMessage) {
+        statusMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearStatusMessage()
+        }
+    }
+
+    Box(modifier = modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            SearchBar(
+                query = searchQuery,
+                onQueryChange = { viewModel.updateSearchQuery(it) },
+                onClearClick = { viewModel.clearSearch() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+            if (isImporting) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            if (songs.isEmpty()) {
+                EmptyLibraryMessage(
+                    hasSearchQuery = searchQuery.isNotEmpty(),
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                SongList(
+                    songs = songs,
+                    viewModel = viewModel,
+                    activeSetFilter = activeSetFilter,
+                    onSongClick = onSongClick,
+                    onDeleteSong = { song -> viewModel.deleteSong(song) },
+                    onRemoveFromSet = { songId, setNum -> viewModel.removeSongFromSetNumber(songId, setNum) },
+                    onAddToSet = { /* handled inside item */ },
+                    onReorder = { songId, toIdx -> viewModel.reorderSong(songId, toIdx) },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
+    }
+}
+
+/**
+ * Scrollable song list with swipe-to-dismiss and optional drag-to-reorder.
+ *
+ * - Left swipe: shows confirmation dialog (remove from set or delete)
+ * - Drag handle (visible when set filter active): long-press to reorder
+ */
+@Composable
+fun SongList(
+    songs: List<SongEntity>,
+    viewModel: LibraryViewModel,
+    activeSetFilter: Int?,
+    onSongClick: (String) -> Unit,
+    onDeleteSong: (SongEntity) -> Unit,
+    onRemoveFromSet: (String, Int) -> Unit,
+    onAddToSet: (String) -> Unit,
+    onReorder: (String, Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val listState = rememberLazyListState()
+    val density = LocalDensity.current
+    val itemHeightPx = remember(density) { with(density) { 57.dp.toPx() } }
+
+    // Drag-and-drop state
+    var draggingIndex by remember { mutableStateOf<Int?>(null) }
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+
+    LazyColumn(
+        state = listState,
+        modifier = modifier,
+        contentPadding = PaddingValues(vertical = 4.dp)
+    ) {
+        items(songs, key = { it.id }) { song ->
+            val index = songs.indexOf(song)
+            val isDragging = draggingIndex == index
+
+            val dragHandleModifier = if (activeSetFilter != null) {
+                Modifier.pointerInput(song.id, songs.size) {
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { draggingIndex = index; dragOffsetY = 0f },
+                        onDrag = { change, drag ->
+                            change.consume()
+                            dragOffsetY += drag.y
+                        },
+                        onDragEnd = {
+                            val offsetInItems = (dragOffsetY / itemHeightPx).roundToInt()
+                            val targetIdx = (index + offsetInItems).coerceIn(0, songs.size - 1)
+                            if (targetIdx != index) onReorder(song.id, targetIdx)
+                            draggingIndex = null
+                            dragOffsetY = 0f
+                        },
+                        onDragCancel = { draggingIndex = null; dragOffsetY = 0f }
+                    )
+                }
+            } else Modifier
+
+            SongListItem(
+                song = song,
+                viewModel = viewModel,
+                activeSetFilter = activeSetFilter,
+                onClick = { onSongClick(song.id) },
+                onDeleteSong = { onDeleteSong(song) },
+                onRemoveFromSet = onRemoveFromSet,
+                onAddToSet = { onAddToSet(song.id) },
+                isDragging = isDragging,
+                dragOffsetY = if (isDragging) dragOffsetY else 0f,
+                dragHandleModifier = dragHandleModifier,
+                modifier = Modifier
+                    .zIndex(if (isDragging) 1f else 0f)
+            )
+        }
+    }
+}
+
+/**
+ * Single song row with swipe-to-dismiss gesture.
+ *
+ * Layout: [drag handle] [Title – Artist  key]  [●1][●3]  [+]
+ *
+ * Left swipe reveals a colored background and triggers a confirmation dialog.
+ * - If set filter active: "Remove from Set N"
+ * - Otherwise: "Delete from Library"
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SongListItem(
+    song: SongEntity,
+    viewModel: LibraryViewModel,
+    activeSetFilter: Int?,
+    onClick: () -> Unit,
+    onDeleteSong: () -> Unit,
+    onRemoveFromSet: (String, Int) -> Unit,
+    onAddToSet: () -> Unit,
+    isDragging: Boolean = false,
+    dragOffsetY: Float = 0f,
+    dragHandleModifier: Modifier = Modifier,
+    modifier: Modifier = Modifier
+) {
+    var sets by remember { mutableStateOf<List<SetEntity>>(emptyList()) }
+    var showConfirmDialog by remember { mutableStateOf(false) }
+    var showAddToSetDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(song.id) {
+        sets = viewModel.getSetsContainingSong(song.id)
+    }
+
+    // Two-action confirmation dialog triggered by left swipe
+    if (showConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showConfirmDialog = false },
+            title = { Text("\"${song.title}\"") },
+            text = {
+                Column {
+                    // Action 1: Remove from Set (only shown when song is in the active set)
+                    if (activeSetFilter != null && sets.any { it.number == activeSetFilter }) {
+                        OutlinedButton(
+                            onClick = {
+                                showConfirmDialog = false
+                                onRemoveFromSet(song.id, activeSetFilter)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+                        ) {
+                            Text(
+                                "Remove from Set $activeSetFilter",
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Spacer(modifier = Modifier.padding(top = 8.dp))
+                    }
+                    // Action 2: Delete from Library (always shown)
+                    OutlinedButton(
+                        onClick = {
+                            showConfirmDialog = false
+                            onDeleteSong()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                "Delete from Library",
+                                color = MaterialTheme.colorScheme.error,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                "Permanently removes the song record",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showConfirmDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Add to Set picker dialog
+    if (showAddToSetDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddToSetDialog = false },
+            title = { Text("Add to Set") },
+            text = {
+                Column {
+                    for (setNum in 1..4) {
+                        val setColor = SetColor.getSetColor(setNum)
+                        val alreadyInSet = sets.any { it.number == setNum }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = !alreadyInSet) {
+                                    if (!alreadyInSet) {
+                                        showAddToSetDialog = false
+                                        viewModel.addSongToSetNumber(song.id, setNum)
+                                    }
+                                }
+                                .padding(vertical = 12.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .clip(CircleShape)
+                                    .background(if (alreadyInSet) setColor.copy(alpha = 0.3f) else setColor),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = setNum.toString(),
+                                    color = Color.White,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "Set $setNum" + if (alreadyInSet) " (already added)" else "",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (alreadyInSet)
+                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                                else
+                                    MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        if (setNum < 4) HorizontalDivider(thickness = 0.5.dp)
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showAddToSetDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            value == SwipeToDismissBoxValue.EndToStart
+        }
+    )
+
+    LaunchedEffect(dismissState.currentValue) {
+        if (dismissState.currentValue == SwipeToDismissBoxValue.EndToStart) {
+            showConfirmDialog = true
+            dismissState.snapTo(SwipeToDismissBoxValue.Settled)
+        }
+    }
+
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = false,
+        enableDismissFromEndToStart = true,
+        backgroundContent = {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.error),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = if (activeSetFilter != null) "Remove from set" else "Delete",
+                    tint = Color.White,
+                    modifier = Modifier.padding(end = 20.dp)
+                )
+            }
+        },
+        modifier = modifier
+            .fillMaxWidth()
+            .let { if (isDragging) it.padding(horizontal = 4.dp) else it }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .clickable(onClick = onClick)
+                .padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Drag handle — only shown when set filter is active
+            if (activeSetFilter != null) {
+                Icon(
+                    imageVector = Icons.Default.Menu,
+                    contentDescription = "Drag to reorder",
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+                    modifier = Modifier
+                        .size(20.dp)
+                        .padding(start = 4.dp)
+                        .then(dragHandleModifier)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+            } else {
+                Spacer(modifier = Modifier.width(16.dp))
+            }
+
+            // Title – Artist (no key here; key moves to right of row)
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = song.title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Text(
+                    text = " – ${song.artist}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+            }
+
+            // Key badge — directly left of Set Circles
+            song.currentKey?.let { key ->
+                Spacer(modifier = Modifier.width(6.dp))
+                KeyBadge(key = key)
+            }
+
+            // Set membership circles
+            Spacer(modifier = Modifier.width(6.dp))
+            sets.forEach { set ->
+                SetNumberCircle(
+                    setNumber = set.number,
+                    modifier = Modifier.padding(end = 4.dp)
+                )
+            }
+
+            // Add-to-Set pill button with outline border
+            Spacer(modifier = Modifier.width(4.dp))
+            OutlinedButton(
+                onClick = { showAddToSetDialog = true },
+                shape = RoundedCornerShape(50.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                modifier = Modifier
+                    .height(28.dp)
+                    .padding(end = 8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Add to set",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+        }
+    }
+
+    HorizontalDivider(
+        thickness = 0.5.dp,
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+    )
 }
 
 /**
@@ -197,22 +616,14 @@ fun SearchBar(
         value = query,
         onValueChange = onQueryChange,
         modifier = modifier,
-        placeholder = {
-            Text("Search by title or artist...")
-        },
+        placeholder = { Text("Search by title or artist...") },
         leadingIcon = {
-            Icon(
-                imageVector = Icons.Default.Search,
-                contentDescription = "Search"
-            )
+            Icon(imageVector = Icons.Default.Search, contentDescription = "Search")
         },
         trailingIcon = {
             if (query.isNotEmpty()) {
                 IconButton(onClick = onClearClick) {
-                    Icon(
-                        imageVector = Icons.Default.Clear,
-                        contentDescription = "Clear search"
-                    )
+                    Icon(imageVector = Icons.Default.Clear, contentDescription = "Clear search")
                 }
             }
         },
@@ -227,158 +638,33 @@ fun SearchBar(
 }
 
 /**
- * Scrollable list of songs.
+ * Small colored circle showing which set number a song belongs to.
  */
 @Composable
-fun SongList(
-    songs: List<SongEntity>,
-    viewModel: LibraryViewModel,
-    onSongClick: (String) -> Unit,
-    onAddToSetlist: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    LazyColumn(
-        modifier = modifier,
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
-    ) {
-        items(
-            items = songs,
-            key = { song -> song.id }
-        ) { song ->
-            SongListItem(
-                song = song,
-                viewModel = viewModel,
-                onClick = { onSongClick(song.id) },
-                onAddToSetlist = { onAddToSetlist(song.id) }
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-    }
-}
-
-/**
- * Individual song list item card with set membership badges.
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun SongListItem(
-    song: SongEntity,
-    viewModel: LibraryViewModel,
-    onClick: () -> Unit,
-    onAddToSetlist: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var sets by remember { mutableStateOf<List<SetEntity>>(emptyList()) }
-
-    // Fetch sets containing this song
-    LaunchedEffect(song.id) {
-        sets = viewModel.getSetsContainingSong(song.id)
-    }
-
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        )
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onClick)
-                .padding(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Song info (title, artist)
-                Column(
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(
-                        text = song.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = song.artist,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                }
-
-                // Key badge
-                song.currentKey?.let { key ->
-                    Spacer(modifier = Modifier.width(8.dp))
-                    KeyBadge(key = key)
-                }
-
-                // Add to setlist button
-                Spacer(modifier = Modifier.width(8.dp))
-                IconButton(
-                    onClick = onAddToSetlist
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AddCircle,
-                        contentDescription = "Add to Setlist",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-
-            // Set membership badges
-            if (sets.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    sets.forEach { set ->
-                        SetMembershipBadge(
-                            setNumber = set.number,
-                            modifier = Modifier.padding(end = 4.dp, bottom = 4.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * Set membership badge showing which set(s) a song belongs to.
- */
-@Composable
-fun SetMembershipBadge(
+fun SetNumberCircle(
     setNumber: Int,
     modifier: Modifier = Modifier
 ) {
-    val colorScheme = MaterialTheme.colorScheme
-    val badgeColor = SetColor.getSetBadgeColor(setNumber, colorScheme)
-    val textColor = SetColor.getSetBadgeTextColor(setNumber, colorScheme)
-
-    Surface(
-        modifier = modifier,
-        shape = MaterialTheme.shapes.extraSmall,
-        color = badgeColor
+    val color = SetColor.getSetColor(setNumber)
+    Box(
+        modifier = modifier
+            .size(22.dp)
+            .clip(CircleShape)
+            .background(color),
+        contentAlignment = Alignment.Center
     ) {
         Text(
-            text = "Set $setNumber",
-            style = MaterialTheme.typography.labelSmall,
-            color = textColor,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            text = setNumber.toString(),
+            color = Color.White,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            lineHeight = 11.sp
         )
     }
 }
 
 /**
- * Key badge showing the current key of the song.
+ * Subtle gray key badge displayed inline next to artist name.
  */
 @Composable
 fun KeyBadge(
@@ -387,15 +673,15 @@ fun KeyBadge(
 ) {
     Surface(
         modifier = modifier,
-        shape = MaterialTheme.shapes.small,
-        color = MaterialTheme.colorScheme.secondaryContainer
+        shape = RoundedCornerShape(4.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant
     ) {
         Text(
             text = key,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
         )
     }
 }
@@ -417,163 +703,17 @@ fun EmptyLibraryMessage(
             modifier = Modifier.padding(32.dp)
         ) {
             Text(
-                text = if (hasSearchQuery) {
-                    "No songs found"
-                } else {
-                    "Your library is empty"
-                },
+                text = if (hasSearchQuery) "No songs found" else "Your library is empty",
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
-                text = if (hasSearchQuery) {
-                    "Try a different search term"
-                } else {
-                    "Tap the + button to import your first song"
-                },
+                text = if (hasSearchQuery) "Try a different search term"
+                       else "Use 'Add Songs' to import your first song",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp)
             )
-        }
-    }
-}
-
-// ========== Previews ==========
-
-@Preview(
-    showBackground = true,
-    widthDp = 800,
-    heightDp = 1280,
-    name = "11-inch Tablet Portrait - With Songs"
-)
-@Composable
-fun LibraryScreenPreview() {
-    MaterialTheme {
-        // Note: Preview uses fake data since we can't instantiate ViewModel here
-        LibraryScreenContent(
-            songs = listOf(
-                SongEntity(
-                    id = "1",
-                    userId = "local-user",
-                    title = "Amazing Grace",
-                    artist = "John Newton",
-                    currentKey = "G",
-                    markdownBody = "",
-                    originalImportBody = null,
-                    version = 1,
-                    createdAt = System.currentTimeMillis(),
-                    updatedAt = System.currentTimeMillis(),
-                    localUpdatedAt = System.currentTimeMillis()
-                ),
-                SongEntity(
-                    id = "2",
-                    userId = "local-user",
-                    title = "How Great Thou Art",
-                    artist = "Carl Boberg",
-                    currentKey = "C",
-                    markdownBody = "",
-                    originalImportBody = null,
-                    version = 1,
-                    createdAt = System.currentTimeMillis(),
-                    updatedAt = System.currentTimeMillis(),
-                    localUpdatedAt = System.currentTimeMillis()
-                ),
-                SongEntity(
-                    id = "3",
-                    userId = "local-user",
-                    title = "Cornerstone",
-                    artist = "Hillsong Worship",
-                    currentKey = "D",
-                    markdownBody = "",
-                    originalImportBody = null,
-                    version = 1,
-                    createdAt = System.currentTimeMillis(),
-                    updatedAt = System.currentTimeMillis(),
-                    localUpdatedAt = System.currentTimeMillis()
-                )
-            ),
-            searchQuery = "",
-            onSearchQueryChange = {},
-            onClearSearch = {},
-            onSongClick = {},
-            onAddToSetlist = {}
-        )
-    }
-}
-
-@Preview(
-    showBackground = true,
-    widthDp = 800,
-    heightDp = 1280,
-    name = "11-inch Tablet Portrait - Empty"
-)
-@Composable
-fun LibraryScreenEmptyPreview() {
-    MaterialTheme {
-        LibraryScreenContent(
-            songs = emptyList(),
-            searchQuery = "",
-            onSearchQueryChange = {},
-            onClearSearch = {},
-            onSongClick = {},
-            onAddToSetlist = {}
-        )
-    }
-}
-
-/**
- * Content-only composable for previews (no ViewModel dependency).
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun LibraryScreenContent(
-    songs: List<SongEntity>,
-    searchQuery: String,
-    onSearchQueryChange: (String) -> Unit,
-    onClearSearch: () -> Unit,
-    onSongClick: (String) -> Unit,
-    onAddToSetlist: (String) -> Unit
-) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = "Library",
-                        style = MaterialTheme.typography.headlineMedium
-                    )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-            )
-        }
-    ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-        ) {
-            SearchBar(
-                query = searchQuery,
-                onQueryChange = onSearchQueryChange,
-                onClearClick = onClearSearch,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-            )
-
-            if (songs.isEmpty()) {
-                EmptyLibraryMessage(hasSearchQuery = searchQuery.isNotEmpty())
-            } else {
-                // Note: Can't show badges in preview without ViewModel
-                Text(
-                    text = "Preview: ${songs.size} songs",
-                    modifier = Modifier.padding(16.dp)
-                )
-            }
         }
     }
 }

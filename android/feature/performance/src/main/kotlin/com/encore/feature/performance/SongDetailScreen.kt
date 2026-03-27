@@ -1,69 +1,71 @@
 package com.encore.feature.performance
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.ZoomIn
-import androidx.compose.material.icons.filled.ZoomOut
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.encore.core.data.preferences.DisplayPreferences
+import com.encore.core.data.preferences.DisplayPreferencesHolder
 import com.mikepenz.markdown.compose.Markdown
 import com.mikepenz.markdown.model.DefaultMarkdownColors
 import com.mikepenz.markdown.model.DefaultMarkdownTypography
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 
 /**
- * Song Detail Screen - Performance / Teleprompter Mode.
+ * Song Detail Screen - Full-Screen Performance Mode.
  *
  * Features:
- * - Markdown rendering with HTML <span> tag support for colored sections
- * - Auto-scroll engine based on Duration metadata (default 3 minutes)
+ * - Full-screen layout with no app chrome (no top/bottom bars)
+ * - Tap-to-reveal floating zoom controls (bottom-right)
+ * - Double-tap to reset zoom to 100%
  * - Pinch-to-zoom for text size adjustment
- * - Play/pause controls
- * - Zoom in/out buttons
+ * - Per-song zoom level persistence
+ * - Section headers rendered with design-spec colors
+ * - Auto-hide controls after 3 seconds
  *
- * Milestone 3: Performance Engine
+ * Milestone 3: Performance Engine - Production Mode
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SongDetailScreen(
     viewModel: SongDetailViewModel,
@@ -72,134 +74,92 @@ fun SongDetailScreen(
     modifier: Modifier = Modifier
 ) {
     val song by viewModel.song.collectAsState()
-    val isAutoScrolling by viewModel.isAutoScrolling.collectAsState()
     val textSizeMultiplier by viewModel.textSizeMultiplier.collectAsState()
-    val scrollSpeedPxPerSecond by viewModel.scrollSpeedPxPerSecond.collectAsState()
 
-    // Load song on first composition
+    var showControls by remember { mutableStateOf(false) }
+
     LaunchedEffect(songId) {
         viewModel.loadSong(songId)
     }
 
-    // Scroll state for manual and auto-scrolling
-    val scrollState = rememberScrollState()
-
-    // Auto-scroll effect
-    LaunchedEffect(isAutoScrolling, scrollSpeedPxPerSecond) {
-        if (isAutoScrolling && scrollSpeedPxPerSecond > 0) {
-            while (isActive && scrollState.value < scrollState.maxValue) {
-                val frameTime = 16 // ~60fps
-                val scrollAmount = (scrollSpeedPxPerSecond * frameTime / 1000f).toInt()
-                scrollState.scrollTo(scrollState.value + scrollAmount)
-                delay(frameTime.toLong())
-            }
+    // Auto-hide controls after 3 seconds
+    LaunchedEffect(showControls) {
+        if (showControls) {
+            delay(3000)
+            showControls = false
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = song?.title ?: "Loading...",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        song?.let {
-                            Text(
-                                text = "${it.artist} • Key: ${it.currentKey ?: "Unknown"}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
-                        )
-                    }
-                },
-                actions = {
-                    // Zoom out button
-                    IconButton(
-                        onClick = {
-                            viewModel.updateTextSize(textSizeMultiplier - 0.1f)
-                        }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ZoomOut,
-                            contentDescription = "Zoom Out"
-                        )
-                    }
+    BackHandler {
+        onNavigateBack()
+    }
 
-                    // Zoom level indicator
-                    Text(
-                        text = "${(textSizeMultiplier * 100).toInt()}%",
-                        style = MaterialTheme.typography.labelLarge,
-                        modifier = Modifier.padding(horizontal = 8.dp)
-                    )
+    val scrollState = rememberScrollState()
 
-                    // Zoom in button
-                    IconButton(
-                        onClick = {
-                            viewModel.updateTextSize(textSizeMultiplier + 0.1f)
-                        }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ZoomIn,
-                            contentDescription = "Zoom In"
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    // Auto-scroll toggle
-                    IconButton(
-                        onClick = { viewModel.toggleAutoScroll() }
-                    ) {
-                        Icon(
-                            imageVector = if (isAutoScrolling) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (isAutoScrolling) "Pause Auto-Scroll" else "Start Auto-Scroll",
-                            tint = if (isAutoScrolling) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface
-                )
-            )
-        }
-    ) { paddingValues ->
-        Box(
-            modifier = modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-        ) {
-            when {
-                song == null -> {
-                    // Loading state
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator()
-                    }
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        when {
+            song == null -> {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator()
                 }
-                else -> {
-                    // Song content with pinch-to-zoom
-                    SongContent(
-                        song = song!!,
-                        scrollState = scrollState,
-                        textSizeMultiplier = textSizeMultiplier,
-                        onZoomChange = { multiplier ->
-                            viewModel.updateTextSize(multiplier)
+            }
+            else -> {
+                SongContent(
+                    song = song!!,
+                    scrollState = scrollState,
+                    textSizeMultiplier = textSizeMultiplier,
+                    onZoomChange = { multiplier ->
+                        viewModel.updateTextSize(multiplier)
+                    },
+                    onSingleTap = {
+                        showControls = !showControls
+                    },
+                    onDoubleTap = {
+                        viewModel.resetTextSize()
+                        showControls = true
+                    }
+                )
+
+                // Persistent back button — top-left, always visible, subtle
+                IconButton(
+                    onClick = onNavigateBack,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Back to library",
+                        tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.45f),
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
+
+                // Floating zoom HUD (bottom-right corner) — appears on single tap, fades after 3s
+                AnimatedVisibility(
+                    visible = showControls,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(16.dp)
+                ) {
+                    FloatingZoomControls(
+                        currentZoom = textSizeMultiplier,
+                        onZoomIn = {
+                            viewModel.updateTextSize(textSizeMultiplier + 0.1f)
+                            showControls = true
+                        },
+                        onZoomOut = {
+                            viewModel.updateTextSize(textSizeMultiplier - 0.1f)
+                            showControls = true
                         }
                     )
                 }
@@ -209,7 +169,11 @@ fun SongDetailScreen(
 }
 
 /**
- * Song content with markdown rendering and pinch-to-zoom.
+ * Song content with section-based colored headers, pinch-to-zoom, and tap gestures.
+ *
+ * Section headers (Intro, Verse, Chorus, etc.) are rendered as Compose Text with
+ * their design-spec hex colors from DisplayPreferences. Body content is rendered
+ * with the Markdown library. This avoids relying on HTML <span> tag rendering support.
  */
 @Composable
 fun SongContent(
@@ -217,11 +181,18 @@ fun SongContent(
     scrollState: androidx.compose.foundation.ScrollState,
     textSizeMultiplier: Float,
     onZoomChange: (Float) -> Unit,
+    onSingleTap: () -> Unit,
+    onDoubleTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var currentZoom by remember { mutableFloatStateOf(textSizeMultiplier) }
 
-    // Update currentZoom when textSizeMultiplier changes externally (button clicks)
+    val displayPreferences = remember { DisplayPreferencesHolder.getPreferences() }
+
+    val sections = remember(song.markdownBody, displayPreferences) {
+        parseSongSections(song.markdownBody, displayPreferences)
+    }
+
     LaunchedEffect(textSizeMultiplier) {
         currentZoom = textSizeMultiplier
     }
@@ -229,116 +200,231 @@ fun SongContent(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .pointerInput(Unit) {
+            // Pinch-to-zoom: separate key so both gesture detectors coexist
+            .pointerInput("transform") {
                 detectTransformGestures { _, _, zoom, _ ->
-                    // Apply zoom transformation
                     currentZoom = (currentZoom * zoom).coerceIn(0.5f, 3.0f)
                     onZoomChange(currentZoom)
                 }
             }
+            // Tap detection: uses onDoubleTap directly (correct API usage)
+            .pointerInput("tap") {
+                detectTapGestures(
+                    onDoubleTap = { onDoubleTap() },
+                    onTap = { onSingleTap() }
+                )
+            }
             .verticalScroll(scrollState)
-            .padding(16.dp)
+            .padding(24.dp)
     ) {
-        // Song metadata card
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer
-            )
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+        sections.forEachIndexed { index, section ->
+            when (section) {
+                is SongSection.Header -> {
+                    val color = section.color?.let {
+                        try { Color(android.graphics.Color.parseColor(it)) } catch (_: Exception) { null }
+                    } ?: MaterialTheme.colorScheme.primary
+
                     Text(
-                        text = song.title,
-                        style = MaterialTheme.typography.headlineSmall.copy(
-                            fontSize = MaterialTheme.typography.headlineSmall.fontSize * textSizeMultiplier
-                        ),
+                        text = section.text,
+                        color = color,
+                        fontSize = when (section.level) {
+                            1 -> (28f * textSizeMultiplier).sp
+                            2 -> (24f * textSizeMultiplier).sp
+                            else -> (20f * textSizeMultiplier).sp
+                        },
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                        modifier = Modifier.padding(
+                            top = if (index > 0) 16.dp else 0.dp,
+                            bottom = 4.dp
+                        )
                     )
                 }
-                Text(
-                    text = song.artist,
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        fontSize = MaterialTheme.typography.bodyLarge.fontSize * textSizeMultiplier
-                    ),
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-                song.currentKey?.let { key ->
-                    Text(
-                        text = "Key: $key",
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontSize = MaterialTheme.typography.bodyMedium.fontSize * textSizeMultiplier
-                        ),
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
+                is SongSection.Body -> {
+                    if (section.markdown.isNotBlank()) {
+                        Markdown(
+                            content = section.markdown,
+                            colors = DefaultMarkdownColors(
+                                text = MaterialTheme.colorScheme.onBackground,
+                                codeText = MaterialTheme.colorScheme.onBackground,
+                                linkText = MaterialTheme.colorScheme.primary,
+                                codeBackground = MaterialTheme.colorScheme.surfaceVariant,
+                                inlineCodeBackground = MaterialTheme.colorScheme.surfaceVariant,
+                                dividerColor = MaterialTheme.colorScheme.outline
+                            ),
+                            typography = DefaultMarkdownTypography(
+                                text = MaterialTheme.typography.bodyLarge.copy(
+                                    fontSize = (MaterialTheme.typography.bodyLarge.fontSize.value * textSizeMultiplier).sp,
+                                    lineHeight = (MaterialTheme.typography.bodyLarge.lineHeight.value * textSizeMultiplier).sp
+                                ),
+                                code = MaterialTheme.typography.bodyMedium.copy(
+                                    fontSize = (MaterialTheme.typography.bodyMedium.fontSize.value * textSizeMultiplier).sp
+                                ),
+                                quote = MaterialTheme.typography.bodyMedium.copy(
+                                    fontSize = (MaterialTheme.typography.bodyMedium.fontSize.value * textSizeMultiplier).sp
+                                ),
+                                paragraph = MaterialTheme.typography.bodyLarge.copy(
+                                    fontSize = (MaterialTheme.typography.bodyLarge.fontSize.value * textSizeMultiplier).sp,
+                                    lineHeight = (MaterialTheme.typography.bodyLarge.lineHeight.value * textSizeMultiplier).sp
+                                ),
+                                ordered = MaterialTheme.typography.bodyLarge.copy(
+                                    fontSize = (MaterialTheme.typography.bodyLarge.fontSize.value * textSizeMultiplier).sp
+                                ),
+                                bullet = MaterialTheme.typography.bodyLarge.copy(
+                                    fontSize = (MaterialTheme.typography.bodyLarge.fontSize.value * textSizeMultiplier).sp
+                                ),
+                                list = MaterialTheme.typography.bodyLarge.copy(
+                                    fontSize = (MaterialTheme.typography.bodyLarge.fontSize.value * textSizeMultiplier).sp
+                                ),
+                                h1 = MaterialTheme.typography.headlineLarge.copy(
+                                    fontSize = (MaterialTheme.typography.headlineLarge.fontSize.value * textSizeMultiplier).sp
+                                ),
+                                h2 = MaterialTheme.typography.headlineMedium.copy(
+                                    fontSize = (MaterialTheme.typography.headlineMedium.fontSize.value * textSizeMultiplier).sp
+                                ),
+                                h3 = MaterialTheme.typography.headlineSmall.copy(
+                                    fontSize = (MaterialTheme.typography.headlineSmall.fontSize.value * textSizeMultiplier).sp
+                                ),
+                                h4 = MaterialTheme.typography.titleLarge.copy(
+                                    fontSize = (MaterialTheme.typography.titleLarge.fontSize.value * textSizeMultiplier).sp
+                                ),
+                                h5 = MaterialTheme.typography.titleMedium.copy(
+                                    fontSize = (MaterialTheme.typography.titleMedium.fontSize.value * textSizeMultiplier).sp
+                                ),
+                                h6 = MaterialTheme.typography.titleSmall.copy(
+                                    fontSize = (MaterialTheme.typography.titleSmall.fontSize.value * textSizeMultiplier).sp
+                                )
+                            )
+                        )
+                    }
                 }
             }
         }
-
-        // Markdown content
-        // Note: The mikepenz markdown renderer automatically handles HTML tags including <span>
-        Markdown(
-            content = song.markdownBody,
-            colors = DefaultMarkdownColors(
-                text = MaterialTheme.colorScheme.onSurface,
-                codeText = MaterialTheme.colorScheme.onSurface,
-                linkText = MaterialTheme.colorScheme.primary,
-                codeBackground = MaterialTheme.colorScheme.surfaceVariant,
-                inlineCodeBackground = MaterialTheme.colorScheme.surfaceVariant,
-                dividerColor = MaterialTheme.colorScheme.outline
-            ),
-            typography = DefaultMarkdownTypography(
-                h1 = MaterialTheme.typography.headlineLarge.copy(
-                    fontSize = (MaterialTheme.typography.headlineLarge.fontSize.value * textSizeMultiplier).sp
-                ),
-                h2 = MaterialTheme.typography.headlineMedium.copy(
-                    fontSize = (MaterialTheme.typography.headlineMedium.fontSize.value * textSizeMultiplier).sp
-                ),
-                h3 = MaterialTheme.typography.headlineSmall.copy(
-                    fontSize = (MaterialTheme.typography.headlineSmall.fontSize.value * textSizeMultiplier).sp
-                ),
-                h4 = MaterialTheme.typography.titleLarge.copy(
-                    fontSize = (MaterialTheme.typography.titleLarge.fontSize.value * textSizeMultiplier).sp
-                ),
-                h5 = MaterialTheme.typography.titleMedium.copy(
-                    fontSize = (MaterialTheme.typography.titleMedium.fontSize.value * textSizeMultiplier).sp
-                ),
-                h6 = MaterialTheme.typography.titleSmall.copy(
-                    fontSize = (MaterialTheme.typography.titleSmall.fontSize.value * textSizeMultiplier).sp
-                ),
-                text = MaterialTheme.typography.bodyLarge.copy(
-                    fontSize = (MaterialTheme.typography.bodyLarge.fontSize.value * textSizeMultiplier).sp,
-                    lineHeight = (MaterialTheme.typography.bodyLarge.lineHeight.value * textSizeMultiplier).sp
-                ),
-                code = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = (MaterialTheme.typography.bodyMedium.fontSize.value * textSizeMultiplier).sp
-                ),
-                quote = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = (MaterialTheme.typography.bodyMedium.fontSize.value * textSizeMultiplier).sp
-                ),
-                paragraph = MaterialTheme.typography.bodyLarge.copy(
-                    fontSize = (MaterialTheme.typography.bodyLarge.fontSize.value * textSizeMultiplier).sp
-                ),
-                ordered = MaterialTheme.typography.bodyLarge.copy(
-                    fontSize = (MaterialTheme.typography.bodyLarge.fontSize.value * textSizeMultiplier).sp
-                ),
-                bullet = MaterialTheme.typography.bodyLarge.copy(
-                    fontSize = (MaterialTheme.typography.bodyLarge.fontSize.value * textSizeMultiplier).sp
-                ),
-                list = MaterialTheme.typography.bodyLarge.copy(
-                    fontSize = (MaterialTheme.typography.bodyLarge.fontSize.value * textSizeMultiplier).sp
-                )
-            )
-        )
     }
+}
+
+/**
+ * A parsed segment of a song — either a colored section header or a block of body content.
+ */
+sealed class SongSection {
+    data class Header(val text: String, val level: Int, val color: String?) : SongSection()
+    data class Body(val markdown: String) : SongSection()
+}
+
+/**
+ * Parse markdown into a flat list of [SongSection]s.
+ *
+ * Each `# Header` line becomes a [SongSection.Header] with its design-spec color.
+ * Body lines between headers are grouped into [SongSection.Body] blocks.
+ * Chord lines are filtered out when [DisplayPreferences.showChords] is false.
+ */
+private fun parseSongSections(
+    markdown: String,
+    preferences: DisplayPreferences
+): List<SongSection> {
+    val result = mutableListOf<SongSection>()
+    val bodyBuffer = mutableListOf<String>()
+
+    fun flushBody() {
+        val bodyMarkdown = bodyBuffer.joinToString("\n")
+        if (bodyMarkdown.isNotBlank()) {
+            result.add(SongSection.Body(bodyMarkdown))
+        }
+        bodyBuffer.clear()
+    }
+
+    for (line in markdown.lines()) {
+        val trimmed = line.trimStart()
+        if (trimmed.startsWith("#")) {
+            flushBody()
+
+            val level = trimmed.takeWhile { it == '#' }.length
+            val headerText = trimmed.drop(level).trimStart()
+            val color = if (preferences.showKeyInfo) {
+                DisplayPreferences.getSectionColor(headerText, preferences)
+            } else null
+
+            result.add(SongSection.Header(text = headerText, level = level, color = color))
+        } else {
+            // Filter chord lines when showChords is off
+            if (preferences.showChords || !isChordLine(line)) {
+                bodyBuffer.add(line)
+            }
+        }
+    }
+
+    flushBody()
+    return result
+}
+
+/**
+ * Floating zoom HUD (semi-transparent overlay, bottom-right).
+ * Appears on single tap, auto-fades after 3s.
+ */
+@Composable
+fun FloatingZoomControls(
+    currentZoom: Float,
+    onZoomIn: () -> Unit,
+    onZoomOut: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = onZoomOut,
+                enabled = currentZoom > 0.5f
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Remove,
+                    contentDescription = "Zoom Out",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.primaryContainer
+            ) {
+                Text(
+                    text = "${(currentZoom * 100).toInt()}%",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            IconButton(
+                onClick = onZoomIn,
+                enabled = currentZoom < 3.0f
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Zoom In",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Detect if a line is a chord line (heuristic: contains chord notation).
+ */
+private fun isChordLine(line: String): Boolean {
+    val chordPattern = """^[\s\|]*([A-G][#b]?m?[\s\|]*)+$""".toRegex()
+    return chordPattern.matches(line.trim())
 }

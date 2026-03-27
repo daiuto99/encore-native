@@ -142,4 +142,35 @@ interface SetEntryDao {
      */
     @Query("DELETE FROM set_entries WHERE set_id = :setId")
     suspend fun deleteAllEntriesForSet(setId: String)
+
+    /**
+     * Find a specific entry by song and set.
+     * Used for remove-from-set operations where the entryId is not known.
+     *
+     * @param setId Set UUID
+     * @param songId Song UUID
+     * @return Entry or null if song is not in the set
+     */
+    @Query("SELECT * FROM set_entries WHERE set_id = :setId AND song_id = :songId LIMIT 1")
+    suspend fun getEntryBySongAndSet(setId: String, songId: String): SetEntryEntity?
+
+    /**
+     * Get all entries for a set as a one-shot list (no Flow).
+     * Used for batch reorder operations where all positions must be updated atomically.
+     *
+     * @param setId Set UUID
+     * @return List of entries ordered by position
+     */
+    @Query("SELECT * FROM set_entries WHERE set_id = :setId ORDER BY position ASC")
+    suspend fun getEntriesForSetList(setId: String): List<SetEntryEntity>
+
+    /**
+     * Update position for a single entry by ID.
+     * Used in the 2-phase reorder algorithm to avoid unique constraint conflicts.
+     *
+     * @param id Entry UUID
+     * @param position New position value
+     */
+    @Query("UPDATE set_entries SET position = :position WHERE id = :id")
+    suspend fun updatePosition(id: String, position: Int)
 }

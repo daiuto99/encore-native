@@ -49,6 +49,9 @@ data class SongEntity(
     @ColumnInfo(name = "harmony_markup")
     val harmonyMarkup: String? = null, // Future: harmony annotations
 
+    @ColumnInfo(name = "last_zoom_level")
+    val lastZoomLevel: Float = 1.0f, // Performance mode zoom level (1.0 = 100%, range 0.5-3.0)
+
     @ColumnInfo(name = "version")
     val version: Int = 1, // Increments on edit, used for conflict detection
 

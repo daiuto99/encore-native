@@ -133,6 +133,17 @@ interface SetDao {
     suspend fun getSetCount(setlistId: String): Int
 
     /**
+     * Get a specific set by setlist ID and set number.
+     * Used for direct set lookup when adding songs.
+     *
+     * @param setlistId Setlist UUID
+     * @param number Set number (1-4)
+     * @return Set or null if not found
+     */
+    @Query("SELECT * FROM sets WHERE setlist_id = :setlistId AND number = :number LIMIT 1")
+    suspend fun getBySetlistAndNumber(setlistId: String, number: Int): SetEntity?
+
+    /**
      * Get all sets that contain a specific song.
      * Used for showing set membership badges in Library.
      *

@@ -29,6 +29,16 @@ interface SongRepository {
     fun searchSongs(query: String): Flow<List<SongEntity>>
 
     /**
+     * Search songs in a specific set by title or artist.
+     * If query is empty or blank, returns all songs in the set.
+     *
+     * @param query Search term (partial match, case-insensitive)
+     * @param setNumber Set number (1-4)
+     * @return Flow of matching songs in the set
+     */
+    fun searchSongsInSet(query: String, setNumber: Int): Flow<List<SongEntity>>
+
+    /**
      * Get a single song by ID.
      *
      * @param id Song UUID
@@ -78,6 +88,33 @@ interface SongRepository {
      * @return Number of songs
      */
     suspend fun getSongCount(): Int
+
+    /**
+     * Update the zoom level for a specific song.
+     * Used in Performance Mode to persist per-song zoom preferences.
+     *
+     * @param songId Song UUID
+     * @param zoomLevel Zoom level (0.5-3.0, where 1.0 = 100%)
+     * @return Result indicating success or error
+     */
+    suspend fun updateZoomLevel(songId: String, zoomLevel: Float): Result<Unit>
+
+    /**
+     * Get all songs that have no key parsed yet.
+     * Used for backfilling key on previously imported songs.
+     *
+     * @return List of songs with null currentKey
+     */
+    suspend fun getSongsWithoutKey(): List<SongEntity>
+
+    /**
+     * Get songs in a specific set ordered by position within the set.
+     * Used when set filter is active with no search text.
+     *
+     * @param setNumber Set number (1-4)
+     * @return Flow of songs ordered by set position
+     */
+    fun getSongsInSetOrdered(setNumber: Int): Flow<List<SongEntity>>
 }
 
 /**
@@ -98,6 +135,11 @@ class SongRepositoryImpl(
         } else {
             songDao.searchSongs(query.trim())
         }
+    }
+
+    override fun searchSongsInSet(query: String, setNumber: Int): Flow<List<SongEntity>> {
+        // Always use the filtered query for set-specific searches
+        return songDao.searchSongsInSet(query.trim(), setNumber)
     }
 
     override suspend fun getSongById(id: String): SongEntity? {
@@ -142,4 +184,27 @@ class SongRepositoryImpl(
     override suspend fun getSongCount(): Int {
         return songDao.getCount()
     }
+
+    override suspend fun updateZoomLevel(songId: String, zoomLevel: Float): Result<Unit> {
+        return try {
+            val song = songDao.getById(songId)
+            if (song != null) {
+                val updatedSong = song.copy(
+                    lastZoomLevel = zoomLevel,
+                    localUpdatedAt = System.currentTimeMillis()
+                )
+                songDao.update(updatedSong)
+                Result.success(Unit)
+            } else {
+                Result.failure(IllegalArgumentException("Song not found: $songId"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun getSongsWithoutKey(): List<SongEntity> = songDao.getSongsWithoutKey()
+
+    override fun getSongsInSetOrdered(setNumber: Int): Flow<List<SongEntity>> =
+        songDao.getSongsInSetOrdered(setNumber)
 }

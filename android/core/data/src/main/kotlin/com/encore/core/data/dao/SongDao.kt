@@ -43,6 +43,24 @@ interface SongDao {
     fun searchSongs(query: String): Flow<List<SongEntity>>
 
     /**
+     * Search songs in a specific set by partial title or artist match.
+     * Joins with set_entries and sets tables to filter by set number.
+     *
+     * @param query Search term (case-insensitive)
+     * @param setNumber Set number (1-4)
+     * @return Flow of matching songs in the set, ordered by title
+     */
+    @Query("""
+        SELECT DISTINCT songs.* FROM songs
+        INNER JOIN set_entries ON songs.id = set_entries.song_id
+        INNER JOIN sets ON set_entries.set_id = sets.id
+        WHERE sets.number = :setNumber
+        AND (songs.title LIKE '%' || :query || '%' OR songs.artist LIKE '%' || :query || '%')
+        ORDER BY songs.title ASC
+    """)
+    fun searchSongsInSet(query: String, setNumber: Int): Flow<List<SongEntity>>
+
+    /**
      * Get a single song by ID.
      *
      * @param id Song UUID
@@ -113,4 +131,27 @@ interface SongDao {
      */
     @Query("SELECT COUNT(*) FROM songs")
     suspend fun getCount(): Int
+
+    /**
+     * Get all songs that have no key parsed yet.
+     * Used for backfilling key on previously imported songs.
+     */
+    @Query("SELECT * FROM songs WHERE current_key IS NULL")
+    suspend fun getSongsWithoutKey(): List<SongEntity>
+
+    /**
+     * Get songs in a specific set ordered by their position within the set.
+     * Used when a set filter is active and no search text is present.
+     *
+     * @param setNumber Set number (1-4)
+     * @return Flow of songs ordered by position
+     */
+    @Query("""
+        SELECT songs.* FROM songs
+        INNER JOIN set_entries ON songs.id = set_entries.song_id
+        INNER JOIN sets ON set_entries.set_id = sets.id
+        WHERE sets.number = :setNumber
+        ORDER BY set_entries.position ASC
+    """)
+    fun getSongsInSetOrdered(setNumber: Int): Flow<List<SongEntity>>
 }

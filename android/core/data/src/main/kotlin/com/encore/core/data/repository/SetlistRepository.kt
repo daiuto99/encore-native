@@ -8,6 +8,7 @@ import com.encore.core.data.entities.SetEntity
 import com.encore.core.data.entities.SetEntryEntity
 import com.encore.core.data.entities.SetlistEntity
 import com.encore.core.data.entities.SongEntity
+import com.encore.core.data.entities.SyncStatus
 import com.encore.core.data.relations.SetEntryWithSong
 import com.encore.core.data.relations.SetlistWithSets
 import kotlinx.coroutines.flow.Flow
@@ -166,6 +167,29 @@ interface SetlistRepository {
      * @return List of sets containing the song, ordered by set number
      */
     suspend fun getSetsContainingSong(songId: String): List<SetEntity>
+
+    /**
+     * Find the SetEntryEntity for a specific song within a specific set.
+     * Used to obtain the entryId needed for remove and reorder operations.
+     *
+     * @param setId Set UUID
+     * @param songId Song UUID
+     * @return The entry entity, or null if the song is not in the set
+     */
+    suspend fun getEntryForSongInSet(setId: String, songId: String): SetEntryEntity?
+
+    /**
+     * Find or create a set with the given number, auto-creating a default setlist if needed.
+     *
+     * Logic:
+     * 1. If no setlists exist: creates "My Setlist" with Sets 1–4.
+     * 2. Searches all setlists for a set with the matching number.
+     * 3. If not found: adds the set to the first available setlist.
+     *
+     * @param setNumber Set number (1–4)
+     * @return The found or newly created SetEntity
+     */
+    suspend fun getOrCreateSetByNumber(setNumber: Int): SetEntity
 }
 
 /**
@@ -395,33 +419,27 @@ class SetlistRepositoryImpl(
             val entry = setEntryDao.getById(entryId)
                 ?: return Result.failure(Exception("Entry not found: $entryId"))
 
-            val oldPosition = entry.position
+            // Get all entries in position order
+            val allEntries = setEntryDao.getEntriesForSetList(entry.setId)
 
-            if (oldPosition == newPosition) {
-                // No change needed
-                return Result.success(Unit)
+            // Build the new order by removing the entry and reinserting at the target index
+            val reordered = allEntries.sortedBy { it.position }.toMutableList()
+            val fromIdx = reordered.indexOfFirst { it.id == entryId }
+            if (fromIdx == -1) return Result.failure(Exception("Entry $entryId not found in set"))
+            val moving = reordered.removeAt(fromIdx)
+            reordered.add(newPosition.coerceIn(0, reordered.size), moving)
+
+            // Phase 1: Set all positions to unique negative values.
+            // This avoids triggering the unique(set_id, position) constraint
+            // during intermediate states when shifting positions.
+            reordered.forEachIndexed { i, e ->
+                setEntryDao.updatePosition(e.id, -(i + 1))
             }
 
-            // Remove from old position (compact)
-            val entriesToCompact = setEntryDao.getEntriesToReposition(
-                entry.setId,
-                oldPosition + 1
-            )
-            entriesToCompact.forEach { entryToCompact ->
-                val updatedEntry = entryToCompact.copy(position = entryToCompact.position - 1)
-                setEntryDao.update(updatedEntry)
+            // Phase 2: Set to correct 0-indexed positions
+            reordered.forEachIndexed { i, e ->
+                setEntryDao.updatePosition(e.id, i)
             }
-
-            // Shift entries at new position and after down by 1
-            val entriesToShift = setEntryDao.getEntriesToReposition(entry.setId, newPosition)
-            entriesToShift.forEach { entryToShift ->
-                val updatedEntry = entryToShift.copy(position = entryToShift.position + 1)
-                setEntryDao.update(updatedEntry)
-            }
-
-            // Update entry to new position
-            val updatedEntry = entry.copy(position = newPosition)
-            setEntryDao.update(updatedEntry)
 
             Result.success(Unit)
         } catch (e: Exception) {
@@ -431,5 +449,71 @@ class SetlistRepositoryImpl(
 
     override suspend fun getSetsContainingSong(songId: String): List<SetEntity> {
         return setDao.getSetsContainingSong(songId)
+    }
+
+    override suspend fun getEntryForSongInSet(setId: String, songId: String): SetEntryEntity? {
+        return setEntryDao.getEntryBySongAndSet(setId, songId)
+    }
+
+    override suspend fun getOrCreateSetByNumber(setNumber: Int): SetEntity {
+        val now = System.currentTimeMillis()
+
+        // Get or create the default setlist
+        var setlists = setlistDao.getSetlistsOnce()
+        if (setlists.isEmpty()) {
+            val setlistId = UUID.randomUUID().toString()
+            setlistDao.insert(
+                SetlistEntity(
+                    id = setlistId,
+                    userId = "local-user",
+                    name = "My Setlist",
+                    version = 1,
+                    createdAt = now,
+                    updatedAt = now,
+                    syncStatus = SyncStatus.SYNCED,
+                    localUpdatedAt = now,
+                    lastSyncedAt = now
+                )
+            )
+            // Pre-create Sets 1–4 for the default setlist
+            for (num in 1..4) {
+                setDao.insert(
+                    SetEntity(
+                        id = UUID.randomUUID().toString(),
+                        setlistId = setlistId,
+                        number = num,
+                        colorToken = null,
+                        createdAt = now
+                    )
+                )
+            }
+            setlists = setlistDao.getSetlistsOnce()
+        }
+
+        // Search all setlists for an existing set with this number
+        for (setlist in setlists) {
+            val existing = setDao.getBySetlistAndNumber(setlist.id, setNumber)
+            if (existing != null) return existing
+        }
+
+        // No set found — add it to the first setlist
+        val firstSetlistId = setlists.first().id
+        val newSetId = UUID.randomUUID().toString()
+        setDao.insert(
+            SetEntity(
+                id = newSetId,
+                setlistId = firstSetlistId,
+                number = setNumber,
+                colorToken = null,
+                createdAt = now
+            )
+        )
+        return SetEntity(
+            id = newSetId,
+            setlistId = firstSetlistId,
+            number = setNumber,
+            colorToken = null,
+            createdAt = now
+        )
     }
 }

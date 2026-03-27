@@ -104,6 +104,13 @@ interface SetlistDao {
     suspend fun getCount(): Int
 
     /**
+     * Get all setlists as a one-shot (non-Flow) result.
+     * Used when we need to inspect setlist state inside a suspend function.
+     */
+    @Query("SELECT * FROM setlists ORDER BY name ASC")
+    suspend fun getSetlistsOnce(): List<SetlistEntity>
+
+    /**
      * Search setlists by name.
      *
      * @param query Search term (case-insensitive, partial match)

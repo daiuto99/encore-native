@@ -5,6 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.encore.core.data.dao.SetDao
 import com.encore.core.data.dao.SetEntryDao
@@ -24,6 +25,7 @@ import java.util.UUID
  * Encore Room Database - Local offline-first persistence layer.
  *
  * Version 1: Initial schema with Song, Setlist, Set, and SetEntry entities.
+ * Version 2: Added lastZoomLevel field to SongEntity for Performance Mode.
  * Pre-populates with Amazing Grace demo song on first launch.
  *
  * Based on: docs/architecture/data-model.md
@@ -35,7 +37,7 @@ import java.util.UUID
         SetEntity::class,
         SetEntryEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = true
 )
 @TypeConverters(EncoreTypeConverters::class)
@@ -54,6 +56,18 @@ abstract class EncoreDatabase : RoomDatabase() {
         private const val DATABASE_NAME = "encore_database"
 
         /**
+         * Migration from version 1 to 2: Add lastZoomLevel column to songs table.
+         * Default value is 1.0 (100% zoom).
+         */
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE songs ADD COLUMN last_zoom_level REAL NOT NULL DEFAULT 1.0"
+                )
+            }
+        }
+
+        /**
          * Get singleton database instance.
          *
          * @param context Application context
@@ -66,6 +80,7 @@ abstract class EncoreDatabase : RoomDatabase() {
                     EncoreDatabase::class.java,
                     DATABASE_NAME
                 )
+                    .addMigrations(MIGRATION_1_2)
                     .addCallback(DatabaseCallback(context.applicationContext))
                     .build()
                 INSTANCE = instance
@@ -110,6 +125,7 @@ abstract class EncoreDatabase : RoomDatabase() {
                     originalImportBody = AMAZING_GRACE_FULL_MARKDOWN,
                     leadMarker = null,
                     harmonyMarkup = null,
+                    lastZoomLevel = 1.0f,
                     version = 1,
                     createdAt = now,
                     updatedAt = now,

@@ -52,6 +52,9 @@ data class SongEntity(
     @ColumnInfo(name = "last_zoom_level")
     val lastZoomLevel: Float = 1.0f, // Performance mode zoom level (1.0 = 100%, range 0.5-3.0)
 
+    @ColumnInfo(name = "owner_id")
+    val ownerId: String? = null, // Google account ID — null until user signs in (Milestone 4)
+
     @ColumnInfo(name = "version")
     val version: Int = 1, // Increments on edit, used for conflict detection
 

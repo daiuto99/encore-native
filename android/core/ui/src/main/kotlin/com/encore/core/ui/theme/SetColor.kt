@@ -12,6 +12,23 @@ import androidx.compose.ui.graphics.Color
 object SetColor {
 
     /**
+     * Global persistent color for a set number (1-4).
+     * These are fixed, vivid colors shared across Library circles, Sets chips, and any future UI.
+     *
+     * @param setNumber Set number (1-4)
+     * @return Vivid Color for this set
+     */
+    fun getSetColor(setNumber: Int): Color {
+        return when (setNumber) {
+            1 -> Color(0xFF3B82F6) // Blue
+            2 -> Color(0xFFF97316) // Orange
+            3 -> Color(0xFF10B981) // Green
+            4 -> Color(0xFF8B5CF6) // Purple
+            else -> Color(0xFF6B7280) // Gray fallback
+        }
+    }
+
+    /**
      * Get background color for a set based on its number.
      *
      * Uses Material 3 container colors in rotation for visual distinction.

@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import com.encore.feature.library.LibraryViewModel
 import com.encore.feature.performance.SongDetailViewModel
 import com.encore.feature.setlists.SetlistViewModel
+import com.encore.tablet.auth.AuthViewModel
 
 /**
  * Factory for creating ViewModels with dependencies.
@@ -33,6 +34,11 @@ class ViewModelFactory(
             modelClass.isAssignableFrom(SongDetailViewModel::class.java) -> {
                 SongDetailViewModel(
                     appContainer.songRepository
+                ) as T
+            }
+            modelClass.isAssignableFrom(AuthViewModel::class.java) -> {
+                AuthViewModel(
+                    appContainer.authRepository
                 ) as T
             }
             else -> throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")

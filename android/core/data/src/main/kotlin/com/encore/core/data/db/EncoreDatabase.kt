@@ -26,6 +26,7 @@ import java.util.UUID
  *
  * Version 1: Initial schema with Song, Setlist, Set, and SetEntry entities.
  * Version 2: Added lastZoomLevel field to SongEntity for Performance Mode.
+ * Version 3: Added ownerId field to SongEntity for Milestone 4 auth integration.
  * Pre-populates with Amazing Grace demo song on first launch.
  *
  * Based on: docs/architecture/data-model.md
@@ -37,7 +38,7 @@ import java.util.UUID
         SetEntity::class,
         SetEntryEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 @TypeConverters(EncoreTypeConverters::class)
@@ -68,6 +69,18 @@ abstract class EncoreDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration from version 2 to 3: Add ownerId column to songs table.
+         * Nullable — null until user signs in with Google.
+         */
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE songs ADD COLUMN owner_id TEXT"
+                )
+            }
+        }
+
+        /**
          * Get singleton database instance.
          *
          * @param context Application context
@@ -80,7 +93,8 @@ abstract class EncoreDatabase : RoomDatabase() {
                     EncoreDatabase::class.java,
                     DATABASE_NAME
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .fallbackToDestructiveMigration()
                     .addCallback(DatabaseCallback(context.applicationContext))
                     .build()
                 INSTANCE = instance

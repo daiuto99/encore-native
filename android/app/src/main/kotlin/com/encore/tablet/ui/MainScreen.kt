@@ -14,8 +14,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -23,18 +25,23 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,14 +55,17 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.encore.core.data.auth.AuthState
 import com.encore.core.ui.theme.SetColor
 import com.encore.feature.library.LibraryListContent
 import com.encore.feature.library.LibraryViewModel
 import com.encore.feature.performance.SongDetailScreen
 import com.encore.feature.performance.SongDetailViewModel
+import com.encore.tablet.auth.AuthViewModel
 import com.encore.tablet.di.AppContainer
 import com.encore.tablet.di.ViewModelFactory
 import com.encore.tablet.navigation.Routes
+import kotlinx.coroutines.launch
 
 /**
  * Main Screen - Root of the app.
@@ -76,6 +86,7 @@ fun MainScreen(
 ) {
     val navController = rememberNavController()
     val libraryViewModel: LibraryViewModel = viewModel(factory = viewModelFactory)
+    val authViewModel: AuthViewModel = viewModel(factory = viewModelFactory)
 
     NavHost(
         navController = navController,
@@ -85,6 +96,7 @@ fun MainScreen(
         composable("command_center") {
             CommandCenterScreen(
                 libraryViewModel = libraryViewModel,
+                authViewModel = authViewModel,
                 onSongClick = { songId ->
                     navController.navigate(Routes.songDetail(songId))
                 }
@@ -120,12 +132,17 @@ fun MainScreen(
 @Composable
 fun CommandCenterScreen(
     libraryViewModel: LibraryViewModel,
+    authViewModel: AuthViewModel,
     onSongClick: (String) -> Unit
 ) {
     var selectedSetFilter by remember { mutableStateOf<Int?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val importResult by libraryViewModel.importResult.collectAsState()
+    val authState by authViewModel.authState.collectAsState()
+    var showProfileSheet by remember { mutableStateOf(false) }
+    val profileSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
 
     // Sync set filter state into ViewModel
     LaunchedEffect(selectedSetFilter) {
@@ -137,6 +154,17 @@ fun CommandCenterScreen(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         if (uris.isNotEmpty()) libraryViewModel.importSongs(context, uris)
+    }
+
+    // Sign-in error snackbar — Indefinite so the full error string is readable
+    LaunchedEffect(Unit) {
+        authViewModel.signInError.collect { errorMsg ->
+            snackbarHostState.showSnackbar(
+                message = errorMsg,
+                duration = androidx.compose.material3.SnackbarDuration.Indefinite,
+                withDismissAction = true
+            )
+        }
     }
 
     // Import result snackbar
@@ -151,6 +179,29 @@ fun CommandCenterScreen(
             }.ifEmpty { "No files imported" }
             snackbarHostState.showSnackbar(msg)
             libraryViewModel.clearImportResult()
+        }
+    }
+
+    if (showProfileSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showProfileSheet = false },
+            sheetState = profileSheetState
+        ) {
+            ProfileSheetContent(
+                authState = authState,
+                onSignIn = {
+                    authViewModel.signIn(context)
+                    scope.launch { profileSheetState.hide() }.invokeOnCompletion {
+                        showProfileSheet = false
+                    }
+                },
+                onSignOut = {
+                    authViewModel.signOut()
+                    scope.launch { profileSheetState.hide() }.invokeOnCompletion {
+                        showProfileSheet = false
+                    }
+                }
+            )
         }
     }
 
@@ -189,7 +240,7 @@ fun CommandCenterScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                    .padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -199,17 +250,30 @@ fun CommandCenterScreen(
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                TextButton(
-                    onClick = {
-                        libraryViewModel.clearSearch()
-                        libraryViewModel.updateSetFilter(null)
-                    },
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                ) {
-                    Text(
-                        text = "Show All",
-                        style = MaterialTheme.typography.labelMedium
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(
+                        onClick = {
+                            libraryViewModel.clearSearch()
+                            libraryViewModel.updateSetFilter(null)
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                    ) {
+                        Text(
+                            text = "Show All",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                    IconButton(onClick = { showProfileSheet = true }) {
+                        Icon(
+                            imageVector = Icons.Default.AccountCircle,
+                            contentDescription = "Account",
+                            tint = when (authState) {
+                                is AuthState.Authenticated -> MaterialTheme.colorScheme.primary
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
                 }
             }
 
@@ -351,5 +415,104 @@ fun QuickActionCard(
                 }
             }
         }
+    }
+}
+
+/**
+ * Profile bottom sheet — shows sign-in prompt when unauthenticated,
+ * account details + sign-out when authenticated.
+ */
+@Composable
+fun ProfileSheetContent(
+    authState: AuthState,
+    onSignIn: () -> Unit,
+    onSignOut: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        when (authState) {
+            is AuthState.Unauthenticated, AuthState.Loading -> {
+                Icon(
+                    imageVector = Icons.Default.AccountCircle,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(56.dp)
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "Sign in to Sync",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Your songs are saved offline. Sign in to back them up and sync across devices.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+                OutlinedButton(
+                    onClick = onSignIn,
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(50.dp),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.outline
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AccountCircle,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Sign in with Google")
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Offline Mode  •  Sign in to Sync",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
+            }
+            is AuthState.Authenticated -> {
+                Icon(
+                    imageVector = Icons.Default.AccountCircle,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(56.dp)
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                val displayName = authState.user.displayName
+                if (displayName != null) {
+                    Text(
+                        text = displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Text(
+                    text = authState.user.googleAccountId,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+                OutlinedButton(
+                    onClick = onSignOut,
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(50.dp),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.outline
+                    )
+                ) {
+                    Text("Sign Out")
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(24.dp))
     }
 }

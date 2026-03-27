@@ -2,6 +2,9 @@ package com.encore.tablet.di
 
 import android.content.Context
 import com.encore.core.data.db.EncoreDatabase
+import com.encore.core.data.auth.AuthRepository
+import com.encore.core.data.auth.AuthRepositoryImpl
+import com.encore.tablet.BuildConfig
 import com.encore.core.data.repository.SetlistRepository
 import com.encore.core.data.repository.SetlistRepositoryImpl
 import com.encore.core.data.repository.SongRepository
@@ -17,7 +20,7 @@ import com.encore.core.data.repository.SongRepositoryImpl
  *
  * Milestone 2: Manual DI (will migrate to Hilt in Milestone 4)
  */
-class AppContainer(context: Context) {
+class AppContainer(private val context: Context) {
 
     // Database singleton
     private val database: EncoreDatabase by lazy {
@@ -36,5 +39,9 @@ class AppContainer(context: Context) {
             setEntryDao = database.setEntryDao(),
             songDao = database.songDao()
         )
+    }
+
+    val authRepository: AuthRepository by lazy {
+        AuthRepositoryImpl(context, BuildConfig.GOOGLE_WEB_CLIENT_ID)
     }
 }

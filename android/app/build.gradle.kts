@@ -60,6 +60,11 @@ dependencies {
     implementation(project(":core:data"))
     implementation(project(":core:sync"))
 
+    // Feature modules
+    implementation(project(":feature:library"))
+    implementation(project(":feature:setlists"))
+    implementation(project(":feature:performance"))
+
     // Core Android dependencies
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
@@ -71,6 +76,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
 
     // Navigation
     implementation("androidx.navigation:navigation-compose:2.7.7")

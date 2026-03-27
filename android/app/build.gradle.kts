@@ -99,6 +99,9 @@ dependencies {
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
 
+    // Image loading
+    implementation("io.coil-kt:coil-compose:2.6.0")
+
     // Credential Manager — app module includes Play Services backend
     implementation("androidx.credentials:credentials:1.2.2")
     implementation("androidx.credentials:credentials-play-services-auth:1.2.2")

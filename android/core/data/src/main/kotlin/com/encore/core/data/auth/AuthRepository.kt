@@ -8,20 +8,27 @@ import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
+import com.encore.core.data.preferences.UserPreferencesRepository
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 // ── Domain types ──────────────────────────────────────────────────────────────
 
 data class GoogleUser(
-    val googleAccountId: String,  // Stable account identifier (email or sub)
+    val googleAccountId: String,       // Stable account identifier (email or sub)
     val displayName: String?,
     val givenName: String?,
     val familyName: String?,
-    val idToken: String           // JWT for Ktor API calls in Milestone 4
+    val profilePictureUri: android.net.Uri?,  // Google avatar URL
+    val idToken: String                // JWT for Ktor API calls in Milestone 4
 )
 
 sealed class AuthState {
@@ -58,18 +65,38 @@ interface AuthRepository {
 
 class AuthRepositoryImpl(
     applicationContext: Context,
-    private val webClientId: String
+    private val webClientId: String,
+    private val userPrefs: UserPreferencesRepository
 ) : AuthRepository {
 
     private val credentialManager = CredentialManager.create(applicationContext)
+    private val repositoryScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+    // Starts as Loading — held there until the DataStore read below completes,
+    // preventing a "signed-out" flash on cold start.
     private val _authState = MutableStateFlow<AuthState>(AuthState.Loading)
     override val authState: StateFlow<AuthState> = _authState.asStateFlow()
 
     init {
-        // No saved credential on cold start in Credential Manager — start unauthenticated.
-        // Milestone 4 will add token persistence to DataStore so this can restore sessions.
-        _authState.value = AuthState.Unauthenticated
+        repositoryScope.launch {
+            val persisted = userPrefs.persistedUser.first()
+            _authState.value = if (persisted != null) {
+                Log.d(TAG, "Restoring session for ${persisted.googleAccountId}")
+                AuthState.Authenticated(
+                    GoogleUser(
+                        googleAccountId  = persisted.googleAccountId,
+                        displayName      = persisted.displayName,
+                        givenName        = null,
+                        familyName       = null,
+                        profilePictureUri = persisted.profilePictureUri
+                            ?.let { android.net.Uri.parse(it) },
+                        idToken          = ""  // Not persisted; refreshed on next explicit sign-in
+                    )
+                )
+            } else {
+                AuthState.Unauthenticated
+            }
+        }
     }
 
     override suspend fun signIn(activityContext: Context): Result<GoogleUser> {
@@ -103,9 +130,11 @@ class AuthRepositoryImpl(
                     displayName = googleIdToken.displayName,
                     givenName = googleIdToken.givenName,
                     familyName = googleIdToken.familyName,
+                    profilePictureUri = googleIdToken.profilePictureUri,
                     idToken = googleIdToken.idToken
                 )
                 _authState.value = AuthState.Authenticated(user)
+                userPrefs.saveUser(user)
                 Result.success(user)
             } else {
                 _authState.value = AuthState.Unauthenticated
@@ -131,9 +160,10 @@ class AuthRepositoryImpl(
 
     override suspend fun signOut() {
         try {
+            userPrefs.clearUser()
             credentialManager.clearCredentialState(ClearCredentialStateRequest())
         } catch (e: Exception) {
-            Log.w(TAG, "clearCredentialState failed (non-fatal)", e)
+            Log.w(TAG, "signOut cleanup failed (non-fatal)", e)
         } finally {
             _authState.value = AuthState.Unauthenticated
         }

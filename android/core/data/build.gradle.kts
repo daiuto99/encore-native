@@ -36,6 +36,9 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
 
+    // DataStore — user session persistence
+    implementation("androidx.datastore:datastore-preferences:1.0.0")
+
     // Credential Manager (auth data layer — no Play Services backend here)
     implementation("androidx.credentials:credentials:1.2.2")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.0")

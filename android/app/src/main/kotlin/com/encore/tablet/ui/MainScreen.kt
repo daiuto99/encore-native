@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
@@ -20,6 +21,8 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -35,6 +38,10 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.Dp
+import coil.compose.AsyncImage
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -142,6 +149,7 @@ fun CommandCenterScreen(
     val authState by authViewModel.authState.collectAsState()
     var showProfileSheet by remember { mutableStateOf(false) }
     val profileSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showAccountDropdown by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     // Sync set filter state into ViewModel
@@ -263,16 +271,56 @@ fun CommandCenterScreen(
                             style = MaterialTheme.typography.labelMedium
                         )
                     }
-                    IconButton(onClick = { showProfileSheet = true }) {
-                        Icon(
-                            imageVector = Icons.Default.AccountCircle,
-                            contentDescription = "Account",
-                            tint = when (authState) {
-                                is AuthState.Authenticated -> MaterialTheme.colorScheme.primary
-                                else -> MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                            modifier = Modifier.size(26.dp)
-                        )
+                    androidx.compose.foundation.layout.Box {
+                        IconButton(onClick = {
+                            when (authState) {
+                                is AuthState.Authenticated -> showAccountDropdown = true
+                                else -> showProfileSheet = true
+                            }
+                        }) {
+                            UserAvatar(
+                                profilePictureUri = (authState as? AuthState.Authenticated)?.user?.profilePictureUri,
+                                isAuthenticated = authState is AuthState.Authenticated,
+                                size = 30.dp
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showAccountDropdown,
+                            onDismissRequest = { showAccountDropdown = false }
+                        ) {
+                            val user = (authState as? AuthState.Authenticated)?.user
+                            if (user != null) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            val name = user.displayName
+                                            if (name != null) {
+                                                Text(
+                                                    text = name,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            }
+                                            Text(
+                                                text = user.googleAccountId,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    },
+                                    onClick = {},
+                                    enabled = false
+                                )
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text("Sign Out") },
+                                    onClick = {
+                                        authViewModel.signOut()
+                                        showAccountDropdown = false
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -419,6 +467,39 @@ fun QuickActionCard(
 }
 
 /**
+ * Google avatar image clipped to a circle, with AccountCircle fallback.
+ */
+@Composable
+fun UserAvatar(
+    profilePictureUri: android.net.Uri?,
+    isAuthenticated: Boolean,
+    size: Dp,
+    modifier: Modifier = Modifier
+) {
+    if (profilePictureUri != null) {
+        AsyncImage(
+            model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                .data(profilePictureUri)
+                .crossfade(200)
+                .build(),
+            contentDescription = "Profile picture",
+            contentScale = ContentScale.Crop,
+            modifier = modifier
+                .size(size)
+                .clip(CircleShape)
+        )
+    } else {
+        Icon(
+            imageVector = Icons.Default.AccountCircle,
+            contentDescription = "Account",
+            tint = if (isAuthenticated) MaterialTheme.colorScheme.primary
+                   else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = modifier.size(size)
+        )
+    }
+}
+
+/**
  * Profile bottom sheet — shows sign-in prompt when unauthenticated,
  * account details + sign-out when authenticated.
  */
@@ -480,11 +561,10 @@ fun ProfileSheetContent(
                 )
             }
             is AuthState.Authenticated -> {
-                Icon(
-                    imageVector = Icons.Default.AccountCircle,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(56.dp)
+                UserAvatar(
+                    profilePictureUri = authState.user.profilePictureUri,
+                    isAuthenticated = true,
+                    size = 64.dp
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 val displayName = authState.user.displayName

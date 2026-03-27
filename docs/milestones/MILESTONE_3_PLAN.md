@@ -1,338 +1,353 @@
 # Milestone 3: Performance Engine
 
-**Goal:** Build the Song Viewer (Teleprompter Mode) with markdown rendering, auto-scroll, and pinch-to-zoom capabilities. Enable musicians to perform live with optimized visibility and automatic scrolling.
+**Goal:** Build a production-ready Performance Mode for live shows with persistent zoom, rich HTML rendering, and optimized UX. Focus on data integrity and visual clarity for stage performance.
 
-**Status:** Task 1 Complete (1/4 tasks)
+**Status:** Foundation Complete - Starting Refinement (0/4 tasks)
 **Last Updated:** 2026-03-27
+
+---
+
+## 🎯 Priority Shift: Production-Ready Performance Mode
+
+**Previous Scope (Prototype):**
+- ✅ Basic markdown rendering
+- ✅ Pinch-to-zoom (ephemeral state)
+- ✅ Auto-scroll engine (experimental)
+
+**New Scope (Production):**
+- 🔄 Performance Mode UI refinement
+- 🔄 Per-song zoom level persistence
+- 🔄 Full CSS/HTML rendering for colored sections
+- 🔄 De-scope auto-scroll (move to Post-v1 backlog)
 
 ---
 
 ## Task Overview
 
-| Task | Description | Status | Files |
-|------|-------------|--------|-------|
-| 1 | Song Detail Screen (Teleprompter) | ✅ COMPLETED | `feature/performance/` |
-| 2 | Transposition Engine | ⏳ PENDING | `core/data/transpose/` |
-| 3 | Edit Mode | ⏳ PENDING | `feature/edit/` |
-| 4 | Testing & Polish | ⏳ PENDING | All modules |
+| Task | Description | Status | Priority | Files |
+|------|-------------|--------|----------|-------|
+| 1 | Performance Mode UI Refinement | 🔄 IN PROGRESS | P0 | `feature/performance/` |
+| 2 | Per-Song Zoom Level Persistence | ⏳ NEXT | P0 | `core/data/entities/` |
+| 3 | Full CSS/HTML Support | ⏳ PENDING | P1 | `feature/performance/` |
+| 4 | De-scope Auto-Scroll | ⏳ PENDING | P2 | `feature/performance/` |
 
 ---
 
-## ✅ Task 1: Song Detail Screen (Teleprompter Mode) - COMPLETED
+## 🔄 Task 1: Performance Mode UI Refinement - IN PROGRESS
 
-**Date Completed:** 2026-03-27
+**Date Started:** 2026-03-27
 
 ### Goal:
-Create a full-screen song viewer optimized for live performance with:
-- Markdown rendering that honors HTML `<span>` tags for colored section headers
-- Auto-scroll engine based on Duration metadata or default 3-minute timer
-- Pinch-to-zoom for on-the-fly text size adjustment
-- Navigation from Library and Setlist screens
+Transform the prototype Song Detail Screen into a production-ready Performance Mode optimized for live stage use on 11-inch tablets in portrait orientation.
 
-### Files Created:
-- `feature/performance/src/main/kotlin/com/encore/feature/performance/SongDetailViewModel.kt`
-- `feature/performance/src/main/kotlin/com/encore/feature/performance/SongDetailScreen.kt`
+### Requirements:
 
-### Files Modified:
-- `feature/performance/build.gradle.kts` - Added dependencies (markdown, navigation, lifecycle, core modules)
-- `app/src/main/kotlin/com/encore/tablet/di/ViewModelFactory.kt` - Added SongDetailViewModel factory
-- `app/src/main/kotlin/com/encore/tablet/navigation/Navigation.kt` - Added Routes.SONG_DETAIL and navigation composable
-- `feature/setlists/src/main/kotlin/com/encore/feature/setlists/SetlistDetailScreen.kt` - Added onSongClick navigation
+#### 1. Full-Screen Performance Mode
+- **No Top Bar:** Maximize screen real estate for song content
+- **Gesture-Based Navigation:** Swipe from left edge to go back (Android standard)
+- **Status Bar Hiding:** Immersive mode for live performance
+- **Tap-to-Reveal Controls:** Tap anywhere to show/hide floating zoom controls
 
----
-
-## Implementation Details
-
-### 1. SongDetailViewModel (feature/performance/SongDetailViewModel.kt)
-
-**Purpose:** Manages song data, auto-scroll state, text size, and scroll speed calculations
-
-**Key Features:**
-
-#### State Management:
-- `song: StateFlow<SongEntity?>` - Current song data
-- `isAutoScrolling: StateFlow<Boolean>` - Auto-scroll toggle state
-- `textSizeMultiplier: StateFlow<Float>` - Text zoom level (0.5x - 3.0x)
-- `scrollSpeedPxPerSecond: StateFlow<Float>` - Calculated scroll speed
-
-#### Duration Parsing:
-Regex patterns for detecting song duration in markdown:
-```kotlin
-// Handles multiple formats:
-"(?i)\*?\*?Duration:\*?\*?\s*(\d+):(\d+)".toRegex()  // **Duration:** 3:30
-"(?i)^\s*duration\s*:\s*(\d+):(\d+)".toRegex()        // Duration: 3:30
-"\[\s*(?i)duration\s*:\s*(\d+):(\d+)\s*\]".toRegex() // [Duration: 3:30]
-```
-
-#### Scroll Speed Calculation:
-- Parses duration from markdown metadata (e.g., "**Duration:** 3:30" = 210 seconds)
-- Falls back to default 180 seconds (3 minutes) if no duration found
-- Estimates content height (50 lines × 100px = 5000px)
-- Calculates: `speedPxPerSecond = contentHeight / durationSeconds`
-- Result: Smooth scroll that completes within song duration
-
-#### Text Size Control:
-- Default: 1.0x (100%)
-- Range: 0.5x - 3.0x (50% - 300%)
-- Clamped with `coerceIn()` for safety
-- Applied to all typography scales (h1, h2, h3, text, code, quote)
-
----
-
-### 2. SongDetailScreen (feature/performance/SongDetailScreen.kt)
-
-**Purpose:** Full-screen performance view with controls and gestures
-
-**Key Features:**
-
-#### Top Bar Controls:
-- **Back Button:** Navigate back to previous screen
-- **Song Info:** Title, artist, and key displayed in app bar
-- **Zoom Controls:**
-  - Zoom Out button (-)
-  - Current zoom percentage display (e.g., "100%")
+#### 2. Floating Zoom Controls (Overlay)
+- **Position:** Bottom-right corner, semi-transparent background
+- **Controls:**
+  - Zoom percentage badge (e.g., "100%")
   - Zoom In button (+)
-  - Step size: 10% per tap
-- **Auto-Scroll Toggle:**
-  - Play/Pause icon button
-  - Tinted primary color when active
-  - Starts/stops auto-scroll animation
+  - Zoom Out button (-)
+  - Reset button (optional)
+- **Auto-Hide:** Fade out after 3 seconds of inactivity
+- **Tap-to-Show:** Tap anywhere on screen to reveal controls
 
-#### Markdown Rendering:
-- **Library:** mikepenz multiplatform-markdown-renderer v0.14.0
-- **HTML Support:** Automatically renders `<span style="color:...">` tags for colored section headers
-- **Typography Scaling:** All heading and text sizes multiplied by `textSizeMultiplier`
-- **Material 3 Colors:** Text color matches theme, code blocks use surfaceVariant background
-- **Line Height Scaling:** Maintains readability at all zoom levels
+#### 3. Song Metadata Overlay (Optional)
+- **Position:** Top of screen, semi-transparent
+- **Content:** Title, Artist, Key
+- **Behavior:** Fade out after 3 seconds, tap to reveal
+- **Alternative:** Remove entirely, show only on song load
 
-#### Pinch-to-Zoom Gestures:
-```kotlin
-.pointerInput(Unit) {
-    detectTransformGestures { _, _, zoom, _ ->
-        currentZoom = (currentZoom * zoom).coerceIn(0.5f, 3.0f)
-        onZoomChange(currentZoom)
-    }
-}
-```
-- Multi-touch pinch gesture detection
-- Real-time zoom feedback
-- Clamped to 0.5x - 3.0x range
-- Works alongside button zoom controls
+#### 4. Pinch-to-Zoom (Existing - Keep)
+- ✅ Multi-touch gesture detection
+- ✅ Real-time text scaling (0.5x - 3.0x)
+- ✅ All typography scales proportionally
 
-#### Auto-Scroll Implementation:
-```kotlin
-LaunchedEffect(isAutoScrolling, scrollSpeedPxPerSecond) {
-    if (isAutoScrolling && scrollSpeedPxPerSecond > 0) {
-        while (isActive && scrollState.value < scrollState.maxValue) {
-            val frameTime = 16 // ~60fps
-            val scrollAmount = (scrollSpeedPxPerSecond * frameTime / 1000f).toInt()
-            scrollState.scrollTo(scrollState.value + scrollAmount)
-            delay(frameTime.toLong())
-        }
-    }
-}
-```
-- 60 FPS smooth scrolling (16ms frame time)
-- Stops at end of content (maxValue check)
-- Cancels when user toggles off or navigates away
-- Calculated based on song duration
+### Files to Modify:
+- `feature/performance/src/main/kotlin/com/encore/feature/performance/SongDetailScreen.kt`
+  - Remove Scaffold and TopAppBar
+  - Add Box layout with full-screen content
+  - Add floating zoom controls (AnimatedVisibility)
+  - Implement tap gesture for control reveal
+  - Add auto-hide timer (3 seconds)
 
-#### Song Metadata Card:
-- Material 3 primaryContainer background
-- Displays: Title (Headline), Artist (Body), Key (Medium weight)
-- Scales with text size multiplier
-- Positioned above markdown content
+### Files to Create:
+- `feature/performance/src/main/kotlin/com/encore/feature/performance/components/FloatingZoomControls.kt` (optional - inline is fine)
+
+### Acceptance Criteria:
+- [ ] No top bar or navigation chrome visible by default
+- [ ] Tap anywhere on screen reveals zoom controls
+- [ ] Zoom controls fade out after 3 seconds of inactivity
+- [ ] Pinch-to-zoom continues to work
+- [ ] Back gesture (swipe from left edge) navigates back
+- [ ] Zoom percentage displayed in overlay
+- [ ] Clean, distraction-free performance view
 
 ---
 
-### 3. Navigation Integration
+## ⏳ Task 2: Per-Song Zoom Level Persistence - NEXT
 
-#### Routes Added (app/navigation/Navigation.kt):
+**Status:** Blocked by Task 1
+**Priority:** P0 (Critical for UX)
+
+### Goal:
+Persist zoom level per song so musicians can set preferred text size once and have it remembered across app sessions.
+
+### Requirements:
+
+#### 1. Schema Update
+Add `zoomLevel` field to SongEntity:
 ```kotlin
-const val SONG_DETAIL = "song/{songId}"
-fun songDetail(songId: String) = "song/$songId"
+@Entity(tableName = "songs")
+data class SongEntity(
+    // ... existing fields ...
+    val zoomLevel: Float = 1.0f  // Default 100% zoom
+)
 ```
 
-#### Composable Route:
+#### 2. Database Migration
+Create migration from version N to N+1:
+- Add `zoom_level` column with default value 1.0
+- Update `EncoreDatabase` version number
+- Add migration strategy in database builder
+
+#### 3. ViewModel Integration
+Update `SongDetailViewModel`:
+- Load zoom level from song entity on `loadSong()`
+- Save zoom level to repository on `updateTextSize()`
+- Debounce save operations (500ms) to avoid excessive writes
+
+#### 4. Repository Update
+Add to `SongRepository`:
 ```kotlin
-composable(
-    route = Routes.SONG_DETAIL,
-    arguments = listOf(
-        navArgument("songId") { type = NavType.StringType }
-    )
-) { backStackEntry ->
-    val songId = backStackEntry.arguments?.getString("songId")
-    val viewModel: SongDetailViewModel = viewModel(factory = viewModelFactory)
-    SongDetailScreen(
-        viewModel = viewModel,
-        songId = songId,
-        onNavigateBack = { navController.popBackStack() }
-    )
-}
+suspend fun updateZoomLevel(songId: String, zoomLevel: Float): Result<Unit>
 ```
 
-#### Navigation Triggers:
-1. **Library Screen:** Tap song card → `navController.navigate(Routes.songDetail(songId))`
-2. **Setlist Detail Screen:** Tap song in setlist → `navController.navigate(Routes.songDetail(songId))`
+### Files to Modify:
+- `core/data/src/main/kotlin/com/encore/core/data/entities/SongEntity.kt`
+- `core/data/src/main/kotlin/com/encore/core/data/db/EncoreDatabase.kt`
+- `core/data/src/main/kotlin/com/encore/core/data/repository/SongRepository.kt`
+- `feature/performance/src/main/kotlin/com/encore/feature/performance/SongDetailViewModel.kt`
+
+### Acceptance Criteria:
+- [ ] Zoom level saved to database on change
+- [ ] Zoom level restored when song reopened
+- [ ] Default zoom is 1.0 (100%) for new songs
+- [ ] Zoom persists across app restarts
+- [ ] Database migration executes without data loss
+- [ ] Debouncing prevents excessive DB writes
 
 ---
 
-### 4. Dependencies Added
+## ⏳ Task 3: Full CSS/HTML Support - PENDING
 
-#### feature/performance/build.gradle.kts:
+**Status:** Blocked by Task 2
+**Priority:** P1 (Important for stage visibility)
+
+### Goal:
+Enable full CSS/HTML rendering in markdown so musicians can use colored section headers (e.g., `<span style="color:blue">Verse 1</span>`) for quick visual navigation during live performances.
+
+### Current State:
+- mikepenz markdown renderer **partially** supports HTML tags
+- Basic `<span>` tags may render but **CSS styles might be stripped**
+- Need to verify if `style="color:..."` attributes are preserved
+
+### Requirements:
+
+#### 1. HTML Rendering Investigation
+- Test current mikepenz renderer with colored `<span>` tags
+- Determine if CSS `style` attributes are supported
+- If not supported: Evaluate alternatives (WebView, custom renderer, Compose HTML library)
+
+#### 2. Implementation Options
+
+**Option A: mikepenz with HTML plugin (preferred)**
 ```kotlin
-// Markdown rendering
-implementation("com.mikepenz:multiplatform-markdown-renderer:0.14.0")
-implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.14.0")
-
-// Core modules
-implementation(project(":core:ui"))
-implementation(project(":core:data"))
-
-// Lifecycle and ViewModel
-implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
-implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
-
-// Navigation
-implementation("androidx.navigation:navigation-compose:2.7.7")
-
-// Material Icons Extended
-implementation("androidx.compose.material:material-icons-extended")
+// Check if mikepenz supports HTML plugin
+implementation("com.mikepenz:multiplatform-markdown-renderer-html:0.14.0")
 ```
 
----
+**Option B: Custom Markdown Parser**
+- Parse `<span style="color:...">` tags manually
+- Apply colors using AnnotatedString with SpanStyle
+- Replace markdown sections with Compose Text elements
 
-## Acceptance Criteria
+**Option C: WebView Fallback**
+- Render markdown as HTML in WebView
+- Trade-off: Heavier, but full CSS support
+- Not ideal for performance, but guaranteed compatibility
 
-### ✅ Markdown Rendering:
-- [x] Renders markdown content using mikepenz library
-- [x] Preserves HTML `<span style="color:...">` tags for colored section headers
-- [x] Displays chords in `[G]` notation correctly
-- [x] Shows metadata (Title, Artist, Key) in dedicated card
+#### 3. Test Cases
+Create sample songs with:
+- `<span style="color:blue">Verse 1</span>`
+- `<span style="color:red">Chorus</span>`
+- `<span style="color:green; font-weight:bold">Bridge</span>`
 
-### ✅ Auto-Scroll Engine:
-- [x] Parses `**Duration:** 3:30` metadata from markdown
-- [x] Falls back to 3-minute default if duration not found
-- [x] Calculates scroll speed to complete within song duration
-- [x] Smooth 60 FPS scrolling animation
-- [x] Play/Pause toggle button in top bar
-- [x] Auto-stops at end of content
+### Files to Modify:
+- `feature/performance/src/main/kotlin/com/encore/feature/performance/SongDetailScreen.kt`
+- `feature/performance/build.gradle.kts` (if new dependency needed)
 
-### ✅ Pinch-to-Zoom:
-- [x] Detects pinch gestures with `detectTransformGestures`
-- [x] Real-time text size adjustment (0.5x - 3.0x range)
-- [x] Scales all typography (headings, body, code)
-- [x] Maintains line height for readability
-- [x] Zoom +/- buttons in top bar
-- [x] Displays current zoom percentage
-
-### ✅ Navigation:
-- [x] Library screen navigates to song detail on tap
-- [x] Setlist detail screen navigates to song detail on tap
-- [x] Back button returns to previous screen
-- [x] Song loads correctly from songId parameter
-- [x] ViewModelFactory provides SongDetailViewModel
-
-### ✅ UI/UX:
-- [x] Material 3 design system
-- [x] Full-screen layout optimized for performance
-- [x] Primary color accent for active auto-scroll button
-- [x] Song metadata card with primaryContainer background
-- [x] Loading indicator while song fetches
-- [x] Responsive to orientation changes
+### Acceptance Criteria:
+- [ ] `<span style="color:blue">Text</span>` renders with blue color
+- [ ] `<span style="color:red">Text</span>` renders with red color
+- [ ] Multiple colors supported (blue, red, green, yellow, etc.)
+- [ ] `font-weight:bold` renders as bold text
+- [ ] Colored sections visible in dark and light themes
+- [ ] No performance degradation
 
 ---
 
-## Technical Decisions
+## ⏳ Task 4: De-scope Auto-Scroll (Move to Backlog) - PENDING
 
-### 1. Why mikepenz Markdown Renderer?
-- **HTML Support:** Automatically renders `<span>` tags (critical for colored sections)
-- **Material 3 Integration:** Built-in M3 theming support
-- **Compose-Native:** No WebView overhead, pure Compose implementation
-- **Performance:** Lightweight and fast for live performance use
+**Status:** Blocked by Task 3
+**Priority:** P2 (Nice-to-have, not MVP)
 
-### 2. Why 60 FPS Auto-Scroll?
-- **Smooth Playback:** 16ms frame time ensures no stuttering
-- **Battery Efficient:** Only recalculates on scroll state change
-- **Graceful Degradation:** Automatically stops at end, cancels on back navigation
+### Goal:
+Remove auto-scroll UI from Performance Mode while keeping the underlying code infrastructure for future Post-v1 implementation.
 
-### 3. Why 0.5x - 3.0x Zoom Range?
-- **0.5x Minimum:** Below this, text becomes unreadable on 11-inch tablet
-- **3.0x Maximum:** Beyond this, too few words visible per screen
-- **10% Steps:** Button taps change size by 0.1x for fine control
-- **Pinch Gestures:** Continuous zoom within range for precise adjustment
+### Rationale:
+- **User Feedback:** Musicians prefer manual scrolling for precise control
+- **Complexity:** Duration parsing and speed calibration require extensive testing
+- **MVP Focus:** Zoom persistence and HTML rendering are higher priority
+- **Future Work:** Re-introduce as advanced feature in Post-v1
 
-### 4. Why Duration Metadata?
-- **Artist Control:** Musicians can calibrate scroll speed per song
-- **Flexible Format:** Supports multiple markdown formats (`**Duration:**`, `Duration:`, `[Duration:]`)
-- **Sensible Default:** 3 minutes covers most worship/pop songs
-- **Manual Override:** Play/pause button gives full control
+### Requirements:
 
----
+#### 1. Remove from UI
+- Remove Play/Pause button from SongDetailScreen
+- Remove auto-scroll toggle from top bar (already removed in Task 1)
+- Remove auto-scroll LaunchedEffect animation
 
-## Known Limitations
+#### 2. Keep in ViewModel (Plumbing)
+- **Keep** `isAutoScrolling` state (unused but ready)
+- **Keep** `scrollSpeedPxPerSecond` calculation
+- **Keep** `toggleAutoScroll()` function
+- **Keep** `parseDuration()` function
+- **Keep** `calculateScrollSpeed()` function
 
-### 1. Static Scroll Speed:
-- Current implementation uses estimated content height (5000px)
-- Future enhancement: Calculate actual content height after compose measurement
-- Workaround: Duration metadata allows per-song calibration
+#### 3. Documentation
+- Add note to MILESTONE_3_PLAN.md: "Auto-scroll moved to Post-v1 backlog"
+- Create `docs/backlog/AUTO_SCROLL_FEATURE.md` with implementation notes
 
-### 2. No Chord Highlighting:
-- Chords rendered as inline text, not highlighted
-- Future enhancement: Custom markdown renderer for chord detection
-- Current: Obsidian's `[G]` notation preserved in content
+### Files to Modify:
+- `feature/performance/src/main/kotlin/com/encore/feature/performance/SongDetailScreen.kt`
+  - Remove Play/Pause button (if not already removed in Task 1)
+  - Remove auto-scroll LaunchedEffect
+  - Comment: "Auto-scroll infrastructure retained for Post-v1"
+- `feature/performance/src/main/kotlin/com/encore/feature/performance/SongDetailViewModel.kt`
+  - Add comment: "Auto-scroll methods retained for future use"
 
-### 3. No Screen Wake Lock:
-- Screen may dim during performance if auto-lock enabled
-- Future enhancement: Acquire WAKE_LOCK permission
-- Workaround: Users must disable auto-lock in device settings
+### Files to Create:
+- `docs/backlog/AUTO_SCROLL_FEATURE.md`
 
----
-
-## Next Steps: Task 2 - Transposition Engine
-
-**Goal:** Implement on-the-fly key transposition for songs
-
-**Requirements:**
-- Transpose button in SongDetailScreen top bar
-- Key selection dialog (all 12 keys)
-- Chord transposition logic (handles sharps, flats, minors)
-- Updates `currentKey` in database
-- Preserves original key in metadata
-
-**Files to Create:**
-- `core/data/src/main/kotlin/com/encore/core/data/transpose/TransposeEngine.kt`
-- `feature/performance/src/main/kotlin/com/encore/feature/performance/KeySelectionDialog.kt`
-
-**Files to Modify:**
-- `feature/performance/SongDetailScreen.kt` - Add transpose button and dialog
-- `feature/performance/SongDetailViewModel.kt` - Add transpose logic and state
+### Acceptance Criteria:
+- [ ] No auto-scroll UI visible in Performance Mode
+- [ ] ViewModel retains auto-scroll methods (commented as future use)
+- [ ] Duration parsing code remains functional
+- [ ] Scroll speed calculation logic intact
+- [ ] Backlog documentation created
 
 ---
 
-## Milestone Success Criteria
+## 🏗️ Foundation Complete (Prototype Phase)
+
+### ✅ Completed in Previous Session:
+
+#### SongDetailViewModel (feature/performance/SongDetailViewModel.kt)
+- ✅ Song data loading from repository
+- ✅ Text size state (0.5x - 3.0x)
+- ✅ Auto-scroll state (to be hidden in UI)
+- ✅ Duration parsing from markdown
+- ✅ Scroll speed calculation
+
+#### SongDetailScreen (feature/performance/SongDetailScreen.kt)
+- ✅ Markdown rendering with mikepenz library
+- ✅ Pinch-to-zoom gesture detection
+- ✅ TopAppBar with controls (to be removed in Task 1)
+- ✅ Zoom +/- buttons (to be moved to floating overlay)
+- ✅ Auto-scroll toggle (to be removed in Task 4)
+
+#### Navigation Integration
+- ✅ Library → Song Detail navigation
+- ✅ Setlist → Song Detail navigation
+- ✅ ViewModelFactory wiring
+- ✅ Routes and composable setup
+
+#### Dependencies
+- ✅ mikepenz markdown renderer v0.14.0
+- ✅ Material Icons Extended
+- ✅ Navigation Compose
+- ✅ Lifecycle ViewModel Compose
+
+---
+
+## 📊 Milestone Success Criteria
 
 **Core Features:**
-- ✅ Song Detail Screen with markdown rendering
-- ⏳ Transposition engine for on-the-fly key changes
-- ⏳ Edit mode for updating song charts
-- ⏳ Testing and polish
+- [ ] Full-screen Performance Mode (no chrome)
+- [ ] Floating zoom controls with auto-hide
+- [ ] Per-song zoom level persistence
+- [ ] Full CSS/HTML rendering for colored sections
+- [ ] Pinch-to-zoom (already working)
+- [ ] Clean, distraction-free stage view
 
-**Performance Requirements:**
-- Smooth 60 FPS auto-scroll
-- Instant text zoom response
-- No lag on pinch gestures
-- Fast song load time (<500ms)
+**Data Integrity:**
+- [ ] Zoom level persists across app restarts
+- [ ] Database migration executes cleanly
+- [ ] No data loss during migration
 
 **User Experience:**
-- Optimized for 11-inch tablet in portrait
-- Visible on 14x20 room stage or dark venue
-- One-tap play/pause for quick control
-- Intuitive pinch-to-zoom gestures
+- [ ] Tap-to-reveal controls
+- [ ] 3-second auto-hide timer
+- [ ] Smooth pinch-to-zoom
+- [ ] Instant song load (<500ms)
+- [ ] Visible on 11-inch tablet in portrait
+- [ ] Readable from 14x20 room distance
+
+**De-Scoped (Post-v1):**
+- Auto-scroll engine (code retained, UI removed)
+- Advanced duration calibration
+- Edit mode (separate milestone)
 
 ---
 
-## Build and Run
+## 🚀 Next Steps
+
+### Immediate (Task 1):
+1. Remove Scaffold and TopAppBar from SongDetailScreen
+2. Add full-screen Box layout
+3. Create floating zoom controls (bottom-right)
+4. Implement tap gesture for reveal/hide
+5. Add 3-second auto-hide timer
+6. Test on 11-inch tablet
+
+### Short-Term (Task 2):
+1. Add `zoomLevel` field to SongEntity
+2. Create database migration
+3. Update SongRepository with save/load methods
+4. Integrate zoom persistence in ViewModel
+5. Test persistence across app restarts
+
+### Medium-Term (Task 3):
+1. Test current HTML rendering capabilities
+2. Evaluate mikepenz HTML plugin
+3. Implement custom span parser if needed
+4. Add colored section samples to test data
+
+### Long-Term (Task 4):
+1. Remove auto-scroll UI elements
+2. Document auto-scroll in backlog
+3. Retain ViewModel infrastructure
+
+---
+
+## 🎸 Build and Run
 
 **Build Command:**
 ```bash
@@ -345,19 +360,43 @@ cd android
 ./gradlew :app:installDebug
 ```
 
-**Test Navigation:**
-1. Launch app → Library tab
-2. Tap any song card → Opens SongDetailScreen
-3. OR: Setlists tab → Tap setlist → Tap song → Opens SongDetailScreen
+**Git Commands (Executed):**
+```bash
+# Commit milestone-2-final-stable
+git add -A
+git commit -m "chore: Milestone 2 Final Stable + Performance Engine Foundation"
 
-**Test Auto-Scroll:**
-1. Open any song
-2. Tap Play button in top bar → Scroll begins
-3. Tap Pause button → Scroll stops
-4. Add `**Duration:** 2:00` to markdown → Faster scroll
+# Create feature branch
+git checkout -b feature/performance-viewer
+```
 
-**Test Pinch-Zoom:**
-1. Open any song
-2. Pinch in/out on content area → Text scales
-3. Tap +/- buttons → Text scales by 10%
-4. Zoom percentage updates in top bar
+---
+
+## 📝 Notes
+
+### Why De-scope Auto-Scroll?
+- Musicians prefer manual scrolling for precise control during live performance
+- Duration parsing is complex and requires extensive per-song calibration
+- Zoom persistence and HTML rendering are higher priority for MVP
+- Code infrastructure retained for easy re-introduction in Post-v1
+
+### Why Floating Controls?
+- Maximizes screen real estate for song content
+- Follows Android full-screen immersive mode patterns
+- Reduces distraction during live performance
+- Quick access when needed (tap to reveal)
+
+### Why Per-Song Zoom Persistence?
+- Different songs have different complexity (simple hymns vs. complex arrangements)
+- Musicians want to set zoom once per song and forget it
+- Critical for muscle memory during live performance
+- Eliminates friction in performance workflow
+
+---
+
+## 🔗 Related Documentation
+
+- [Product Overview](../01_Product_Overview.md)
+- [Technical Specification](../03_Technical_Specification.md)
+- [Data Model](../architecture/data-model.md)
+- [MILESTONE_2_PLAN.md](./MILESTONE_2_PLAN.md)

@@ -86,37 +86,94 @@ Each milestone should be considered incomplete until the developer provides the 
 
 ## Milestone 3 - Performance Mode
 
-- Updated APK/test build.
+**Status:** ✅ COMPLETE (2026-03-27) — see `docs/milestones/M3_SUMMARY.md`
 
-- Performance mode screen(s).
-
-- Dark mode implementation.
-
-- Swipe navigation behavior.
-
-- Search overlay in performance mode.
-
-- Return-to-set behavior and state restore implementation.
-
-- Offline rehearsal test notes or demo.
-
-- Known limitations / edge cases.
+- ✅ Updated APK/test build — installed on SM-X210.
+- ✅ Performance mode screen (`SongDetailScreen`) — full-screen, no chrome, persistent ✕ back button.
+- ✅ Dark mode — `darkColorScheme()` + `Color(0xFF121212)` global background.
+- ✅ Swipe navigation — left/right between songs in active set.
+- ✅ Search overlay — global search in library ignores set filter when text is present.
+- ✅ Return-to-set state — back from performance mode restores set filter and scroll position.
+- ✅ Pinch-to-zoom (0.5×–3.0×), double-tap reset, single-tap HUD, 3s auto-hide, 500ms debounced persist.
+- ✅ Section headers colored by type (Verse, Chorus, Bridge, etc.) via `DisplayPreferences`.
+- ✅ Known limitations documented — see M3_SUMMARY.md §7.
 
 ## Milestone 4 - Sync + Account Behavior
 
-- Updated APK/test build.
+**Status:** 🔄 IN PROGRESS
 
-- Google sign-in and sign-out flows.
+### Phase 4.1 — Identity & Auth Integration ✅ COMPLETE (2026-03-27)
 
-- Single active device session behavior.
+- ✅ Updated APK installed on SM-X210 (clean build confirmed).
+  - Branch: `feature/performance-viewer`
 
-- Sync Now implementation.
+- ✅ Google sign-in and sign-out flows.
+  - `AuthRepositoryImpl` via Credential Manager + `GetGoogleIdOption`
+  - `AccountCircle` icon (top-right) → `ModalBottomSheet` profile panel
+  - Sign-out via `credentialManager.clearCredentialState()`
 
-- Conflict resolution UI for songs and setlists.
+- ✅ Auth state machine: `Loading` → `Unauthenticated` / `Authenticated(GoogleUser)`
+  - `StateFlow<AuthState>` observed by `AuthViewModel` → UI
+  - `AccountCircle` tint: primary color when authenticated, onSurfaceVariant when not
 
-- Test notes for offline-to-online sync and conflict scenarios.
+- ✅ Error surfacing: sign-in failures emit to `SharedFlow<String>` → Indefinite Snackbar with dismiss action.
+  - User cancellations swallowed silently.
 
-- Cloud schema / API changes documented.
+- ✅ `SongEntity.ownerId: String?` added — DB version 3, `MIGRATION_2_3`.
+
+- ✅ `BuildConfig.GOOGLE_WEB_CLIENT_ID` injected from `local.properties` via `buildConfigField`.
+  - Web Client ID only in code; Android Client ID matched automatically via SHA-1.
+
+- ✅ Technical spec: `docs/milestones/M4/TECHNICAL_SPEC.md`
+
+### Phase 4.2.1 — Avatar & Profile UI ✅ COMPLETE (2026-03-27)
+
+- ✅ Google avatar displayed via Coil `AsyncImage` clipped to `CircleShape` with 200ms crossfade.
+  - Fallback to `AccountCircle` icon when `profilePictureUri` is null.
+- ✅ `profilePictureUri: android.net.Uri?` added to `GoogleUser` — extracted from `GoogleIdTokenCredential`.
+- ✅ Authenticated tap interaction: `DropdownMenu` with display name, email, and **Sign Out**.
+  - Unauthenticated tap still opens `ModalBottomSheet` sign-in flow.
+- ✅ `io.coil-kt:coil-compose:2.6.0` added to `app/build.gradle.kts`.
+
+### Phase 4.2.2 — Session Persistence ✅ COMPLETE (2026-03-27)
+
+- ✅ `UserPreferencesRepository` — new Preferences DataStore in `core:data`.
+  - Persists: `google_account_id`, `display_name`, `profile_picture_uri` (as String).
+  - `idToken` intentionally not persisted (expires; refreshed on next sign-in).
+- ✅ Cold-start session restore: `AuthRepositoryImpl.init` reads DataStore; sets `Authenticated`
+  from cache or `Unauthenticated` — no sign-in prompt on reopen after login.
+- ✅ `_authState` starts as `Loading` during DataStore read (no "signed-out" flash).
+- ✅ Sign-out clears DataStore before clearing Credential Manager state.
+- ✅ `androidx.datastore:datastore-preferences:1.0.0` added to `core/data/build.gradle.kts`.
+- ✅ Verified on device: sign in → close → reopen → avatar appears immediately.
+
+### Phase 4.3.5 — Zen Header & Adaptive Song Color ✅ COMPLETE (2026-03-27)
+
+- ✅ Legacy Quick Action Cards ("Song Folder Library" / "Add Songs") removed.
+- ✅ `EncoreHeader` composable — logo, v1.0.2 badge, Import icon, SAVE SET / LOAD SET (no-op), PERFORM pill (no-op), Settings icon, UserAvatar 32dp with border + DropdownMenu.
+  - File: `app/.../ui/HeaderComponent.kt`
+- ✅ Global dark background: `Color(0xFF121212)` on Scaffold + Column; `darkColorScheme()` in `EncoreTheme`.
+- ✅ Adaptive song row color: title/artist text color reflects earliest set number via `SetColor.getSetColor()`; set circles remain on right side.
+- ✅ `encore_logo.xml` placeholder drawable added (user replaces with real asset).
+- ✅ Import flow: `GetMultipleContents` (`ACTION_GET_CONTENT`) — standard Android activity back-stack; Back once = up a directory, Back twice = return to app. Matches native Android behavior.
+- ✅ Import sheet has explicit "Cancel" button before entering the system file picker.
+- ✅ In-flight import cancellable via "Cancel" Snackbar action → `LibraryViewModel.cancelImport()`.
+- ✅ Notification permission + heads-up notification removed (no longer needed with native back behavior).
+- ✅ Song row Title-First hierarchy: Title (bold, left, `weight(1f, fill=false)`) + Artist (65% opacity, 10dp gap) cluster left; `Spacer(weight(1f))` separates them from key badge / set circles / add button on the right.
+
+### Phase 4.4+ — Deferred
+
+- ⬜ Single active device session policy (`POST /auth/google` Ktor call).
+
+- ⬜ `SyncStatus` state machine wired to actual Ktor API calls.
+
+- ⬜ Manual Sync Now action + conflict resolution UI for songs and setlists.
+
+- ⬜ Test notes for offline-to-online sync and conflict scenarios.
+
+- ⬜ Cloud schema / API changes documented.
+
+- ⬜ Setlist management screen (create, rename, delete setlists).
 
 ## Milestone 5 - Beta Hardening
 

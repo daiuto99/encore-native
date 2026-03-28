@@ -104,3 +104,4 @@ yarn-error.log*
 # Misc
 *.orig
 .vscode/
+.DS_Store

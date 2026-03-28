@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Placeholder logo — replace with the real Encore wordmark.
+    Dimensions: 120×26dp  |  viewportWidth: 120  |  viewportHeight: 26
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="26dp"
+    android:viewportWidth="120"
+    android:viewportHeight="26">
+    <!-- White rounded rectangle outline as placeholder -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.5"
+        android:pathData="M4,4 Q6,4 6,6 L6,20 Q6,22 4,22 L116,22 Q118,22 118,20 L118,6 Q118,4 116,4 Z" />
+    <!-- "ENCORE" label hint — three lines -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M10,10 L38,10 L38,11.5 L10,11.5 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M10,13 L30,13 L30,14.5 L10,14.5 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M10,16 L34,16 L34,17.5 L10,17.5 Z" />
+</vector>

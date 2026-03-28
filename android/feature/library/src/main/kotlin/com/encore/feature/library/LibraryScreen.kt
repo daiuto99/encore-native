@@ -362,6 +362,10 @@ fun SongListItem(
         sets = viewModel.getSetsContainingSong(song.id)
     }
 
+    val rowAccentColor = remember(sets) {
+        sets.minByOrNull { it.number }?.number?.let { SetColor.getSetColor(it) }
+    }
+
     // Two-action confirmation dialog triggered by left swipe
     if (showConfirmDialog) {
         AlertDialog(
@@ -537,28 +541,24 @@ fun SongListItem(
                 Spacer(modifier = Modifier.width(16.dp))
             }
 
-            // Title – Artist (no key here; key moves to right of row)
-            Row(
-                modifier = Modifier.weight(1f),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = song.title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-                Text(
-                    text = " – ${song.artist}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-            }
+            // Title (primary) + Artist (secondary) — clustered left, space before metadata
+            Text(
+                text = song.title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = rowAccentColor ?: MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                text = song.artist,
+                style = MaterialTheme.typography.bodyMedium,
+                color = rowAccentColor?.copy(alpha = 0.65f) ?: MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.weight(1f))
 
             // Key badge — directly left of Set Circles
             song.currentKey?.let { key ->

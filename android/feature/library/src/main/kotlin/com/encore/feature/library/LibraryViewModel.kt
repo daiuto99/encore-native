@@ -12,6 +12,7 @@ import com.encore.core.data.entities.SyncStatus
 import com.encore.core.data.repository.SetlistRepository
 import com.encore.core.data.repository.SongRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -48,6 +49,8 @@ class LibraryViewModel(
 
     private val _isImporting = MutableStateFlow(false)
     val isImporting: StateFlow<Boolean> = _isImporting.asStateFlow()
+
+    private var importJob: Job? = null
 
     private val _importResult = MutableStateFlow<ImportResult?>(null)
     val importResult: StateFlow<ImportResult?> = _importResult.asStateFlow()
@@ -114,11 +117,17 @@ class LibraryViewModel(
     fun clearImportResult() { _importResult.value = null }
     fun clearStatusMessage() { _statusMessage.value = null }
 
+    fun cancelImport() {
+        importJob?.cancel()
+        importJob = null
+        _isImporting.value = false
+    }
+
     /**
      * Import songs from markdown files using SAF URIs.
      */
     fun importSongs(context: Context, uris: List<Uri>) {
-        viewModelScope.launch {
+        importJob = viewModelScope.launch {
             _isImporting.value = true
             var addedCount = 0
             var skippedCount = 0

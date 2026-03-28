@@ -2,6 +2,7 @@ package com.encore.tablet.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -16,13 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -126,14 +121,14 @@ fun MainScreen(
     }
 }
 
+
 /**
  * Command Center — the main library + sets management screen.
  *
  * Layout (top to bottom):
- * 1. Quick action cards: Song Folder Library | Add Songs
- * 2. "Song Library" section label
- * 3. Song list with search (LibraryListContent — no nested Scaffold)
- * 4. Sets section with global color-coded filter chips
+ * 1. EncoreHeader — logo, version badge, Import, SAVE/LOAD SET, PERFORM, Settings, avatar
+ * 2. Song list with search (LibraryListContent — no nested Scaffold)
+ * 3. Sets section with global color-coded filter chips
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -146,8 +141,10 @@ fun CommandCenterScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val importResult by libraryViewModel.importResult.collectAsState()
+    val isImporting by libraryViewModel.isImporting.collectAsState()
     val authState by authViewModel.authState.collectAsState()
     var showProfileSheet by remember { mutableStateOf(false) }
+    var showImportSheet by remember { mutableStateOf(false) }
     val profileSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showAccountDropdown by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -157,11 +154,27 @@ fun CommandCenterScreen(
         libraryViewModel.updateSetFilter(selectedSetFilter)
     }
 
-    // File picker for "Add Songs" card
     val filePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments()
+        contract = ActivityResultContracts.GetMultipleContents()
     ) { uris ->
+        showImportSheet = false
         if (uris.isNotEmpty()) libraryViewModel.importSongs(context, uris)
+    }
+
+    // "Importing…" Snackbar with Cancel — dismissed automatically when import finishes
+    LaunchedEffect(isImporting) {
+        if (isImporting) {
+            val result = snackbarHostState.showSnackbar(
+                message = "Importing…",
+                actionLabel = "Cancel",
+                duration = androidx.compose.material3.SnackbarDuration.Indefinite
+            )
+            if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
+                libraryViewModel.cancelImport()
+            }
+        } else {
+            snackbarHostState.currentSnackbarData?.dismiss()
+        }
     }
 
     // Sign-in error snackbar — Indefinite so the full error string is readable
@@ -190,6 +203,50 @@ fun CommandCenterScreen(
         }
     }
 
+    if (showImportSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showImportSheet = false }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 40.dp, vertical = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Import Songs",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Select one or more markdown (.md) files from your device.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+                OutlinedButton(
+                    onClick = {
+                        filePickerLauncher.launch("*/*")
+                    },
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(50.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Choose Files")
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(
+                    onClick = { showImportSheet = false },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Cancel")
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
+    }
+
     if (showProfileSheet) {
         ModalBottomSheet(
             onDismissRequest = { showProfileSheet = false },
@@ -214,116 +271,25 @@ fun CommandCenterScreen(
     }
 
     Scaffold(
+        containerColor = Color(0xFF121212),
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .background(Color(0xFF121212))
                 .padding(paddingValues)
         ) {
-            // ── Quick Action Cards ──────────────────────────────────────────
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                QuickActionCard(
-                    title = "Song Folder Library",
-                    subtitle = "Browse and manage your song files",
-                    icon = Icons.Default.Folder,
-                    onClick = {},
-                    modifier = Modifier.weight(1f)
-                )
-                QuickActionCard(
-                    title = "Add Songs",
-                    subtitle = "Import markdown song files",
-                    icon = Icons.Default.Add,
-                    onClick = { filePickerLauncher.launch(arrayOf("*/*")) },
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            // ── Song Library Section ─────────────────────────────────────────
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "Song Library",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(
-                        onClick = {
-                            libraryViewModel.clearSearch()
-                            libraryViewModel.updateSetFilter(null)
-                        },
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                    ) {
-                        Text(
-                            text = "Show All",
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                    }
-                    androidx.compose.foundation.layout.Box {
-                        IconButton(onClick = {
-                            when (authState) {
-                                is AuthState.Authenticated -> showAccountDropdown = true
-                                else -> showProfileSheet = true
-                            }
-                        }) {
-                            UserAvatar(
-                                profilePictureUri = (authState as? AuthState.Authenticated)?.user?.profilePictureUri,
-                                isAuthenticated = authState is AuthState.Authenticated,
-                                size = 30.dp
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = showAccountDropdown,
-                            onDismissRequest = { showAccountDropdown = false }
-                        ) {
-                            val user = (authState as? AuthState.Authenticated)?.user
-                            if (user != null) {
-                                DropdownMenuItem(
-                                    text = {
-                                        Column {
-                                            val name = user.displayName
-                                            if (name != null) {
-                                                Text(
-                                                    text = name,
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    fontWeight = FontWeight.SemiBold
-                                                )
-                                            }
-                                            Text(
-                                                text = user.googleAccountId,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    },
-                                    onClick = {},
-                                    enabled = false
-                                )
-                                HorizontalDivider()
-                                DropdownMenuItem(
-                                    text = { Text("Sign Out") },
-                                    onClick = {
-                                        authViewModel.signOut()
-                                        showAccountDropdown = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+            // ── Header ───────────────────────────────────────────────────────
+            EncoreHeader(
+                authState = authState,
+                showAccountDropdown = showAccountDropdown,
+                onImportClick = { showImportSheet = true },
+                onShowDropdown = { showAccountDropdown = true },
+                onDropdownDismiss = { showAccountDropdown = false },
+                onSignOut = { authViewModel.signOut(); showAccountDropdown = false },
+                onProfileSheetRequest = { showProfileSheet = true }
+            )
 
             HorizontalDivider(
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -415,58 +381,6 @@ fun SetsSection(
 }
 
 /**
- * Quick action card for the Command Center top row.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun QuickActionCard(
-    title: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    subtitle: String? = null
-) {
-    Card(
-        onClick = onClick,
-        modifier = modifier.height(90.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = title,
-                tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                modifier = Modifier.size(32.dp)
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Column {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                )
-                if (subtitle != null) {
-                    Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.65f)
-                    )
-                }
-            }
-        }
-    }
-}
-
-/**
  * Google avatar image clipped to a circle, with AccountCircle fallback.
  */
 @Composable
@@ -512,7 +426,7 @@ fun ProfileSheetContent(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 20.dp),
+            .padding(horizontal = 40.dp, vertical = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         when (authState) {
@@ -527,7 +441,7 @@ fun ProfileSheetContent(
                 Text(
                     text = "Sign in to Sync",
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.SemiBold
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(

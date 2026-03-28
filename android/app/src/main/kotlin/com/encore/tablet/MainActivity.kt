@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.encore.tablet.di.AppContainer
@@ -54,7 +55,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun EncoreTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = MaterialTheme.colorScheme,
+        colorScheme = darkColorScheme(),
         typography = MaterialTheme.typography,
         content = content
     )

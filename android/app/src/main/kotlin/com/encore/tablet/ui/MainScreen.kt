@@ -2,6 +2,10 @@ package com.encore.tablet.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import com.encore.feature.library.SyncProgress
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -14,10 +18,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -99,8 +106,8 @@ fun MainScreen(
             CommandCenterScreen(
                 libraryViewModel = libraryViewModel,
                 authViewModel = authViewModel,
-                onSongClick = { songId ->
-                    navController.navigate(Routes.songDetail(songId))
+                onSongClick = { songId, setNumber ->
+                    navController.navigate(Routes.songDetail(songId, setNumber))
                 }
             )
         }
@@ -108,14 +115,30 @@ fun MainScreen(
         // Song detail is full-screen — NavHost replaces entire content, no Scaffold around it
         composable(
             route = Routes.SONG_DETAIL,
-            arguments = listOf(navArgument("songId") { type = NavType.StringType })
+            arguments = listOf(
+                navArgument("songId") { type = NavType.StringType },
+                navArgument("setNumber") {
+                    type = NavType.IntType
+                    defaultValue = -1
+                }
+            )
         ) { backStackEntry ->
             val songId = backStackEntry.arguments?.getString("songId") ?: return@composable
+            val setNumber = backStackEntry.arguments?.getInt("setNumber") ?: -1
             val viewModel: SongDetailViewModel = viewModel(factory = viewModelFactory)
             SongDetailScreen(
                 viewModel = viewModel,
                 songId = songId,
-                onNavigateBack = { navController.popBackStack() }
+                setNumber = setNumber,
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToSong = { newSongId ->
+                    // popUpTo("command_center") without inclusive = true:
+                    // clears the entire song-detail back stack safely while
+                    // keeping command_center as the base, so Back always works.
+                    navController.navigate(Routes.songDetail(newSongId, setNumber)) {
+                        popUpTo("command_center")
+                    }
+                }
             )
         }
     }
@@ -135,7 +158,7 @@ fun MainScreen(
 fun CommandCenterScreen(
     libraryViewModel: LibraryViewModel,
     authViewModel: AuthViewModel,
-    onSongClick: (String) -> Unit
+    onSongClick: (songId: String, setNumber: Int?) -> Unit
 ) {
     var selectedSetFilter by remember { mutableStateOf<Int?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -154,6 +177,19 @@ fun CommandCenterScreen(
         libraryViewModel.updateSetFilter(selectedSetFilter)
     }
 
+    val syncProgress by libraryViewModel.syncProgress.collectAsState()
+    val connectedFolderUri by libraryViewModel.connectedFolderUri.collectAsState()
+
+    // Folder Sync — OpenDocumentTree gives a persistent tree URI
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        showImportSheet = false
+        uri?.let { libraryViewModel.syncFolder(context, it) }
+    }
+
+    // Individual file import — GetMultipleContents uses ACTION_GET_CONTENT
+    // Native back-stack handles cancel: Back = up a level, Back again = return to app
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents()
     ) { uris ->
@@ -192,59 +228,29 @@ fun CommandCenterScreen(
     LaunchedEffect(importResult) {
         importResult?.let { result ->
             val msg = buildString {
-                if (result.addedCount > 0) append("${result.addedCount} imported")
-                if (result.skippedCount > 0) {
+                if (result.addedCount > 0) append("${result.addedCount} added")
+                if (result.updatedCount > 0) {
                     if (result.addedCount > 0) append(", ")
-                    append("${result.skippedCount} skipped")
+                    append("${result.updatedCount} updated")
                 }
-            }.ifEmpty { "No files imported" }
+                if (result.skippedCount > 0) {
+                    if (result.addedCount > 0 || result.updatedCount > 0) append(", ")
+                    append("${result.skippedCount} unchanged")
+                }
+            }.ifEmpty { "No changes" }
             snackbarHostState.showSnackbar(msg)
             libraryViewModel.clearImportResult()
         }
     }
 
     if (showImportSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showImportSheet = false }
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 40.dp, vertical = 20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "Import Songs",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Select one or more markdown (.md) files from your device.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(20.dp))
-                OutlinedButton(
-                    onClick = {
-                        filePickerLauncher.launch("*/*")
-                    },
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(50.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Choose Files")
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                TextButton(
-                    onClick = { showImportSheet = false },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Cancel")
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-        }
+        ImportModal(
+            onDismiss = { showImportSheet = false },
+            onSyncFolder = { folderPickerLauncher.launch(null) },
+            onImportFiles = { filePickerLauncher.launch("*/*") },
+            syncProgress = syncProgress,
+            connectedFolderUri = connectedFolderUri
+        )
     }
 
     if (showProfileSheet) {
@@ -284,7 +290,9 @@ fun CommandCenterScreen(
             EncoreHeader(
                 authState = authState,
                 showAccountDropdown = showAccountDropdown,
+                connectedFolderUri = connectedFolderUri,
                 onImportClick = { showImportSheet = true },
+                onRefreshClick = { libraryViewModel.refreshConnectedFolder(context) },
                 onShowDropdown = { showAccountDropdown = true },
                 onDropdownDismiss = { showAccountDropdown = false },
                 onSignOut = { authViewModel.signOut(); showAccountDropdown = false },
@@ -300,7 +308,7 @@ fun CommandCenterScreen(
             // Song list (search bar + rows) — fills available space
             LibraryListContent(
                 viewModel = libraryViewModel,
-                onSongClick = onSongClick,
+                onSongClick = { songId -> onSongClick(songId, selectedSetFilter) },
                 modifier = Modifier.weight(1f)
             )
 
@@ -312,6 +320,167 @@ fun CommandCenterScreen(
                 },
                 onClearFilter = { selectedSetFilter = null }
             )
+        }
+    }
+}
+
+/**
+ * Zen Import Modal — two-option bottom sheet for ingesting songs.
+ *
+ * Primary:   "Sync Folder" — opens DocumentTree picker; persists URI for future re-scans.
+ * Secondary: "Import Files" — opens multi-file picker for individual .md files.
+ *
+ * When a sync is in progress, the buttons are replaced with a non-intrusive progress
+ * indicator showing "Syncing N of M…" and a LinearProgressIndicator.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ImportModal(
+    onDismiss: () -> Unit,
+    onSyncFolder: () -> Unit,
+    onImportFiles: () -> Unit,
+    syncProgress: SyncProgress?,
+    connectedFolderUri: String? = null
+) {
+    // Derive a readable folder name from the tree URI (e.g. "primary:Encore" → "Encore")
+    val folderName = connectedFolderUri?.let {
+        try {
+            android.net.Uri.parse(it).lastPathSegment
+                ?.substringAfterLast(':')
+                ?.takeIf { name -> name.isNotBlank() }
+                ?: "Connected Folder"
+        } catch (e: Exception) { "Connected Folder" }
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 40.dp, vertical = 8.dp)
+                .padding(bottom = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Icon in circle
+            androidx.compose.foundation.layout.Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CreateNewFolder,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(20.dp))
+            Text(
+                text = if (connectedFolderUri != null) "Library Connected" else "Import Songs",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = if (folderName != null) "Folder: $folderName"
+                       else "Sync an entire folder or pick individual files.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(32.dp))
+
+            // Progress or action buttons
+            AnimatedVisibility(
+                visible = syncProgress != null,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                if (syncProgress != null) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = syncProgress.message,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        LinearProgressIndicator(
+                            progress = { syncProgress.fraction },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    }
+                }
+            }
+
+            AnimatedVisibility(
+                visible = syncProgress == null,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Primary: Sync Folder / Update Library
+                    androidx.compose.material3.Button(
+                        onClick = onSyncFolder,
+                        shape = CircleShape,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CreateNewFolder,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = if (connectedFolderUri != null) "Update Library" else "Sync Folder",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    // Secondary: Import Files
+                    OutlinedButton(
+                        onClick = onImportFiles,
+                        shape = CircleShape,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FileOpen,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "Import Files",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Cancel",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
         }
     }
 }

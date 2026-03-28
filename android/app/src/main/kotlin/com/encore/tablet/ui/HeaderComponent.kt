@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -51,7 +52,9 @@ import com.encore.tablet.R
 fun EncoreHeader(
     authState: AuthState,
     showAccountDropdown: Boolean,
+    connectedFolderUri: String?,
     onImportClick: () -> Unit,
+    onRefreshClick: () -> Unit,
     onShowDropdown: () -> Unit,
     onDropdownDismiss: () -> Unit,
     onSignOut: () -> Unit,
@@ -79,6 +82,17 @@ fun EncoreHeader(
         )
 
         Spacer(modifier = Modifier.weight(1f))
+
+        // ── Refresh (only when a folder is linked) ───────────────────────────
+        if (connectedFolderUri != null) {
+            IconButton(onClick = onRefreshClick) {
+                Icon(
+                    imageVector = Icons.Outlined.Refresh,
+                    contentDescription = "Refresh library",
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+            }
+        }
 
         // ── Import ───────────────────────────────────────────────────────────
         IconButton(onClick = onImportClick) {

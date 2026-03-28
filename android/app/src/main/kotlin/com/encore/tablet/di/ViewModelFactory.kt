@@ -22,7 +22,8 @@ class ViewModelFactory(
             modelClass.isAssignableFrom(LibraryViewModel::class.java) -> {
                 LibraryViewModel(
                     appContainer.songRepository,
-                    appContainer.setlistRepository
+                    appContainer.setlistRepository,
+                    appContainer.userPreferencesRepository
                 ) as T
             }
             modelClass.isAssignableFrom(SetlistViewModel::class.java) -> {

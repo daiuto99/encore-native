@@ -81,8 +81,8 @@ interface SongDao {
     @Query("""
         SELECT * FROM songs
         WHERE user_id = :userId
-        AND title = :title
-        AND artist = :artist
+        AND LOWER(title) = LOWER(:title)
+        AND LOWER(artist) = LOWER(:artist)
         LIMIT 1
     """)
     suspend fun findDuplicate(userId: String, title: String, artist: String): SongEntity?

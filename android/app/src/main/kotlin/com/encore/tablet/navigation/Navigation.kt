@@ -36,10 +36,13 @@ object Routes {
     const val LIBRARY = "library"
     const val SETLISTS = "setlists"
     const val SETLIST_DETAIL = "setlist/{setlistId}"
-    const val SONG_DETAIL = "song/{songId}"
+    // setNumber is optional (-1 = no set context; omit from URL when absent)
+    const val SONG_DETAIL = "song/{songId}?setNumber={setNumber}"
 
     fun setlistDetail(setlistId: String) = "setlist/$setlistId"
-    fun songDetail(songId: String) = "song/$songId"
+    fun songDetail(songId: String, setNumber: Int? = null): String =
+        if (setNumber != null && setNumber > 0) "song/$songId?setNumber=$setNumber"
+        else "song/$songId"
 }
 
 /**

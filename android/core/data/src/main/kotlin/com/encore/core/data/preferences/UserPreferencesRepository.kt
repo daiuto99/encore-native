@@ -34,9 +34,10 @@ data class PersistedUser(
 class UserPreferencesRepository(private val context: Context) {
 
     private object Keys {
-        val GOOGLE_ACCOUNT_ID   = stringPreferencesKey("google_account_id")
-        val DISPLAY_NAME        = stringPreferencesKey("display_name")
-        val PROFILE_PICTURE_URI = stringPreferencesKey("profile_picture_uri")
+        val GOOGLE_ACCOUNT_ID     = stringPreferencesKey("google_account_id")
+        val DISPLAY_NAME          = stringPreferencesKey("display_name")
+        val PROFILE_PICTURE_URI   = stringPreferencesKey("profile_picture_uri")
+        val CONNECTED_FOLDER_URI  = stringPreferencesKey("connected_folder_uri")
     }
 
     /**
@@ -61,8 +62,37 @@ class UserPreferencesRepository(private val context: Context) {
         }
     }
 
-    /** Called on sign-out — wipes all stored user data. */
+    /**
+     * The URI string of the last folder synced via SAF OpenDocumentTree.
+     * Device-scoped, not user-scoped — persists across sign-out.
+     */
+    val connectedFolderUri: Flow<String?> = context.userDataStore.data.map { prefs ->
+        prefs[Keys.CONNECTED_FOLDER_URI]
+    }
+
+    /** Save the folder URI after a successful OpenDocumentTree sync. */
+    suspend fun saveConnectedFolderUri(uri: android.net.Uri) {
+        context.userDataStore.edit { prefs ->
+            prefs[Keys.CONNECTED_FOLDER_URI] = uri.toString()
+        }
+    }
+
+    /** Clear the connected folder (e.g. user disconnects it explicitly). */
+    suspend fun clearConnectedFolderUri() {
+        context.userDataStore.edit { prefs ->
+            prefs.remove(Keys.CONNECTED_FOLDER_URI)
+        }
+    }
+
+    /**
+     * Sign-out — clears only auth keys.
+     * Connected folder URI is intentionally kept: it is device-scoped, not user-scoped.
+     */
     suspend fun clearUser() {
-        context.userDataStore.edit { it.clear() }
+        context.userDataStore.edit { prefs ->
+            prefs.remove(Keys.GOOGLE_ACCOUNT_ID)
+            prefs.remove(Keys.DISPLAY_NAME)
+            prefs.remove(Keys.PROFILE_PICTURE_URI)
+        }
     }
 }

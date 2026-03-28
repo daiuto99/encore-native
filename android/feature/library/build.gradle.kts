@@ -56,4 +56,7 @@ dependencies {
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+
+    // DocumentFile — SAF folder traversal for Folder Sync
+    implementation("androidx.documentfile:documentfile:1.0.1")
 }

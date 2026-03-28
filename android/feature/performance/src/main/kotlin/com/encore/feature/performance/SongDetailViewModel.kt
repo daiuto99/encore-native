@@ -10,6 +10,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -44,25 +45,49 @@ class SongDetailViewModel(
     private val _scrollSpeedPxPerSecond = MutableStateFlow(0f)
     val scrollSpeedPxPerSecond: StateFlow<Float> = _scrollSpeedPxPerSecond.asStateFlow()
 
+    // Set navigation context
+    private val _currentSetNumber = MutableStateFlow(-1)
+    val currentSetNumber: StateFlow<Int> = _currentSetNumber.asStateFlow()
+
+    private val _prevSongId = MutableStateFlow<String?>(null)
+    val prevSongId: StateFlow<String?> = _prevSongId.asStateFlow()
+
+    private val _nextSongId = MutableStateFlow<String?>(null)
+    val nextSongId: StateFlow<String?> = _nextSongId.asStateFlow()
+
     // Debounce job for saving zoom level
     private var saveZoomJob: Job? = null
 
     /**
      * Load song by ID from repository.
-     * Restores saved zoom level for this song.
+     * Restores saved zoom level and computes prev/next navigation within the set.
+     *
+     * @param songId Song UUID to load
+     * @param setNumber Set context for prev/next navigation (-1 = no set context)
      */
-    fun loadSong(songId: String) {
+    fun loadSong(songId: String, setNumber: Int = -1) {
         viewModelScope.launch {
             val song = songRepository.getSongById(songId)
             _song.value = song
+            _currentSetNumber.value = setNumber
 
             // Restore saved zoom level
             song?.let {
                 _textSizeMultiplier.value = it.lastZoomLevel
                 Log.d(TAG, "Loaded song: ${it.title}, zoom level: ${it.lastZoomLevel}")
-
-                // Calculate scroll speed based on duration metadata (retained for Post-v1)
                 calculateScrollSpeed(it)
+            }
+
+            // Compute prev/next within the set (one-shot snapshot)
+            if (setNumber > 0) {
+                val songsInSet = songRepository.getSongsInSetOrdered(setNumber).first()
+                val idx = songsInSet.indexOfFirst { it.id == songId }
+                _prevSongId.value = if (idx > 0) songsInSet[idx - 1].id else null
+                _nextSongId.value = if (idx < songsInSet.size - 1) songsInSet[idx + 1].id else null
+                Log.d(TAG, "Set $setNumber: idx=$idx, prev=${_prevSongId.value}, next=${_nextSongId.value}")
+            } else {
+                _prevSongId.value = null
+                _nextSongId.value = null
             }
         }
     }

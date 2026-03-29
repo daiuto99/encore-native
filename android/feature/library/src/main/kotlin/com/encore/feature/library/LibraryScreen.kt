@@ -383,13 +383,10 @@ fun SongListItem(
     dragHandleModifier: Modifier = Modifier,
     modifier: Modifier = Modifier
 ) {
-    var sets by remember { mutableStateOf<List<SetEntity>>(emptyList()) }
+    val sets by remember(song.id) { viewModel.observeSetsContainingSong(song.id) }
+        .collectAsState(initial = emptyList())
     var showConfirmDialog by remember { mutableStateOf(false) }
     var showAddToSetDialog by remember { mutableStateOf(false) }
-
-    LaunchedEffect(song.id) {
-        sets = viewModel.getSetsContainingSong(song.id)
-    }
 
     val rowAccentColor = remember(sets) {
         sets.minByOrNull { it.number }?.number?.let { SetColor.getSetColor(it) }
@@ -455,21 +452,22 @@ fun SongListItem(
 
     // Add to Set picker dialog
     if (showAddToSetDialog) {
+        val availableSets by viewModel.availableSets.collectAsState()
         AlertDialog(
             onDismissRequest = { showAddToSetDialog = false },
             title = { Text("Add to Set") },
             text = {
                 Column {
-                    for (setNum in 1..4) {
-                        val setColor = SetColor.getSetColor(setNum)
-                        val alreadyInSet = sets.any { it.number == setNum }
+                    availableSets.forEachIndexed { index, setEntity ->
+                        val setColor = SetColor.getSetColor(setEntity.number)
+                        val alreadyInSet = sets.any { it.number == setEntity.number }
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable(enabled = !alreadyInSet) {
                                     if (!alreadyInSet) {
                                         showAddToSetDialog = false
-                                        viewModel.addSongToSetNumber(song.id, setNum)
+                                        viewModel.addSongToSetNumber(song.id, setEntity.number)
                                     }
                                 }
                                 .padding(vertical = 12.dp, horizontal = 4.dp),
@@ -483,7 +481,7 @@ fun SongListItem(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = setNum.toString(),
+                                    text = setEntity.number.toString(),
                                     color = Color.White,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold
@@ -491,7 +489,7 @@ fun SongListItem(
                             }
                             Spacer(modifier = Modifier.width(12.dp))
                             Text(
-                                text = "Set $setNum" + if (alreadyInSet) " (already added)" else "",
+                                text = "Set ${setEntity.number}" + if (alreadyInSet) " (already added)" else "",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = if (alreadyInSet)
                                     MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
@@ -499,7 +497,7 @@ fun SongListItem(
                                     MaterialTheme.colorScheme.onSurface
                             )
                         }
-                        if (setNum < 4) HorizontalDivider(thickness = 0.5.dp)
+                        if (index < availableSets.size - 1) HorizontalDivider(thickness = 0.5.dp)
                     }
                 }
             },

@@ -5,10 +5,12 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -43,7 +45,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,8 +66,8 @@ import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.preferences.DisplayPreferences
 import com.encore.core.data.preferences.DisplayPreferencesHolder
 import com.encore.core.ui.theme.SetColor
-import kotlin.math.abs
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Viewer preferences
@@ -173,6 +175,7 @@ sealed class SongSection {
  *
  * Phase 4.5: High-Visibility Performance Viewer
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SongDetailScreen(
     viewModel: SongDetailViewModel,
@@ -186,8 +189,10 @@ fun SongDetailScreen(
     val textSizeMultiplier by viewModel.textSizeMultiplier.collectAsState()
     val prevSongId by viewModel.prevSongId.collectAsState()
     val nextSongId by viewModel.nextSongId.collectAsState()
+    val performSongIds by viewModel.performSongIds.collectAsState()
 
     var showControls by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     // Keep screen on during performance
     val view = LocalView.current
@@ -210,150 +215,174 @@ fun SongDetailScreen(
 
     BackHandler { onNavigateBack() }
 
-    val scrollState = rememberScrollState()
     val chordAccentColor = if (setNumber > 0) SetColor.getSetColor(setNumber) else null
 
-    // Stable refs inside pointerInput lambdas
-    val latestPrevSongId by rememberUpdatedState(prevSongId)
-    val latestNextSongId by rememberUpdatedState(nextSongId)
-    val latestOnNavigateToSong by rememberUpdatedState(onNavigateToSong)
+    // Effective list: always ≥ 1 entry so pager never has pageCount = 0
+    val effectiveSongIds = if (performSongIds.isEmpty()) listOf(songId) else performSongIds
+    val initialPage = remember(effectiveSongIds, songId) {
+        effectiveSongIds.indexOf(songId).coerceAtLeast(0)
+    }
+    val pagerState = rememberPagerState(initialPage = initialPage) { effectiveSongIds.size }
+
+    // Jump instantly to the correct page once performSongIds loads
+    LaunchedEffect(effectiveSongIds) {
+        val targetPage = effectiveSongIds.indexOf(songId).coerceAtLeast(0)
+        if (targetPage != pagerState.currentPage) {
+            pagerState.scrollToPage(targetPage)
+        }
+    }
+
+    // Notify ViewModel when the user swipes to a new page
+    LaunchedEffect(pagerState.currentPage) {
+        val currentId = effectiveSongIds.getOrNull(pagerState.currentPage) ?: return@LaunchedEffect
+        viewModel.onPageChanged(currentId, setNumber)
+    }
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
-            .pointerInput("swipe") {
-                var accumX = 0f
-                detectHorizontalDragGestures(
-                    onDragStart = { accumX = 0f },
-                    onDragEnd = {
-                        if (abs(accumX) > 80.dp.toPx()) {
-                            if (accumX > 0) {
-                                latestPrevSongId?.let { latestOnNavigateToSong?.invoke(it) }
-                            } else {
-                                latestNextSongId?.let { latestOnNavigateToSong?.invoke(it) }
-                            }
-                        }
-                        accumX = 0f
-                    }
-                ) { _, dragAmount -> accumX += dragAmount }
-            }
     ) {
-        when {
-            song == null -> {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = Color.White)
+        if (song == null) {
+            // ── Initial load spinner ─────────────────────────────────────────
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = Color.White)
+            }
+        } else {
+            // ── HorizontalPager — one page per song in the set ───────────────
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize()
+            ) { page ->
+                val pageSongId = effectiveSongIds.getOrNull(page) ?: songId
+                val pageSong by viewModel.getSongForPage(pageSongId).collectAsState(initial = null)
+                val pageScrollState = rememberScrollState()
+                val isActivePage = page == pagerState.currentPage
+
+                if (pageSong != null) {
+                    SongContent(
+                        song = pageSong!!,
+                        scrollState = pageScrollState,
+                        textSizeMultiplier = if (isActivePage) textSizeMultiplier
+                                             else pageSong!!.lastZoomLevel,
+                        chordAccentColor = chordAccentColor,
+                        onZoomChange = { if (isActivePage) viewModel.updateTextSize(it) },
+                        onSingleTap = { showControls = !showControls },
+                        onDoubleTap = {
+                            if (isActivePage) { viewModel.resetTextSize(); showControls = true }
+                        }
+                    )
+                } else {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = Color.White)
+                    }
                 }
             }
-            else -> {
-                // ── Scrollable song body ─────────────────────────────────────
-                SongContent(
-                    song = song!!,
-                    scrollState = scrollState,
-                    textSizeMultiplier = textSizeMultiplier,
-                    chordAccentColor = chordAccentColor,
-                    onZoomChange = { viewModel.updateTextSize(it) },
-                    onSingleTap = { showControls = !showControls },
-                    onDoubleTap = { viewModel.resetTextSize(); showControls = true }
-                )
 
-                // ── Slim header (✕ + title + artist) ────────────────────────
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.TopStart)
-                        .background(Color.Black.copy(alpha = 0.80f))
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            // ── Slim header (✕ + title + artist) ────────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.TopStart)
+                    .background(Color.Black.copy(alpha = 0.80f))
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = onNavigateBack,
+                    modifier = Modifier.size(36.dp)
                 ) {
-                    IconButton(
-                        onClick = onNavigateBack,
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Back",
-                            tint = Color.White.copy(alpha = 0.55f),
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Column(modifier = Modifier.weight(1f)) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Back",
+                        tint = Color.White.copy(alpha = 0.55f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = song!!.title,
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (song!!.artist != "Unknown Artist") {
                         Text(
-                            text = song!!.title,
-                            color = Color.White,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
+                            text = song!!.artist,
+                            color = Color.White.copy(alpha = 0.50f),
+                            style = MaterialTheme.typography.labelSmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        if (song!!.artist != "Unknown Artist") {
-                            Text(
-                                text = song!!.artist,
-                                color = Color.White.copy(alpha = 0.50f),
-                                style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                    }
+                }
+            }
+
+            // ── Prev song arrow ──────────────────────────────────────────────
+            if (prevSongId != null) {
+                IconButton(
+                    onClick = {
+                        scope.launch {
+                            pagerState.animateScrollToPage(pagerState.currentPage - 1)
                         }
-                    }
-                }
-
-                // ── Prev song arrow ──────────────────────────────────────────
-                if (prevSongId != null && onNavigateToSong != null) {
-                    IconButton(
-                        onClick = { onNavigateToSong.invoke(prevSongId!!) },
-                        modifier = Modifier
-                            .align(Alignment.CenterStart)
-                            .padding(start = 2.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ChevronLeft,
-                            contentDescription = "Previous song",
-                            tint = Color.White.copy(alpha = 0.25f),
-                            modifier = Modifier.size(40.dp)
-                        )
-                    }
-                }
-
-                // ── Next song arrow ──────────────────────────────────────────
-                if (nextSongId != null && onNavigateToSong != null) {
-                    IconButton(
-                        onClick = { onNavigateToSong.invoke(nextSongId!!) },
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .padding(end = 2.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ChevronRight,
-                            contentDescription = "Next song",
-                            tint = Color.White.copy(alpha = 0.25f),
-                            modifier = Modifier.size(40.dp)
-                        )
-                    }
-                }
-
-                // ── Floating zoom HUD ────────────────────────────────────────
-                AnimatedVisibility(
-                    visible = showControls,
-                    enter = fadeIn(),
-                    exit = fadeOut(),
+                    },
                     modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(16.dp)
+                        .align(Alignment.CenterStart)
+                        .padding(start = 2.dp)
                 ) {
-                    FloatingZoomControls(
-                        currentZoom = textSizeMultiplier,
-                        onZoomIn = {
-                            viewModel.updateTextSize(textSizeMultiplier + 0.1f)
-                            showControls = true
-                        },
-                        onZoomOut = {
-                            viewModel.updateTextSize(textSizeMultiplier - 0.1f)
-                            showControls = true
-                        }
+                    Icon(
+                        imageVector = Icons.Default.ChevronLeft,
+                        contentDescription = "Previous song",
+                        tint = Color.White.copy(alpha = 0.25f),
+                        modifier = Modifier.size(40.dp)
                     )
                 }
+            }
+
+            // ── Next song arrow ──────────────────────────────────────────────
+            if (nextSongId != null) {
+                IconButton(
+                    onClick = {
+                        scope.launch {
+                            pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                        }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(end = 2.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = "Next song",
+                        tint = Color.White.copy(alpha = 0.25f),
+                        modifier = Modifier.size(40.dp)
+                    )
+                }
+            }
+
+            // ── Floating zoom HUD ────────────────────────────────────────────
+            AnimatedVisibility(
+                visible = showControls,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp)
+            ) {
+                FloatingZoomControls(
+                    currentZoom = textSizeMultiplier,
+                    onZoomIn = {
+                        viewModel.updateTextSize(textSizeMultiplier + 0.1f)
+                        showControls = true
+                    },
+                    onZoomOut = {
+                        viewModel.updateTextSize(textSizeMultiplier - 0.1f)
+                        showControls = true
+                    }
+                )
             }
         }
     }

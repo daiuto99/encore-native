@@ -34,7 +34,8 @@ class ViewModelFactory(
             }
             modelClass.isAssignableFrom(SongDetailViewModel::class.java) -> {
                 SongDetailViewModel(
-                    appContainer.songRepository
+                    appContainer.songRepository,
+                    appContainer.setlistRepository
                 ) as T
             }
             modelClass.isAssignableFrom(AuthViewModel::class.java) -> {

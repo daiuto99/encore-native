@@ -4,13 +4,16 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.encore.core.data.entities.SongEntity
+import com.encore.core.data.repository.SetlistRepository
 import com.encore.core.data.repository.SongRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -26,7 +29,8 @@ import kotlinx.coroutines.launch
  * Milestone 3: Performance Engine - Production Mode
  */
 class SongDetailViewModel(
-    private val songRepository: SongRepository
+    private val songRepository: SongRepository,
+    private val setlistRepository: SetlistRepository
 ) : ViewModel() {
 
     // Song data
@@ -55,6 +59,48 @@ class SongDetailViewModel(
     private val _nextSongId = MutableStateFlow<String?>(null)
     val nextSongId: StateFlow<String?> = _nextSongId.asStateFlow()
 
+    // Song cache + pager state
+    private val _songCache = MutableStateFlow<Map<String, SongEntity>>(emptyMap())
+    private val _performSongIds = MutableStateFlow<List<String>>(emptyList())
+    val performSongIds: StateFlow<List<String>> = _performSongIds.asStateFlow()
+
+    /**
+     * Returns a Flow for a specific song page — loads and caches on first call.
+     * Adjacent pages collect independently, enabling smooth pager previews.
+     */
+    fun getSongForPage(songId: String): Flow<SongEntity?> {
+        if (!_songCache.value.containsKey(songId)) {
+            viewModelScope.launch {
+                songRepository.getSongById(songId)?.let { s ->
+                    _songCache.value = _songCache.value + (songId to s)
+                }
+            }
+        }
+        return _songCache.map { it[songId] }
+    }
+
+    /** Called by pager when the visible page changes — updates main song state + zoom. */
+    fun onPageChanged(songId: String, setNumber: Int) {
+        _songCache.value[songId]?.let { cached ->
+            _song.value = cached
+            _textSizeMultiplier.value = cached.lastZoomLevel
+            _currentSetNumber.value = setNumber
+        } ?: viewModelScope.launch {
+            // Not yet cached — load synchronously and update
+            songRepository.getSongById(songId)?.let { s ->
+                _songCache.value = _songCache.value + (songId to s)
+                _song.value = s
+                _textSizeMultiplier.value = s.lastZoomLevel
+                _currentSetNumber.value = setNumber
+            }
+        }
+        // Recompute prev/next for arrow affordance
+        val ids = _performSongIds.value
+        val idx = ids.indexOf(songId)
+        _prevSongId.value = ids.getOrNull(idx - 1)
+        _nextSongId.value = ids.getOrNull(idx + 1)
+    }
+
     // Debounce job for saving zoom level
     private var saveZoomJob: Job? = null
 
@@ -78,14 +124,29 @@ class SongDetailViewModel(
                 calculateScrollSpeed(it)
             }
 
-            // Compute prev/next within the set (one-shot snapshot)
-            if (setNumber > 0) {
-                val songsInSet = songRepository.getSongsInSetOrdered(setNumber).first()
-                val idx = songsInSet.indexOfFirst { it.id == songId }
-                _prevSongId.value = if (idx > 0) songsInSet[idx - 1].id else null
-                _nextSongId.value = if (idx < songsInSet.size - 1) songsInSet[idx + 1].id else null
-                Log.d(TAG, "Set $setNumber: idx=$idx, prev=${_prevSongId.value}, next=${_nextSongId.value}")
-            } else {
+            // Populate pager song list and cache first few entries
+            try {
+                if (setNumber > 0) {
+                    val setEntity = setlistRepository.getOrCreateSetByNumber(setNumber)
+                    val songsInSet = setlistRepository.getSongsInSet(setEntity.id).first()
+                        .map { it.song }
+                    _performSongIds.value = songsInSet.map { it.id }
+                    // Seed cache with first 3 songs for instant pager previews
+                    val seedCache = _songCache.value.toMutableMap()
+                    songsInSet.take(3).forEach { s -> seedCache[s.id] = s }
+                    _songCache.value = seedCache
+                    val idx = songsInSet.indexOfFirst { it.id == songId }
+                    _prevSongId.value = if (idx > 0) songsInSet[idx - 1].id else null
+                    _nextSongId.value = if (idx < songsInSet.size - 1) songsInSet[idx + 1].id else null
+                    Log.d(TAG, "Set $setNumber (id=${setEntity.id}): ${songsInSet.size} songs, idx=$idx")
+                } else {
+                    _performSongIds.value = if (song != null) listOf(songId) else emptyList()
+                    _prevSongId.value = null
+                    _nextSongId.value = null
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to load set $setNumber context, falling back to single-song", e)
+                _performSongIds.value = listOf(songId)
                 _prevSongId.value = null
                 _nextSongId.value = null
             }

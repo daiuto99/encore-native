@@ -6,8 +6,14 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import com.encore.feature.library.SyncProgress
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -25,6 +31,8 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.FileOpen
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -35,6 +43,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -65,6 +74,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.encore.core.data.auth.AuthState
+import com.encore.core.data.entities.SetEntity
 import com.encore.core.ui.theme.SetColor
 import com.encore.feature.library.LibraryListContent
 import com.encore.feature.library.LibraryViewModel
@@ -190,6 +200,7 @@ fun CommandCenterScreen(
 
     val syncProgress by libraryViewModel.syncProgress.collectAsState()
     val connectedFolderUri by libraryViewModel.connectedFolderUri.collectAsState()
+    val availableSets by libraryViewModel.availableSets.collectAsState()
 
     // Folder Sync — OpenDocumentTree gives a persistent tree URI
     val folderPickerLauncher = rememberLauncherForActivityResult(
@@ -325,11 +336,14 @@ fun CommandCenterScreen(
 
             // ── Sets Section ─────────────────────────────────────────────────
             SetsSection(
+                sets = availableSets,
                 selectedSet = selectedSetFilter,
                 onSetSelected = { setNumber ->
                     selectedSetFilter = if (selectedSetFilter == setNumber) null else setNumber
                 },
-                onClearFilter = { selectedSetFilter = null }
+                onClearFilter = { selectedSetFilter = null },
+                onCreateSet = { libraryViewModel.createNewSet() },
+                onDeleteSet = { set -> libraryViewModel.deleteSet(set) }
             )
         }
     }
@@ -497,18 +511,43 @@ fun ImportModal(
 }
 
 /**
- * Sets management footer with global color-coded filter chips (Sets 1–4).
+ * Sets management footer — dynamic chips driven by sets that exist in the DB.
  *
- * Active state uses the set's persistent color (blue/orange/green/purple).
- * Selecting an active set deselects it (toggle behavior).
+ * Active state uses the set's persistent color. Selecting an active set deselects
+ * it (toggle). "New Set" chip appended at the end creates the next numbered set.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SetsSection(
+    sets: List<SetEntity>,
     selectedSet: Int?,
     onSetSelected: (Int) -> Unit,
     onClearFilter: () -> Unit,
+    onCreateSet: () -> Unit,
+    onDeleteSet: (SetEntity) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var setToDelete by remember { mutableStateOf<SetEntity?>(null) }
+
+    if (setToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { setToDelete = null },
+            title = { Text("Delete Set ${setToDelete!!.number}?") },
+            text = { Text("This will remove the set and all its song assignments. Songs will not be deleted.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteSet(setToDelete!!)
+                        setToDelete = null
+                    }
+                ) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { setToDelete = null }) { Text("Cancel") }
+            }
+        )
+    }
+
     HorizontalDivider(
         thickness = 0.5.dp,
         color = MaterialTheme.colorScheme.outlineVariant
@@ -542,20 +581,52 @@ fun SetsSection(
             }
         }
         Spacer(modifier = Modifier.height(6.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            for (setNumber in 1..4) {
-                val setColor = SetColor.getSetColor(setNumber)
-                FilterChip(
-                    selected = selectedSet == setNumber,
-                    onClick = { onSetSelected(setNumber) },
-                    label = { Text("Set $setNumber") },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = setColor,
-                        selectedLabelColor = Color.White,
-                        labelColor = setColor
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            sets.forEach { set ->
+                val setColor = SetColor.getSetColor(set.number)
+                val isSelected = selectedSet == set.number
+                Surface(
+                    shape = CircleShape,
+                    color = if (isSelected) setColor else Color.Transparent,
+                    border = BorderStroke(1.dp, setColor),
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .combinedClickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = androidx.compose.material.ripple.rememberRipple(),
+                            onClick = { onSetSelected(set.number) },
+                            onLongClick = { if (set.number > 1) setToDelete = set }
+                        )
+                ) {
+                    Text(
+                        text = "Set ${set.number}",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        color = if (isSelected) Color.White else setColor,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
                     )
-                )
+                }
             }
+            FilterChip(
+                selected = false,
+                onClick = onCreateSet,
+                label = {
+                    Text(
+                        text = "+ New Set",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp)
+                    )
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            )
         }
     }
 }

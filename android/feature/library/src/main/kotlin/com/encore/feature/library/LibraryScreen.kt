@@ -42,7 +42,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
@@ -68,8 +67,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -304,7 +306,7 @@ fun SongList(
 ) {
     val listState = rememberLazyListState()
     val density = LocalDensity.current
-    val itemHeightPx = remember(density) { with(density) { 72.dp.toPx() } }
+    val itemHeightPx = remember(density) { with(density) { 60.dp.toPx() } }
 
     // Drag-and-drop state
     var draggingIndex by remember { mutableStateOf<Int?>(null) }
@@ -547,10 +549,10 @@ fun SongListItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 72.dp)
-                .background(MaterialTheme.colorScheme.surface)
+                .heightIn(min = 60.dp)
+                .background(Color.Black)
                 .clickable(onClick = onClick)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Drag handle — only shown when set filter is active
@@ -566,32 +568,33 @@ fun SongListItem(
                 Spacer(modifier = Modifier.width(12.dp))
             }
 
-            // Title (bold) stacked above Artist (grey) — Column takes remaining width
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = song.title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = rowAccentColor ?: MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                if (song.artist != "Unknown Artist") {
-                    Text(
-                        text = song.artist,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
+            // Single-line: [Bold Title] — [Grey Artist], ellipsis on overflow
+            val titleColor = rowAccentColor ?: MaterialTheme.colorScheme.onSurface
+            Text(
+                text = buildAnnotatedString {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = titleColor)) {
+                        append(song.title)
+                    }
+                    if (song.artist != "Unknown Artist") {
+                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.22f))) {
+                            append("  —  ")
+                        }
+                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) {
+                            append(song.artist)
+                        }
+                    }
+                },
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
             Spacer(modifier = Modifier.width(8.dp))
 
-            // Key badge — accent-colored pill, directly left of Set Circles
+            // Key badge — ghost pill, directly left of Set Circles
             song.currentKey?.let { key ->
                 KeyBadge(key = key, accentColor = rowAccentColor)
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(4.dp))
             }
 
             // Set membership circles
@@ -692,7 +695,8 @@ fun SetNumberCircle(
 }
 
 /**
- * Key badge pill — uses accentColor (set tint) when available, gray fallback otherwise.
+ * Ghost key badge — barely-there pill that labels the key without competing with song titles.
+ * Uses a hairline accent tint when the song is in a set, otherwise near-invisible on black.
  */
 @Composable
 fun KeyBadge(
@@ -700,19 +704,18 @@ fun KeyBadge(
     accentColor: Color? = null,
     modifier: Modifier = Modifier
 ) {
-    val bgColor = accentColor?.copy(alpha = 0.12f) ?: MaterialTheme.colorScheme.surfaceVariant
-    val textColor = accentColor ?: MaterialTheme.colorScheme.onSurfaceVariant
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(4.dp),
-        color = bgColor
+    val bgColor = accentColor?.copy(alpha = 0.09f) ?: Color.White.copy(alpha = 0.07f)
+    val textColor = accentColor?.copy(alpha = 0.75f) ?: MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+    Box(
+        modifier = modifier
+            .background(bgColor, RoundedCornerShape(50))
+            .padding(horizontal = 7.dp, vertical = 3.dp)
     ) {
         Text(
             text = key,
             style = MaterialTheme.typography.labelSmall,
             color = textColor,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+            fontWeight = FontWeight.Medium
         )
     }
 }

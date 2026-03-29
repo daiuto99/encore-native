@@ -99,9 +99,20 @@ class LibraryViewModel(
             base
         } else {
             base.map { list ->
-                when (sortOrder) {
+                val sorted = when (sortOrder) {
                     SortOrder.TITLE  -> list.sortedBy { it.title.lowercase() }
                     SortOrder.ARTIST -> list.sortedBy { it.artist.lowercase() }
+                }
+                // Smart search: prioritise results where title/artist STARTS WITH the query.
+                // Falls back to the full contains-match list if no starts-with hits exist.
+                if (query.isNotBlank()) {
+                    val q = query.lowercase()
+                    val startsWith = sorted.filter {
+                        it.title.lowercase().startsWith(q) || it.artist.lowercase().startsWith(q)
+                    }
+                    if (startsWith.isNotEmpty()) startsWith else sorted
+                } else {
+                    sorted
                 }
             }
         }

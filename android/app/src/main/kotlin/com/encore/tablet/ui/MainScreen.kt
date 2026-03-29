@@ -130,13 +130,24 @@ fun MainScreen(
                 viewModel = viewModel,
                 songId = songId,
                 setNumber = setNumber,
-                onNavigateBack = { navController.popBackStack() },
+                onNavigateBack = {
+                    // popBackStack() returns false when the stack is empty or corrupted.
+                    // Fall back to an explicit navigate so the user never lands on a blank screen.
+                    val popped = navController.popBackStack()
+                    if (!popped) {
+                        navController.navigate("command_center") {
+                            popUpTo(0) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }
+                },
                 onNavigateToSong = { newSongId ->
-                    // popUpTo("command_center") without inclusive = true:
-                    // clears the entire song-detail back stack safely while
-                    // keeping command_center as the base, so Back always works.
+                    // launchSingleTop prevents stacking multiple song_detail instances.
+                    // popUpTo("command_center") clears any previous song_detail entries,
+                    // keeping command_center as the sole base so Back always works.
                     navController.navigate(Routes.songDetail(newSongId, setNumber)) {
                         popUpTo("command_center")
+                        launchSingleTop = true
                     }
                 }
             )

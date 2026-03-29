@@ -135,7 +135,15 @@ fun EncoreNavHost(
             SongDetailScreen(
                 viewModel = viewModel,
                 songId = songId,
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = {
+                    val popped = navController.popBackStack()
+                    if (!popped) {
+                        navController.navigate(Routes.LIBRARY) {
+                            popUpTo(0) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }
+                }
             )
         }
     }

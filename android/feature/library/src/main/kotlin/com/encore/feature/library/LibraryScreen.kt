@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedButton
@@ -95,6 +97,7 @@ fun LibraryScreen(
     val importResult by viewModel.importResult.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
     val activeSetFilter by viewModel.setFilter.collectAsState()
+    val sortOrder by viewModel.sortOrder.collectAsState()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -132,6 +135,16 @@ fun LibraryScreen(
         topBar = {
             TopAppBar(
                 title = { Text("Song Library", style = MaterialTheme.typography.titleLarge) },
+                actions = {
+                    IconButton(onClick = { viewModel.toggleSort() }) {
+                        Icon(
+                            imageVector = Icons.Default.Sort,
+                            contentDescription = if (sortOrder == SortOrder.ARTIST) "Sort by Title" else "Sort by Artist",
+                            tint = if (sortOrder == SortOrder.ARTIST) MaterialTheme.colorScheme.primary
+                                   else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface
@@ -197,6 +210,7 @@ fun LibraryListContent(
     val importResult by viewModel.importResult.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
     val activeSetFilter by viewModel.setFilter.collectAsState()
+    val sortOrder by viewModel.sortOrder.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(importResult) {
@@ -222,14 +236,27 @@ fun LibraryListContent(
 
     Box(modifier = modifier.fillMaxWidth()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            SearchBar(
-                query = searchQuery,
-                onQueryChange = { viewModel.updateSearchQuery(it) },
-                onClearClick = { viewModel.clearSearch() },
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            )
+                    .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SearchBar(
+                    query = searchQuery,
+                    onQueryChange = { viewModel.updateSearchQuery(it) },
+                    onClearClick = { viewModel.clearSearch() },
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = { viewModel.toggleSort() }) {
+                    Icon(
+                        imageVector = Icons.Default.Sort,
+                        contentDescription = if (sortOrder == SortOrder.ARTIST) "Sort by Title" else "Sort by Artist",
+                        tint = if (sortOrder == SortOrder.ARTIST) MaterialTheme.colorScheme.primary
+                               else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             if (isImporting) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             if (songs.isEmpty()) {
                 EmptyLibraryMessage(
@@ -277,7 +304,7 @@ fun SongList(
 ) {
     val listState = rememberLazyListState()
     val density = LocalDensity.current
-    val itemHeightPx = remember(density) { with(density) { 57.dp.toPx() } }
+    val itemHeightPx = remember(density) { with(density) { 72.dp.toPx() } }
 
     // Drag-and-drop state
     var draggingIndex by remember { mutableStateOf<Int?>(null) }
@@ -520,9 +547,10 @@ fun SongListItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(min = 72.dp)
                 .background(MaterialTheme.colorScheme.surface)
                 .clickable(onClick = onClick)
-                .padding(vertical = 10.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Drag handle — only shown when set filter is active
@@ -533,37 +561,37 @@ fun SongListItem(
                     tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
                     modifier = Modifier
                         .size(20.dp)
-                        .padding(start = 4.dp)
                         .then(dragHandleModifier)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-            } else {
-                Spacer(modifier = Modifier.width(16.dp))
+                Spacer(modifier = Modifier.width(12.dp))
             }
 
-            // Title (primary) + Artist (secondary) — clustered left, space before metadata
-            Text(
-                text = song.title,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = rowAccentColor ?: MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            Text(
-                text = song.artist,
-                style = MaterialTheme.typography.bodyMedium,
-                color = rowAccentColor?.copy(alpha = 0.65f) ?: MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(modifier = Modifier.weight(1f))
+            // Title (bold) stacked above Artist (grey) — Column takes remaining width
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = song.title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = rowAccentColor ?: MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (song.artist != "Unknown Artist") {
+                    Text(
+                        text = song.artist,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(8.dp))
 
-            // Key badge — directly left of Set Circles
+            // Key badge — accent-colored pill, directly left of Set Circles
             song.currentKey?.let { key ->
+                KeyBadge(key = key, accentColor = rowAccentColor)
                 Spacer(modifier = Modifier.width(6.dp))
-                KeyBadge(key = key)
             }
 
             // Set membership circles
@@ -664,22 +692,25 @@ fun SetNumberCircle(
 }
 
 /**
- * Subtle gray key badge displayed inline next to artist name.
+ * Key badge pill — uses accentColor (set tint) when available, gray fallback otherwise.
  */
 @Composable
 fun KeyBadge(
     key: String,
+    accentColor: Color? = null,
     modifier: Modifier = Modifier
 ) {
+    val bgColor = accentColor?.copy(alpha = 0.12f) ?: MaterialTheme.colorScheme.surfaceVariant
+    val textColor = accentColor ?: MaterialTheme.colorScheme.onSurfaceVariant
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(4.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant
+        color = bgColor
     ) {
         Text(
             text = key,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = textColor,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
         )

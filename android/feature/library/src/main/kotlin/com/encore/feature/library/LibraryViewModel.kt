@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -71,24 +72,38 @@ class LibraryViewModel(
             initialValue = null
         )
 
+    private val _sortOrder = MutableStateFlow(SortOrder.TITLE)
+    val sortOrder: StateFlow<SortOrder> = _sortOrder.asStateFlow()
+
     // One-shot feedback messages (add to set, remove from set, etc.)
     private val _statusMessage = MutableStateFlow<String?>(null)
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
 
     /**
-     * Songs list with reactive search and set filtering.
+     * Songs list with reactive search, set filtering, and sort order.
      *
-     * - Non-empty search: global search across all songs (ignores set filter)
-     * - Empty search + set filter: songs in set ordered by position
-     * - Empty search + no filter: all songs alphabetically
+     * - Non-empty search: global search across all songs by title and artist (ignores set filter)
+     * - Empty search + set filter: songs in set ordered by position (sort order ignored)
+     * - Empty search + no filter: all songs sorted by [SortOrder]
      */
-    val songs: StateFlow<List<SongEntity>> = combine(_searchQuery, _setFilter) { query, setFilter ->
-        Pair(query, setFilter)
-    }.flatMapLatest { (query, setFilter) ->
-        when {
+    val songs: StateFlow<List<SongEntity>> = combine(_searchQuery, _setFilter, _sortOrder) { query, setFilter, sortOrder ->
+        Triple(query, setFilter, sortOrder)
+    }.flatMapLatest { (query, setFilter, sortOrder) ->
+        val base = when {
             query.isNotBlank() -> songRepository.searchSongs(query)
-            setFilter != null -> songRepository.getSongsInSetOrdered(setFilter)
-            else -> songRepository.searchSongs("")
+            setFilter != null  -> songRepository.getSongsInSetOrdered(setFilter)
+            else               -> songRepository.searchSongs("")
+        }
+        // Preserve set position order when browsing a set without a search query
+        if (setFilter != null && query.isBlank()) {
+            base
+        } else {
+            base.map { list ->
+                when (sortOrder) {
+                    SortOrder.TITLE  -> list.sortedBy { it.title.lowercase() }
+                    SortOrder.ARTIST -> list.sortedBy { it.artist.lowercase() }
+                }
+            }
         }
     }.stateIn(
         scope = viewModelScope,
@@ -130,6 +145,9 @@ class LibraryViewModel(
     fun updateSearchQuery(query: String) { _searchQuery.value = query }
     fun clearSearch() { _searchQuery.value = "" }
     fun updateSetFilter(setNumber: Int?) { _setFilter.value = setNumber }
+    fun toggleSort() {
+        _sortOrder.value = if (_sortOrder.value == SortOrder.TITLE) SortOrder.ARTIST else SortOrder.TITLE
+    }
     fun clearImportResult() { _importResult.value = null }
     fun clearStatusMessage() { _statusMessage.value = null }
 
@@ -568,6 +586,8 @@ class LibraryViewModel(
         private const val TAG = "LibraryViewModel"
     }
 }
+
+enum class SortOrder { TITLE, ARTIST }
 
 data class ImportResult(val addedCount: Int, val skippedCount: Int, val updatedCount: Int = 0)
 

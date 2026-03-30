@@ -201,6 +201,8 @@ fun CommandCenterScreen(
     val syncProgress by libraryViewModel.syncProgress.collectAsState()
     val connectedFolderUri by libraryViewModel.connectedFolderUri.collectAsState()
     val availableSets by libraryViewModel.availableSets.collectAsState()
+    val songs by libraryViewModel.songs.collectAsState()
+    val performSetEntries by libraryViewModel.performSetEntries.collectAsState()
 
     // Folder Sync — OpenDocumentTree gives a persistent tree URI
     val folderPickerLauncher = rememberLauncherForActivityResult(
@@ -314,6 +316,21 @@ fun CommandCenterScreen(
                 showAccountDropdown = showAccountDropdown,
                 connectedFolderUri = connectedFolderUri,
                 onImportClick = { showImportSheet = true },
+                onPerformClick = {
+                    val setNum = selectedSetFilter ?: 1
+                    val firstSongId = if (selectedSetFilter != null) {
+                        songs.firstOrNull()?.id
+                    } else {
+                        performSetEntries.firstOrNull()?.song?.id
+                    }
+                    if (firstSongId != null) {
+                        onSongClick(firstSongId, setNum)
+                    } else {
+                        scope.launch {
+                            snackbarHostState.showSnackbar("No songs in set")
+                        }
+                    }
+                },
                 onRefreshClick = { libraryViewModel.refreshConnectedFolder(context) },
                 onShowDropdown = { showAccountDropdown = true },
                 onDropdownDismiss = { showAccountDropdown = false },

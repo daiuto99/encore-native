@@ -54,6 +54,7 @@ fun EncoreHeader(
     showAccountDropdown: Boolean,
     connectedFolderUri: String?,
     onImportClick: () -> Unit,
+    onPerformClick: () -> Unit,
     onRefreshClick: () -> Unit,
     onShowDropdown: () -> Unit,
     onDropdownDismiss: () -> Unit,
@@ -129,7 +130,7 @@ fun EncoreHeader(
 
         // ── PERFORM ──────────────────────────────────────────────────────────
         Button(
-            onClick = {},
+            onClick = onPerformClick,
             shape = RoundedCornerShape(50),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary,

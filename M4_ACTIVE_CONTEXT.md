@@ -52,6 +52,10 @@ Work M4 in this order:
 2. Implement Manual Sync Now flow against real API calls
 3. Conflict detection and resolution UI
 
+## Next Session Starts Here
+1. **UI polish pass** — review the Library screen and Performance Mode for visual improvements (typography, spacing, color, layout density). No new features yet.
+2. **Song Details / Settings screen** — a dedicated screen for editing song metadata (key, title, artist) and viewer preferences (font size defaults, section colors). Scope TBD at session start.
+
 ## Known Facts for Next Session
 - `SetlistDetailScreen.kt` is a separate screen the user does not use for the main workflow — do not touch it
 - The Library screen (`feature/library`) is the correct location for all set-tab and song-list work

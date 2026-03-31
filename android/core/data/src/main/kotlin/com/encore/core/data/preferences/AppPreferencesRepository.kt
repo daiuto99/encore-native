@@ -40,15 +40,22 @@ class AppPreferencesRepository(private val context: Context) {
         val DARK_BG_COLOR           = stringPreferencesKey("ap_dark_bg_color")
         val LIGHT_BG_COLOR          = stringPreferencesKey("ap_light_bg_color")
 
-        // Section styles — serialised as a JSON object string
-        val SECTION_STYLES_JSON     = stringPreferencesKey("ap_section_styles_json")
+        // Per-theme section styles — serialised as JSON object strings
+        val DARK_SECTION_STYLES_JSON  = stringPreferencesKey("ap_dark_section_styles_json")
+        val LIGHT_SECTION_STYLES_JSON = stringPreferencesKey("ap_light_section_styles_json")
+
+        // Font family
+        val FONT_FAMILY             = stringPreferencesKey("ap_font_family")
     }
 
     // ── Read ─────────────────────────────────────────────────────────────────
 
     val appPreferences: Flow<AppPreferences> = context.appDataStore.data.map { prefs ->
         AppPreferences(
-            sectionStyles           = prefs[Keys.SECTION_STYLES_JSON]
+            darkSectionStyles       = prefs[Keys.DARK_SECTION_STYLES_JSON]
+                                        ?.let(::decodeSectionStyles)
+                                        ?: AppPreferences.DEFAULT_SECTION_STYLES,
+            lightSectionStyles      = prefs[Keys.LIGHT_SECTION_STYLES_JSON]
                                         ?.let(::decodeSectionStyles)
                                         ?: AppPreferences.DEFAULT_SECTION_STYLES,
             lyricSize               = prefs[Keys.LYRIC_SIZE]               ?: 14,
@@ -58,7 +65,10 @@ class AppPreferencesRepository(private val context: Context) {
             showChords              = prefs[Keys.SHOW_CHORDS]              ?: true,
             showKeyInfo             = prefs[Keys.SHOW_KEY_INFO]            ?: true,
             darkBgColor             = prefs[Keys.DARK_BG_COLOR]            ?: "#000000",
-            lightBgColor            = prefs[Keys.LIGHT_BG_COLOR]           ?: "#F2F2F7"
+            lightBgColor            = prefs[Keys.LIGHT_BG_COLOR]           ?: "#F2F2F7",
+            fontFamily              = prefs[Keys.FONT_FAMILY]
+                                        ?.let { runCatching { SongFontFamily.valueOf(it) }.getOrNull() }
+                                        ?: SongFontFamily.SANS_SERIF
         )
     }
 
@@ -88,14 +98,37 @@ class AppPreferencesRepository(private val context: Context) {
         context.appDataStore.edit { it[Keys.SHOW_KEY_INFO] = show }
     }
 
-    suspend fun updateSectionStyle(section: String, style: SectionStyle) {
+    suspend fun updateFontFamily(family: SongFontFamily) {
+        context.appDataStore.edit { it[Keys.FONT_FAMILY] = family.name }
+    }
+
+    suspend fun updateDarkBgColor(hex: String) {
+        context.appDataStore.edit { it[Keys.DARK_BG_COLOR] = hex }
+    }
+
+    suspend fun updateLightBgColor(hex: String) {
+        context.appDataStore.edit { it[Keys.LIGHT_BG_COLOR] = hex }
+    }
+
+    suspend fun updateDarkSectionStyle(section: String, style: SectionStyle) {
         context.appDataStore.edit { prefs ->
-            val current = prefs[Keys.SECTION_STYLES_JSON]
+            val current = prefs[Keys.DARK_SECTION_STYLES_JSON]
                 ?.let(::decodeSectionStyles)
                 ?.toMutableMap()
                 ?: AppPreferences.DEFAULT_SECTION_STYLES.toMutableMap()
             current[section.lowercase().trim()] = style
-            prefs[Keys.SECTION_STYLES_JSON] = encodeSectionStyles(current)
+            prefs[Keys.DARK_SECTION_STYLES_JSON] = encodeSectionStyles(current)
+        }
+    }
+
+    suspend fun updateLightSectionStyle(section: String, style: SectionStyle) {
+        context.appDataStore.edit { prefs ->
+            val current = prefs[Keys.LIGHT_SECTION_STYLES_JSON]
+                ?.let(::decodeSectionStyles)
+                ?.toMutableMap()
+                ?: AppPreferences.DEFAULT_SECTION_STYLES.toMutableMap()
+            current[section.lowercase().trim()] = style
+            prefs[Keys.LIGHT_SECTION_STYLES_JSON] = encodeSectionStyles(current)
         }
     }
 

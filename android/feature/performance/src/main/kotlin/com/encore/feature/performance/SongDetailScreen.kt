@@ -531,8 +531,9 @@ fun SongContent(
 ) {
     val encoreColors = LocalEncoreColors.current
     var currentZoom by remember { mutableFloatStateOf(textSizeMultiplier) }
-    val sections = remember(song.markdownBody, appPreferences.showChords, appPreferences.showKeyInfo) {
-        parseSongSections(song.markdownBody, appPreferences)
+    val isDark = encoreColors.isDark
+    val sections = remember(song.markdownBody, appPreferences.showChords, appPreferences.showKeyInfo, isDark) {
+        parseSongSections(song.markdownBody, appPreferences, isDark)
     }
     val vp = remember { ViewerPreferences() }
 
@@ -723,7 +724,8 @@ private val FRONTMATTER_FENCE = Regex("""^-{3,}$""")
  */
 private fun parseSongSections(
     markdown: String,
-    preferences: AppPreferences
+    preferences: AppPreferences,
+    isDark: Boolean = true
 ): List<SongSection> {
     val result = mutableListOf<SongSection>()
     val bodyBuffer = mutableListOf<String>()
@@ -776,7 +778,7 @@ private fun parseSongSections(
             val level = trimmed.takeWhile { it == '#' }.length
             val headerText = trimmed.drop(level).trimStart()
             val color = if (preferences.showKeyInfo) {
-                AppPreferences.getSectionColor(headerText, preferences)
+                AppPreferences.getSectionColor(headerText, preferences, isDark)
             } else null
             result.add(SongSection.Header(text = headerText, level = level, color = color))
             continue

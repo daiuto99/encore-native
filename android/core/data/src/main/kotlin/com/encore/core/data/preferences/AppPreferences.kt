@@ -1,6 +1,14 @@
 package com.encore.core.data.preferences
 
 /**
+ * Font family choice for chart and lyric rendering.
+ */
+enum class SongFontFamily(val displayName: String) {
+    SANS_SERIF("Sans-Serif"),
+    MONOSPACE("Monospace")
+}
+
+/**
  * Per-section visual style stored in the global preference engine.
  */
 data class SectionStyle(
@@ -16,8 +24,9 @@ data class SectionStyle(
  * Consumed as a StateFlow in LibraryViewModel and SongDetailScreen.
  */
 data class AppPreferences(
-    // ── Section styles matrix ────────────────────────────────────────────────
-    val sectionStyles: Map<String, SectionStyle> = DEFAULT_SECTION_STYLES,
+    // ── Per-theme section styles matrix ──────────────────────────────────────
+    val darkSectionStyles: Map<String, SectionStyle> = DEFAULT_SECTION_STYLES,
+    val lightSectionStyles: Map<String, SectionStyle> = DEFAULT_SECTION_STYLES,
 
     // ── Typography & rhythm ──────────────────────────────────────────────────
     val lyricSize: Int = 14,
@@ -31,7 +40,10 @@ data class AppPreferences(
 
     // ── Dual-theme background colors ─────────────────────────────────────────
     val darkBgColor: String = "#000000",
-    val lightBgColor: String = "#F2F2F7"
+    val lightBgColor: String = "#F2F2F7",
+
+    // ── Font family ───────────────────────────────────────────────────────────
+    val fontFamily: SongFontFamily = SongFontFamily.SANS_SERIF
 ) {
     companion object {
         val DEFAULT_SECTION_STYLES = mapOf(
@@ -46,10 +58,11 @@ data class AppPreferences(
             "pre-chorus"     to SectionStyle("#F97316"),
         )
 
-        /** Returns the hex color for a section name (case-insensitive prefix match). */
-        fun getSectionColor(sectionName: String, prefs: AppPreferences): String? {
+        /** Returns the hex color for a section name from the active theme's style map. */
+        fun getSectionColor(sectionName: String, prefs: AppPreferences, isDark: Boolean = true): String? {
+            val styles = if (isDark) prefs.darkSectionStyles else prefs.lightSectionStyles
             val normalized = sectionName.lowercase().trim()
-            return prefs.sectionStyles.entries
+            return styles.entries
                 .firstOrNull { (key, _) -> normalized.contains(key.lowercase()) }
                 ?.value?.hexColor
         }

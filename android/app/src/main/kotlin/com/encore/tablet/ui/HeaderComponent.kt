@@ -63,7 +63,8 @@ fun EncoreHeader(
     onShowDropdown: () -> Unit,
     onDropdownDismiss: () -> Unit,
     onSignOut: () -> Unit,
-    onProfileSheetRequest: () -> Unit
+    onProfileSheetRequest: () -> Unit,
+    onSettingsClick: () -> Unit = {}
 ) {
     val encoreColors = LocalEncoreColors.current
     Row(
@@ -162,7 +163,7 @@ fun EncoreHeader(
         }
 
         // ── Settings ─────────────────────────────────────────────────────────
-        IconButton(onClick = {}) {
+        IconButton(onClick = onSettingsClick) {
             Icon(
                 imageVector = Icons.Default.Settings,
                 contentDescription = "Settings",

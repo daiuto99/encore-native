@@ -39,6 +39,7 @@ object Routes {
     // setNumber is optional (-1 = no set context; omit from URL when absent)
     const val SONG_DETAIL = "song/{songId}?setNumber={setNumber}"
     const val SONG_CHART_EDITOR = "chart_editor/{songId}"
+    const val SETTINGS = "settings"
 
     fun setlistDetail(setlistId: String) = "setlist/$setlistId"
     fun chartEditor(songId: String) = "chart_editor/$songId"

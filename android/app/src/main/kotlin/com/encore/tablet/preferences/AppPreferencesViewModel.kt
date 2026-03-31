@@ -6,6 +6,7 @@ import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.preferences.AppPreferences
 import com.encore.core.data.preferences.AppPreferencesRepository
 import com.encore.core.data.preferences.SectionStyle
+import com.encore.core.data.preferences.SongFontFamily
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -50,8 +51,20 @@ class AppPreferencesViewModel(
     fun updateShowKeyInfo(show: Boolean) =
         viewModelScope.launch { repo.updateShowKeyInfo(show) }
 
-    fun updateSectionStyle(section: String, style: SectionStyle) =
-        viewModelScope.launch { repo.updateSectionStyle(section, style) }
+    fun updateFontFamily(family: SongFontFamily) =
+        viewModelScope.launch { repo.updateFontFamily(family) }
+
+    fun updateDarkBgColor(hex: String) =
+        viewModelScope.launch { repo.updateDarkBgColor(hex) }
+
+    fun updateLightBgColor(hex: String) =
+        viewModelScope.launch { repo.updateLightBgColor(hex) }
+
+    fun updateDarkSectionStyle(section: String, style: SectionStyle) =
+        viewModelScope.launch { repo.updateDarkSectionStyle(section, style) }
+
+    fun updateLightSectionStyle(section: String, style: SectionStyle) =
+        viewModelScope.launch { repo.updateLightSectionStyle(section, style) }
 
     /**
      * Promotes the song's current visual state to global defaults.

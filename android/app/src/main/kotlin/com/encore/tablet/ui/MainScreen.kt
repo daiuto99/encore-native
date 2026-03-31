@@ -88,6 +88,7 @@ import com.encore.feature.library.LibraryListContent
 import com.encore.feature.library.LibraryViewModel
 import com.encore.feature.library.SongChartEditorScreen
 import com.encore.feature.library.SongEditBottomSheet
+import com.encore.tablet.settings.SettingsScreen
 import com.encore.feature.performance.SongDetailScreen
 import com.encore.feature.performance.SongDetailViewModel
 import com.encore.tablet.auth.AuthViewModel
@@ -152,7 +153,15 @@ fun MainScreen(
                 },
                 onEditChart = { songId ->
                     navController.navigate(Routes.chartEditor(songId))
-                }
+                },
+                onSettingsClick = { navController.navigate(Routes.SETTINGS) }
+            )
+        }
+
+        composable(Routes.SETTINGS) {
+            SettingsScreen(
+                viewModel = appPrefsViewModel,
+                onNavigateBack = { navController.popBackStack() }
             )
         }
 
@@ -232,7 +241,8 @@ fun CommandCenterScreen(
     authViewModel: AuthViewModel,
     onToggleDarkMode: () -> Unit,
     onSongClick: (songId: String, setNumber: Int?) -> Unit,
-    onEditChart: ((songId: String) -> Unit)? = null
+    onEditChart: ((songId: String) -> Unit)? = null,
+    onSettingsClick: () -> Unit = {}
 ) {
     var selectedSetFilter by remember { mutableStateOf<Int?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -390,7 +400,8 @@ fun CommandCenterScreen(
                 onShowDropdown = { showAccountDropdown = true },
                 onDropdownDismiss = { showAccountDropdown = false },
                 onSignOut = { authViewModel.signOut(); showAccountDropdown = false },
-                onProfileSheetRequest = { showProfileSheet = true }
+                onProfileSheetRequest = { showProfileSheet = true },
+                onSettingsClick = onSettingsClick
             )
 
             HorizontalDivider(

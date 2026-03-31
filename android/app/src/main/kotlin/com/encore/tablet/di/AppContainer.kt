@@ -4,6 +4,7 @@ import android.content.Context
 import com.encore.core.data.db.EncoreDatabase
 import com.encore.core.data.auth.AuthRepository
 import com.encore.core.data.auth.AuthRepositoryImpl
+import com.encore.core.data.preferences.AppPreferencesRepository
 import com.encore.core.data.preferences.UserPreferencesRepository
 import com.encore.tablet.BuildConfig
 import com.encore.core.data.repository.SetlistRepository
@@ -44,6 +45,10 @@ class AppContainer(private val context: Context) {
 
     val userPreferencesRepository: UserPreferencesRepository by lazy {
         UserPreferencesRepository(context)
+    }
+
+    val appPreferencesRepository: AppPreferencesRepository by lazy {
+        AppPreferencesRepository(context)
     }
 
     val authRepository: AuthRepository by lazy {

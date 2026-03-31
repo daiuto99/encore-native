@@ -81,7 +81,9 @@ import androidx.navigation.navArgument
 import com.encore.core.data.auth.AuthState
 import com.encore.core.data.entities.SetEntity
 import com.encore.core.data.entities.SongEntity
+import com.encore.core.data.preferences.AppPreferences
 import com.encore.core.ui.theme.SetColor
+import com.encore.tablet.preferences.AppPreferencesViewModel
 import com.encore.feature.library.LibraryListContent
 import com.encore.feature.library.LibraryViewModel
 import com.encore.feature.library.SongChartEditorScreen
@@ -114,6 +116,8 @@ fun MainScreen(
     val navController = rememberNavController()
     val libraryViewModel: LibraryViewModel = viewModel(factory = viewModelFactory)
     val authViewModel: AuthViewModel = viewModel(factory = viewModelFactory)
+    val appPrefsViewModel: AppPreferencesViewModel = viewModel(factory = viewModelFactory)
+    val appPreferences by appPrefsViewModel.preferences.collectAsState()
     var isDarkMode by remember { mutableStateOf(true) }
     var editSong by remember { mutableStateOf<SongEntity?>(null) }
     val encoreColors = if (isDarkMode) DarkEncoreColors else LightEncoreColors
@@ -182,6 +186,7 @@ fun MainScreen(
                 viewModel = viewModel,
                 songId = songId,
                 setNumber = setNumber,
+                appPreferences = appPreferences,
                 onToggleDarkMode = { isDarkMode = !isDarkMode },
                 onEditClick = { song -> editSong = song },
                 onPageChanged = { editSong = null },

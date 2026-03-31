@@ -6,6 +6,7 @@ import com.encore.feature.library.LibraryViewModel
 import com.encore.feature.performance.SongDetailViewModel
 import com.encore.feature.setlists.SetlistViewModel
 import com.encore.tablet.auth.AuthViewModel
+import com.encore.tablet.preferences.AppPreferencesViewModel
 
 /**
  * Factory for creating ViewModels with dependencies.
@@ -23,7 +24,8 @@ class ViewModelFactory(
                 LibraryViewModel(
                     appContainer.songRepository,
                     appContainer.setlistRepository,
-                    appContainer.userPreferencesRepository
+                    appContainer.userPreferencesRepository,
+                    appContainer.appPreferencesRepository
                 ) as T
             }
             modelClass.isAssignableFrom(SetlistViewModel::class.java) -> {
@@ -41,6 +43,11 @@ class ViewModelFactory(
             modelClass.isAssignableFrom(AuthViewModel::class.java) -> {
                 AuthViewModel(
                     appContainer.authRepository
+                ) as T
+            }
+            modelClass.isAssignableFrom(AppPreferencesViewModel::class.java) -> {
+                AppPreferencesViewModel(
+                    appContainer.appPreferencesRepository
                 ) as T
             }
             else -> throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")

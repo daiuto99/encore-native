@@ -75,8 +75,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.encore.core.data.entities.SongEntity
-import com.encore.core.data.preferences.DisplayPreferences
-import com.encore.core.data.preferences.DisplayPreferencesHolder
+import com.encore.core.data.preferences.AppPreferences
 import com.encore.core.ui.theme.LocalEncoreColors
 import com.encore.core.ui.theme.SetColor
 import kotlinx.coroutines.delay
@@ -200,6 +199,7 @@ fun SongDetailScreen(
     onEditClick: ((com.encore.core.data.entities.SongEntity) -> Unit)? = null,
     onPageChanged: (() -> Unit)? = null,
     onNavigateToSong: ((String) -> Unit)? = null,
+    appPreferences: AppPreferences = AppPreferences(),
     modifier: Modifier = Modifier
 ) {
     val song by viewModel.song.collectAsState()
@@ -300,6 +300,7 @@ fun SongDetailScreen(
                             scrollState = pageScrollState,
                             textSizeMultiplier = effectiveZoom,
                             chordAccentColor = chordAccentColor,
+                            appPreferences = appPreferences,
                             onZoomChange = { zoom ->
                                 zoomPerSong[concreteSongId] = zoom
                                 if (isActivePage) viewModel.updateTextSize(zoom)
@@ -377,7 +378,7 @@ fun SongDetailScreen(
                     }
                 }
                 // Lead guitar indicator
-                if (song!!.isLeadGuitar) {
+                if (appPreferences.showLeadIndicator && song!!.isLeadGuitar) {
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
@@ -399,7 +400,8 @@ fun SongDetailScreen(
                 // "Not Original Key" badge
                 val currentDisplayKey = song!!.displayKey
                 val currentOriginalKey = song!!.originalKey
-                if (currentDisplayKey != null && currentOriginalKey != null &&
+                if (appPreferences.showTranspositionWarning &&
+                    currentDisplayKey != null && currentOriginalKey != null &&
                     currentDisplayKey != currentOriginalKey) {
                     Text(
                         text = "Not Original Key",
@@ -524,13 +526,13 @@ fun SongContent(
     onZoomChange: (Float) -> Unit,
     onSingleTap: () -> Unit,
     onDoubleTap: () -> Unit,
+    appPreferences: AppPreferences = AppPreferences(),
     modifier: Modifier = Modifier
 ) {
     val encoreColors = LocalEncoreColors.current
     var currentZoom by remember { mutableFloatStateOf(textSizeMultiplier) }
-    val displayPreferences = remember { DisplayPreferencesHolder.getPreferences() }
-    val sections = remember(song.markdownBody, displayPreferences) {
-        parseSongSections(song.markdownBody, displayPreferences)
+    val sections = remember(song.markdownBody, appPreferences.showChords, appPreferences.showKeyInfo) {
+        parseSongSections(song.markdownBody, appPreferences)
     }
     val vp = remember { ViewerPreferences() }
 
@@ -679,6 +681,12 @@ fun SongContent(
                                     lineHeight = (vp.lineHeightSp * textSizeMultiplier).sp,
                                     fontFamily = FontFamily.Monospace
                                 )
+                                // chordSpacing: extra gap after a chord-only line
+                                val isChordLine = isPureBacktickChordLine(lineToRender) ||
+                                    isBareChordLine(lineToRender)
+                                if (isChordLine && appPreferences.chordSpacing > 0f) {
+                                    Spacer(Modifier.height(appPreferences.chordSpacing.dp))
+                                }
                             }
                         }
                     }
@@ -715,7 +723,7 @@ private val FRONTMATTER_FENCE = Regex("""^-{3,}$""")
  */
 private fun parseSongSections(
     markdown: String,
-    preferences: DisplayPreferences
+    preferences: AppPreferences
 ): List<SongSection> {
     val result = mutableListOf<SongSection>()
     val bodyBuffer = mutableListOf<String>()
@@ -768,7 +776,7 @@ private fun parseSongSections(
             val level = trimmed.takeWhile { it == '#' }.length
             val headerText = trimmed.drop(level).trimStart()
             val color = if (preferences.showKeyInfo) {
-                DisplayPreferences.getSectionColor(headerText, preferences)
+                AppPreferences.getSectionColor(headerText, preferences)
             } else null
             result.add(SongSection.Header(text = headerText, level = level, color = color))
             continue

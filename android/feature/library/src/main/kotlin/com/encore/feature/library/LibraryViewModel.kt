@@ -11,6 +11,8 @@ import androidx.lifecycle.viewModelScope
 import com.encore.core.data.entities.SetEntity
 import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.entities.SyncStatus
+import com.encore.core.data.preferences.AppPreferences
+import com.encore.core.data.preferences.AppPreferencesRepository
 import com.encore.core.data.preferences.UserPreferencesRepository
 import com.encore.core.data.repository.SetlistRepository
 import com.encore.core.data.repository.SongRepository
@@ -49,7 +51,8 @@ import java.util.UUID
 class LibraryViewModel(
     private val songRepository: SongRepository,
     private val setlistRepository: SetlistRepository,
-    private val userPrefs: UserPreferencesRepository
+    private val userPrefs: UserPreferencesRepository,
+    private val appPrefsRepository: AppPreferencesRepository? = null
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
@@ -75,6 +78,15 @@ class LibraryViewModel(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = null
+        )
+
+    /** Global display preferences — emits instantly when any setting changes. */
+    val appPreferences: StateFlow<AppPreferences> = (appPrefsRepository?.appPreferences
+        ?: kotlinx.coroutines.flow.flowOf(AppPreferences()))
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = AppPreferences()
         )
 
     private val _sortOrder = MutableStateFlow(SortOrder.TITLE)

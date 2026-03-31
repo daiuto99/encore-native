@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -32,6 +33,7 @@ import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.outlined.NightsStay
 import androidx.compose.material.icons.outlined.WbSunny
@@ -64,7 +66,9 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.TextUnit
@@ -372,6 +376,45 @@ fun SongDetailScreen(
                         )
                     }
                 }
+                // Lead guitar indicator
+                if (song!!.isLeadGuitar) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(28.dp)
+                            .background(
+                                color = encoreColors.titleText.copy(alpha = 0.12f),
+                                shape = CircleShape
+                            )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MusicNote,
+                            contentDescription = "Lead guitar",
+                            tint = encoreColors.iconTint,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
+                // "Not Original Key" badge
+                val currentDisplayKey = song!!.displayKey
+                val currentOriginalKey = song!!.originalKey
+                if (currentDisplayKey != null && currentOriginalKey != null &&
+                    currentDisplayKey != currentOriginalKey) {
+                    Text(
+                        text = "Not Original Key",
+                        color = Color(0xFFFF9F0A),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .background(
+                                color = Color(0xFFFF9F0A).copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(4.dp)
+                            )
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
                 onEditClick?.let { edit ->
                     IconButton(
                         onClick = { song?.let { edit(it) } },
@@ -593,15 +636,44 @@ fun SongContent(
                 // ── Body block (lyrics + chords) ─────────────────────────────
                 is SongSection.Body -> {
                     if (section.markdown.isNotBlank()) {
+                        // Pre-scan for multi-line [h]...[/h] harmony blocks.
+                        // Same-line [h]Text[/h] is handled inside buildChordLine via HARMONY_TAG_PATTERN.
+                        var inHarmonyBlock = false
                         section.markdown.lines().forEach { rawLine ->
-                            if (rawLine.isBlank()) {
+                            val hasOpen = rawLine.contains("[h]")
+                            val hasClose = rawLine.contains("[/h]")
+                            val isHarmonyLine: Boolean
+                            val lineToRender: String
+                            when {
+                                hasOpen && hasClose -> {
+                                    // Self-contained — let buildChordLine handle it
+                                    isHarmonyLine = false
+                                    lineToRender = rawLine
+                                }
+                                hasOpen -> {
+                                    inHarmonyBlock = true
+                                    isHarmonyLine = true
+                                    lineToRender = rawLine.replace("[h]", "")
+                                }
+                                hasClose -> {
+                                    isHarmonyLine = true
+                                    lineToRender = rawLine.replace("[/h]", "")
+                                    inHarmonyBlock = false
+                                }
+                                else -> {
+                                    isHarmonyLine = inHarmonyBlock
+                                    lineToRender = rawLine
+                                }
+                            }
+                            if (lineToRender.isBlank()) {
                                 Spacer(modifier = Modifier.height(6.dp))
                             } else {
                                 Text(
                                     text = buildChordLine(
-                                        rawLine,
+                                        lineToRender,
                                         chordAccentColor,
-                                        encoreColors.lyricText.copy(alpha = vp.lyricAlpha)
+                                        encoreColors.lyricText.copy(alpha = vp.lyricAlpha),
+                                        isHarmonyLine = isHarmonyLine
                                     ),
                                     fontSize = (vp.bodyFontSizeSp * textSizeMultiplier).sp,
                                     lineHeight = (vp.lineHeightSp * textSizeMultiplier).sp,
@@ -730,6 +802,15 @@ private fun normalizeSectionName(name: String): String =
 // Matches backtick-wrapped bracket chords:  `[G]`  `[Am/E]`  `[Bb7]`
 private val BACKTICK_CHORD_PATTERN = Regex("""`\[([^\]]+)\]`""")
 
+// Harmony tag: [h]Text[/h]
+private val HARMONY_TAG_PATTERN = Regex("""\[h\](.*?)\[/h\]""")
+
+// Technical note: *(text)*  — single-asterisk wrapping (not bold markdown **)
+private val TECH_NOTE_PATTERN = Regex("""\*([^*]+)\*""")
+
+private enum class SpanType { CHORD, HARMONY, TECH_NOTE }
+private data class BodySpan(val range: IntRange, val type: SpanType, val text: String)
+
 // Fallback accent when no set context
 private val DEFAULT_CHORD_COLOR = Color(0xFF3B82F6) // Blue
 
@@ -739,14 +820,20 @@ private val DEFAULT_CHORD_COLOR = Color(0xFF3B82F6) // Blue
  * - Strips Markdown bold (`**`) markers.
  * - `` `[Chord]` `` segments → [chordColor] (brackets visible, backticks stripped).
  * - Legacy bare chord lines → entire line in [chordColor].
+ * - `[h]Text[/h]` → Bold + Orange + Underline (harmony annotation; always rendered).
+ * - `*(text)*` → subtle grey italic (technical/director note).
  * - Lyric text → [lyricColor].
  */
+private val HARMONY_COLOR = Color(0xFFFF9F0A)
+
 private fun buildChordLine(
     rawLine: String,
     chordColor: Color?,
-    lyricColor: Color
+    lyricColor: Color,
+    isHarmonyLine: Boolean = false
 ): AnnotatedString {
     val effectiveChordColor = chordColor ?: DEFAULT_CHORD_COLOR
+    val effectiveLyricColor = if (isHarmonyLine) HARMONY_COLOR else lyricColor
 
     // Strip markdown bold markers so `**Key:**` lines don't show asterisks
     val line = rawLine.replace("**", "")
@@ -758,32 +845,76 @@ private fun buildChordLine(
         }
     }
 
-    // No backtick chords → plain lyric line
-    if (!BACKTICK_CHORD_PATTERN.containsMatchIn(line)) {
+    // Collect all tagged spans in document order so we do one linear pass
+    val spans = mutableListOf<BodySpan>()
+    BACKTICK_CHORD_PATTERN.findAll(line).forEach {
+        spans += BodySpan(it.range, SpanType.CHORD, it.groupValues[1])
+    }
+    HARMONY_TAG_PATTERN.findAll(line).forEach {
+        spans += BodySpan(it.range, SpanType.HARMONY, it.groupValues[1])
+    }
+    TECH_NOTE_PATTERN.findAll(line).forEach {
+        spans += BodySpan(it.range, SpanType.TECH_NOTE, it.groupValues[1])
+    }
+
+    // If no special spans, plain lyric line (harmony style applied if in block)
+    if (spans.isEmpty()) {
         return buildAnnotatedString {
-            withStyle(SpanStyle(color = lyricColor)) { append(line) }
+            withStyle(
+                SpanStyle(
+                    color = effectiveLyricColor,
+                    fontWeight = if (isHarmonyLine) FontWeight.Bold else null,
+                    textDecoration = if (isHarmonyLine) TextDecoration.Underline else null
+                )
+            ) { append(line) }
         }
     }
 
-    // Mixed or chord-only line with backtick notation
+    spans.sortBy { it.range.first }
+
     return buildAnnotatedString {
         var cursor = 0
-        for (match in BACKTICK_CHORD_PATTERN.findAll(line)) {
-            // Lyric text before this chord
-            if (match.range.first > cursor) {
-                withStyle(SpanStyle(color = lyricColor)) {
-                    append(line.substring(cursor, match.range.first))
+        for (span in spans) {
+            if (span.range.first < cursor) continue // overlapping — skip
+            if (span.range.first > cursor) {
+                withStyle(
+                    SpanStyle(
+                        color = effectiveLyricColor,
+                        fontWeight = if (isHarmonyLine) FontWeight.Bold else null,
+                        textDecoration = if (isHarmonyLine) TextDecoration.Underline else null
+                    )
+                ) {
+                    append(line.substring(cursor, span.range.first))
                 }
             }
-            // Chord text — brackets kept, backticks stripped
-            withStyle(SpanStyle(color = effectiveChordColor)) {
-                append("[${match.groupValues[1]}]")
+            when (span.type) {
+                SpanType.CHORD -> withStyle(SpanStyle(color = effectiveChordColor)) {
+                    append("[${span.text}]")
+                }
+                SpanType.HARMONY -> withStyle(
+                    SpanStyle(
+                        color = HARMONY_COLOR,
+                        fontWeight = FontWeight.Bold,
+                        textDecoration = TextDecoration.Underline
+                    )
+                ) { append(span.text) }
+                SpanType.TECH_NOTE -> withStyle(
+                    SpanStyle(
+                        color = effectiveLyricColor.copy(alpha = 0.50f),
+                        fontStyle = FontStyle.Italic
+                    )
+                ) { append("(${span.text})") }
             }
-            cursor = match.range.last + 1
+            cursor = span.range.last + 1
         }
-        // Remaining lyric text after the last chord
         if (cursor < line.length) {
-            withStyle(SpanStyle(color = lyricColor)) { append(line.substring(cursor)) }
+            withStyle(
+                SpanStyle(
+                    color = effectiveLyricColor,
+                    fontWeight = if (isHarmonyLine) FontWeight.Bold else null,
+                    textDecoration = if (isHarmonyLine) TextDecoration.Underline else null
+                )
+            ) { append(line.substring(cursor)) }
         }
     }
 }

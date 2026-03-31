@@ -103,7 +103,7 @@ interface SongRepository {
      * Get all songs that have no key parsed yet.
      * Used for backfilling key on previously imported songs.
      *
-     * @return List of songs with null currentKey
+     * @return List of songs with null displayKey
      */
     suspend fun getSongsWithoutKey(): List<SongEntity>
 

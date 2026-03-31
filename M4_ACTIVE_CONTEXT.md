@@ -39,35 +39,28 @@ Add cloud-backed account and sync behavior without breaking the offline-first lo
   - Dragged row shows scale(1.03f) lift, 8dp shadow, and red border glow
   - `view.parent.requestDisallowInterceptTouchEvent(true)` prevents SwipeToDismissBox from stealing the gesture
 
-## Remaining M4 Work
-- Single active device session policy
-- Wire `SyncStatus` to real Ktor API calls
-- Manual **Sync Now** action
-- Conflict detection and conflict-resolution UI
-- Setlist management screen: create, rename, delete setlists
-
-## Zen UI — Phase 1 COMPLETE (this session)
-- **`EncoreTheme.kt`** — `EncoreColors` data class + `DarkEncoreColors` / `LightEncoreColors` / `LocalEncoreColors` in `core:ui`. All color references flow from here. Wire to Settings screen in a future session.
-- **Dark/Light toggle** — Sun/Moon icon in `EncoreHeader` and Performance slim header. State hoisted in `MainScreen`, provided via `CompositionLocalProvider` above `NavHost` so both screens share one source of truth.
-- **Zen Cards** — 72dp `Surface(RoundedCornerShape(12.dp))` cards, `#1C1C1E` dark / `#FFFFFF` light, 8dp spacing, `2dp` elevation in light mode only.
-- **Left accent bars** — 4dp, Set 1 `#5AC8FA` / Set 2 `#4CD964` / Set 3 `#AF52DE`. Identical in both themes.
-- **Typography** — Title Bold + `titleText`, Artist `artistText (60% alpha)`, glass key badge (`titleText × 10%` bg + `25%` border).
-- **SwipeToDismiss** clipped to `RoundedCornerShape(12.dp)` — red reveal does not bleed outside card.
+## Zen UI — Phase 1 COMPLETE
+- **`EncoreTheme.kt`** — `EncoreColors` data class + `DarkEncoreColors` / `LightEncoreColors` / `LocalEncoreColors` in `core:ui`.
+- **Dark/Light toggle** — Sun/Moon icon in `EncoreHeader` and Performance slim header.
+- **Zen Cards** — 72dp `Surface(RoundedCornerShape(12.dp))` cards, `#1C1C1E` dark / `#FFFFFF` light.
+- **Left accent bars** — 4dp, Set 1 `#5AC8FA` / Set 2 `#4CD964` / Set 3 `#AF52DE`.
 - **SetColor** updated to Zen pastels for Sets 1–3.
 
-## Song Edit Modal COMPLETE (this session)
-- **Swipe-right** on any Library card reveals blue (`#5AC8FA`) background + Edit icon → opens `SongEditBottomSheet`.
-- **Performance header** — Edit pencil icon opens same modal for the active song.
-- **`SongEditBottomSheet`** (in `feature/library`, accessible from `app` module): Title, Artist, Key, Harmony Mode switch, Line Highlight segmented buttons (None / Chords Bold / Lyrics Faded).
-- **DB v4 migration** — `is_harmony_mode INTEGER DEFAULT 0`, `highlight_style INTEGER DEFAULT 0` added to `songs` table via `MIGRATION_3_4`.
-- **Safety** — `onPageChanged` callback dismisses edit modal when user swipes to a new song in Performance Mode.
-- **Zen styling** — `navigationBarsPadding()` clears system dock, 20dp field spacing, themed field colors.
+## Schema & Logic Alignment — COMPLETE (this session)
+- **DB v5 migration** — `current_key` → `display_key`, added `original_key`, `is_lead_guitar`, `is_verified`, `last_verified_at`; removed `lead_marker`, `harmony_markup`. Full table-recreation migration (SQLite constraint). See `docs/decisions/002-song-schema-and-chart-editor.md`.
+- **Performance Header** — "Not Original Key" amber badge when `displayKey != originalKey`; Lead Guitar icon when `isLeadGuitar = true`.
+- **Edit Modal** — Removed Key field and Line Highlight buttons; added Lead Guitar toggle; "Edit Chart" button in header navigates to chart editor.
+- **`set_assignment`** — skipped; future Projects feature will own cross-set membership via a proper `Project` table.
 
-## Known Tweaks Needed (next session)
-- Edit modal visual polish pass — user noted tweaks needed but didn't specify; start session by asking.
-- `isHarmonyMode` and `highlightStyle` are persisted to DB but not yet wired to the Performance viewer renderer. That is the next rendering task.
-- Light mode: `ModalBottomSheet` scrim and system bars may need further theming pass.
-- `SetsSection` `FilterChip` unselected state still uses `MaterialTheme` colors in some edge cases.
+## Chart Editor Screen — COMPLETE (this session)
+- **`SongChartEditorScreen`** — Full-screen markdown editor with `BasicTextField` + `TextFieldValue` for cursor-safe tag insertion.
+- **Harmony DSL multi-line fix** — `SongDetailScreen` pre-scans body lines for `[h]`/`[/h]` block boundaries; lines inside a harmony block render orange + bold + underline. Single-line self-contained tags handled inline by `HARMONY_TAG_PATTERN`.
+- **Formatting toolbar** — `[h]`, Chord, Section buttons in TopAppBar alongside Cancel/Save (always accessible regardless of keyboard state).
+- **Selection caching** — `lastNonCollapsedSelection` restores selection when Android collapses it on button tap, enabling multiple harmony wraps in sequence.
+- **Focus management** — `focusManager.clearFocus()` on Save, Cancel, and Back dismisses cursor and Android selection action bar; prevents editor getting stuck in active-but-no-keyboard state.
+- **Live highlight** — `HarmonyHighlightTransformation` (`VisualTransformation`) shows orange tint on `[h]...[/h]` spans while editing.
+- **Inline chord/section edit** — panel floats above keyboard via `imePadding()`, only shown when active.
+- **`SongEditBottomSheet`** — "Select All" suppressed via `LocalTextToolbar` override (`onSelectAllRequested = null`); explicit "Exit" button added below Save.
 
 ## Remaining M4 Work
 - Single active device session policy
@@ -80,5 +73,7 @@ Add cloud-backed account and sync behavior without breaking the offline-first lo
 - `SetlistDetailScreen.kt` is a separate screen the user does not use — do not touch it
 - The Library screen (`feature/library`) is the correct location for all set-tab and song-list work
 - `SongEditBottomSheet` is in `feature/library` and imported by the `app` module for the Performance screen path
+- `SongChartEditorScreen` is in `feature/library`; navigated to via `Routes.SONG_CHART_EDITOR = "chart_editor/{songId}"`
+- DB is currently at version 5
 - Build filter: `./gradlew assembleDebug 2>&1 | grep -E "FAILED|^e: |BUILD SUCCESSFUL"`
 - ADB path: `~/Library/Android/sdk/platform-tools/adb`

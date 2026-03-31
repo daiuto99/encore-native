@@ -136,7 +136,7 @@ interface SongDao {
      * Get all songs that have no key parsed yet.
      * Used for backfilling key on previously imported songs.
      */
-    @Query("SELECT * FROM songs WHERE current_key IS NULL")
+    @Query("SELECT * FROM songs WHERE display_key IS NULL")
     suspend fun getSongsWithoutKey(): List<SongEntity>
 
     /**

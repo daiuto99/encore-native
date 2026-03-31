@@ -42,9 +42,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Surface
@@ -86,10 +83,15 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalTextToolbar
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.TextToolbar
+import androidx.compose.ui.platform.TextToolbarStatus
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -228,6 +230,7 @@ fun LibraryScreen(
 fun LibraryListContent(
     viewModel: LibraryViewModel,
     onSongClick: (String) -> Unit,
+    onEditChart: ((songId: String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val songs by viewModel.songs.collectAsState()
@@ -299,6 +302,7 @@ fun LibraryListContent(
                     onRemoveFromSet = { songId, setNum -> viewModel.removeSongFromSetNumber(songId, setNum) },
                     onAddToSet = { /* handled inside item */ },
                     onReorder = { songId, toIdx -> viewModel.reorderSong(songId, toIdx) },
+                    onEditChart = onEditChart,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -327,6 +331,7 @@ fun SongList(
     onRemoveFromSet: (String, Int) -> Unit,
     onAddToSet: (String) -> Unit,
     onReorder: (String, Int) -> Unit,
+    onEditChart: ((songId: String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val listState = rememberLazyListState()
@@ -411,6 +416,7 @@ fun SongList(
                 onDeleteSong = { onDeleteSong(song) },
                 onRemoveFromSet = onRemoveFromSet,
                 onAddToSet = { onAddToSet(song.id) },
+                onEditChart = onEditChart,
                 isDragging = isDragging,
                 dragHandleModifier = dragHandleModifier,
                 modifier = Modifier
@@ -445,6 +451,7 @@ fun SongListItem(
     onDeleteSong: () -> Unit,
     onRemoveFromSet: (String, Int) -> Unit,
     onAddToSet: () -> Unit,
+    onEditChart: ((songId: String) -> Unit)? = null,
     isDragging: Boolean = false,
     dragHandleModifier: Modifier = Modifier,
     modifier: Modifier = Modifier
@@ -600,11 +607,12 @@ fun SongListItem(
     if (showEditSheet) {
         SongEditBottomSheet(
             song = song,
-            onSave = { title, artist, key, harmonyMode, highlightStyle ->
-                viewModel.updateSongMetadata(song.id, title, artist, key, harmonyMode, highlightStyle)
+            onSave = { title, artist, isLeadGuitar, harmonyMode ->
+                viewModel.updateSongMetadata(song.id, title, artist, isLeadGuitar, harmonyMode)
                 showEditSheet = false
             },
-            onDismiss = { showEditSheet = false }
+            onDismiss = { showEditSheet = false },
+            onEditChart = onEditChart?.let { cb -> { showEditSheet = false; cb(song.id) } }
         )
     }
 
@@ -700,7 +708,7 @@ fun SongListItem(
                     Spacer(modifier = Modifier.width(8.dp))
 
                     // Key badge — glass pill
-                    song.currentKey?.let { key ->
+                    song.displayKey?.let { key ->
                         KeyBadge(key = key, accentColor = rowAccentColor)
                         Spacer(modifier = Modifier.width(4.dp))
                     }
@@ -865,18 +873,16 @@ fun EmptyLibraryMessage(
 @Composable
 fun SongEditBottomSheet(
     song: com.encore.core.data.entities.SongEntity,
-    onSave: (title: String, artist: String, key: String?, isHarmonyMode: Boolean, highlightStyle: Int) -> Unit,
-    onDismiss: () -> Unit
+    onSave: (title: String, artist: String, isLeadGuitar: Boolean, isHarmonyMode: Boolean) -> Unit,
+    onDismiss: () -> Unit,
+    onEditChart: (() -> Unit)? = null
 ) {
     val encoreColors = LocalEncoreColors.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var title by remember(song.id) { mutableStateOf(song.title) }
     var artist by remember(song.id) { mutableStateOf(if (song.artist == "Unknown Artist") "" else song.artist) }
-    var key by remember(song.id) { mutableStateOf(song.currentKey ?: "") }
+    var leadGuitar by remember(song.id) { mutableStateOf(song.isLeadGuitar) }
     var harmonyMode by remember(song.id) { mutableStateOf(song.isHarmonyMode) }
-    var highlightStyle by remember(song.id) { mutableStateOf(song.highlightStyle) }
-
-    val highlightOptions = listOf("None", "Chords Bold", "Lyrics Faded")
 
     val fieldColors = OutlinedTextFieldDefaults.colors(
         focusedTextColor = encoreColors.titleText,
@@ -890,6 +896,22 @@ fun SongEditBottomSheet(
         unfocusedContainerColor = Color.Transparent,
     )
 
+    val baseToolbar = LocalTextToolbar.current
+    val noSelectAllToolbar = remember(baseToolbar) {
+        object : TextToolbar {
+            override val status: TextToolbarStatus get() = baseToolbar.status
+            override fun showMenu(
+                rect: Rect,
+                onCopyRequested: (() -> Unit)?,
+                onPasteRequested: (() -> Unit)?,
+                onCutRequested: (() -> Unit)?,
+                onSelectAllRequested: (() -> Unit)?
+            ) = baseToolbar.showMenu(rect, onCopyRequested, onPasteRequested, onCutRequested, null)
+            override fun hide() = baseToolbar.hide()
+        }
+    }
+
+    CompositionLocalProvider(LocalTextToolbar provides noSelectAllToolbar) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -902,12 +924,27 @@ fun SongEditBottomSheet(
                 .navigationBarsPadding()
                 .padding(bottom = 16.dp)
         ) {
-            Text(
-                text = "Edit Song",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = encoreColors.titleText
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Edit Song",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = encoreColors.titleText,
+                    modifier = Modifier.weight(1f)
+                )
+                onEditChart?.let { editChart ->
+                    androidx.compose.material3.TextButton(onClick = editChart) {
+                        Text(
+                            text = "Edit Chart",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = encoreColors.iconTint
+                        )
+                    }
+                }
+            }
             Spacer(modifier = Modifier.height(20.dp))
 
             OutlinedTextField(
@@ -930,14 +967,29 @@ fun SongEditBottomSheet(
             )
             Spacer(modifier = Modifier.height(20.dp))
 
-            OutlinedTextField(
-                value = key,
-                onValueChange = { key = it },
-                label = { Text("Key  (e.g. G, Eb, F#m)") },
-                singleLine = true,
-                colors = fieldColors,
-                modifier = Modifier.fillMaxWidth()
-            )
+            // Lead Guitar toggle row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Lead Guitar",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        color = encoreColors.titleText
+                    )
+                    Text(
+                        text = "Show guitar icon in performance header",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = encoreColors.artistText
+                    )
+                }
+                Switch(
+                    checked = leadGuitar,
+                    onCheckedChange = { leadGuitar = it }
+                )
+            }
             Spacer(modifier = Modifier.height(20.dp))
 
             // Harmony Mode toggle row
@@ -963,38 +1015,6 @@ fun SongEditBottomSheet(
                     onCheckedChange = { harmonyMode = it }
                 )
             }
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Line Highlight Style
-            Text(
-                text = "Line Highlight",
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium,
-                color = encoreColors.titleText
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                highlightOptions.forEachIndexed { index, label ->
-                    SegmentedButton(
-                        selected = highlightStyle == index,
-                        onClick = { highlightStyle = index },
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = highlightOptions.size),
-                        colors = SegmentedButtonDefaults.colors(
-                            activeContainerColor = encoreColors.titleText,
-                            inactiveContainerColor = Color.Transparent,
-                            activeBorderColor = encoreColors.titleText,
-                            inactiveBorderColor = encoreColors.titleText.copy(alpha = 0.3f)
-                        )
-                    ) {
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (highlightStyle == index) encoreColors.screenBackground
-                                    else encoreColors.titleText
-                        )
-                    }
-                }
-            }
             Spacer(modifier = Modifier.height(24.dp))
 
             androidx.compose.material3.Button(
@@ -1002,9 +1022,8 @@ fun SongEditBottomSheet(
                     onSave(
                         title.trim().ifBlank { song.title },
                         artist.trim().ifBlank { "Unknown Artist" },
-                        key.trim().ifBlank { null },
-                        harmonyMode,
-                        highlightStyle
+                        leadGuitar,
+                        harmonyMode
                     )
                 },
                 shape = RoundedCornerShape(50),
@@ -1018,6 +1037,19 @@ fun SongEditBottomSheet(
                     fontWeight = FontWeight.SemiBold
                 )
             }
+            Spacer(modifier = Modifier.height(12.dp))
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "Exit",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = encoreColors.artistText
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
         }
     }
+    } // CompositionLocalProvider
 }

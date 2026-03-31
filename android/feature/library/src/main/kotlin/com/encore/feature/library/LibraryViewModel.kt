@@ -26,6 +26,7 @@ import com.encore.core.data.relations.SetEntryWithSong
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -200,7 +201,7 @@ class LibraryViewModel(
     }
 
     /**
-     * Scans all songs with null currentKey and re-parses their markdown body to extract the key.
+     * Scans all songs with null displayKey and re-parses their markdown body to extract the key.
      * Runs once on ViewModel creation to repair previously imported songs.
      */
     private fun backfillMissingKeys() {
@@ -212,7 +213,7 @@ class LibraryViewModel(
                     if (key != null) {
                         val now = System.currentTimeMillis()
                         songRepository.upsertSong(
-                            song.copy(currentKey = key, updatedAt = now, localUpdatedAt = now)
+                            song.copy(displayKey = key, updatedAt = now, localUpdatedAt = now)
                         )
                         Log.d(TAG, "Backfilled key for: ${song.title} → $key")
                     }
@@ -332,7 +333,7 @@ class LibraryViewModel(
                                     title = title,
                                     artist = artist,
                                     markdownBody = content,
-                                    currentKey = key,
+                                    displayKey = key,
                                     updatedAt = now,
                                     localUpdatedAt = now,
                                     version = existing.version + 1,
@@ -348,7 +349,7 @@ class LibraryViewModel(
                             userId = "local-user",
                             title = title,
                             artist = artist,
-                            currentKey = key,
+                            displayKey = key,
                             markdownBody = content,
                             originalImportBody = content,
                             version = 1,
@@ -432,7 +433,7 @@ class LibraryViewModel(
                             userId = "local-user",
                             title = title,
                             artist = artist,
-                            currentKey = key,
+                            displayKey = key,
                             markdownBody = content,
                             originalImportBody = content,
                             version = 1,
@@ -528,7 +529,7 @@ class LibraryViewModel(
                             songRepository.upsertSong(
                                 existing.copy(
                                     markdownBody = content,
-                                    currentKey = key,
+                                    displayKey = key,
                                     updatedAt = now,
                                     localUpdatedAt = now,
                                     version = existing.version + 1,
@@ -543,7 +544,7 @@ class LibraryViewModel(
                                 userId = "local-user",
                                 title = title,
                                 artist = artist,
-                                currentKey = key,
+                                displayKey = key,
                                 markdownBody = content,
                                 originalImportBody = content,
                                 version = 1,
@@ -593,9 +594,8 @@ class LibraryViewModel(
         songId: String,
         title: String,
         artist: String,
-        key: String?,
-        isHarmonyMode: Boolean = false,
-        highlightStyle: Int = 0
+        isLeadGuitar: Boolean = false,
+        isHarmonyMode: Boolean = false
     ) {
         viewModelScope.launch {
             val existing = songRepository.getSongById(songId) ?: return@launch
@@ -603,10 +603,25 @@ class LibraryViewModel(
                 existing.copy(
                     title = title,
                     artist = artist,
-                    currentKey = key,
-                    isHarmonyMode = isHarmonyMode,
-                    highlightStyle = highlightStyle
+                    isLeadGuitar = isLeadGuitar,
+                    isHarmonyMode = isHarmonyMode
                 )
+            )
+        }
+    }
+
+    /** Single-shot flow for observing a song in the chart editor. */
+    fun getSongFlow(songId: String): Flow<SongEntity?> = flow {
+        emit(songRepository.getSongById(songId))
+    }
+
+    /** Persist edited markdown body to DB. */
+    fun updateMarkdownBody(songId: String, body: String) {
+        viewModelScope.launch {
+            val existing = songRepository.getSongById(songId) ?: return@launch
+            val now = System.currentTimeMillis()
+            songRepository.upsertSong(
+                existing.copy(markdownBody = body, updatedAt = now, localUpdatedAt = now)
             )
         }
     }

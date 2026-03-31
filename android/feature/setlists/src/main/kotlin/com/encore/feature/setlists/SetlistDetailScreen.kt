@@ -240,7 +240,7 @@ fun SetSection(
                         songId = entryWithSong.song.id,
                         title = entryWithSong.song.title,
                         artist = entryWithSong.song.artist,
-                        key = entryWithSong.song.currentKey,
+                        key = entryWithSong.song.displayKey,
                         onClick = { onSongClick(entryWithSong.song.id) },
                         modifier = Modifier.weight(1f)
                     )
@@ -484,7 +484,7 @@ fun SongSelectionItem(
             )
         }
 
-        song.currentKey?.let { key ->
+        song.displayKey?.let { key ->
             Spacer(modifier = Modifier.width(8.dp))
             Surface(
                 shape = MaterialTheme.shapes.small,

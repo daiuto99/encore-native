@@ -84,6 +84,7 @@ import com.encore.core.data.entities.SongEntity
 import com.encore.core.ui.theme.SetColor
 import com.encore.feature.library.LibraryListContent
 import com.encore.feature.library.LibraryViewModel
+import com.encore.feature.library.SongChartEditorScreen
 import com.encore.feature.library.SongEditBottomSheet
 import com.encore.feature.performance.SongDetailScreen
 import com.encore.feature.performance.SongDetailViewModel
@@ -121,11 +122,15 @@ fun MainScreen(
     editSong?.let { song ->
         SongEditBottomSheet(
             song = song,
-            onSave = { title, artist, key, harmonyMode, highlightStyle ->
-                libraryViewModel.updateSongMetadata(song.id, title, artist, key, harmonyMode, highlightStyle)
+            onSave = { title, artist, isLeadGuitar, harmonyMode ->
+                libraryViewModel.updateSongMetadata(song.id, title, artist, isLeadGuitar, harmonyMode)
                 editSong = null
             },
-            onDismiss = { editSong = null }
+            onDismiss = { editSong = null },
+            onEditChart = {
+                editSong = null
+                navController.navigate(Routes.chartEditor(song.id))
+            }
         )
     }
     NavHost(
@@ -140,7 +145,22 @@ fun MainScreen(
                 onToggleDarkMode = { isDarkMode = !isDarkMode },
                 onSongClick = { songId, setNumber ->
                     navController.navigate(Routes.songDetail(songId, setNumber))
+                },
+                onEditChart = { songId ->
+                    navController.navigate(Routes.chartEditor(songId))
                 }
+            )
+        }
+
+        composable(
+            route = Routes.SONG_CHART_EDITOR,
+            arguments = listOf(navArgument("songId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val songId = backStackEntry.arguments?.getString("songId") ?: return@composable
+            SongChartEditorScreen(
+                songId = songId,
+                viewModel = libraryViewModel,
+                onNavigateBack = { navController.popBackStack() }
             )
         }
 
@@ -206,7 +226,8 @@ fun CommandCenterScreen(
     libraryViewModel: LibraryViewModel,
     authViewModel: AuthViewModel,
     onToggleDarkMode: () -> Unit,
-    onSongClick: (songId: String, setNumber: Int?) -> Unit
+    onSongClick: (songId: String, setNumber: Int?) -> Unit,
+    onEditChart: ((songId: String) -> Unit)? = null
 ) {
     var selectedSetFilter by remember { mutableStateOf<Int?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -377,6 +398,7 @@ fun CommandCenterScreen(
             LibraryListContent(
                 viewModel = libraryViewModel,
                 onSongClick = { songId -> onSongClick(songId, selectedSetFilter) },
+                onEditChart = onEditChart,
                 modifier = Modifier.weight(1f)
             )
 

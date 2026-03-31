@@ -20,6 +20,16 @@ Add cloud-backed account and sync behavior without breaking the offline-first lo
 - **Swipe/zoom gesture fix:** `onZoomChange` deferred to finger-lift — eliminates pager stutter
 - **Set sort order:** All DAO queries now `ORDER BY created_at ASC`
 - **`reorderSongInSet(entryId, newPosition)`** wired in ViewModel and Repository
+- **Performance Mode gesture & zoom polish (COMPLETE):**
+  - Double-tap to reset zoom: custom `PointerEventPass.Initial` detector bypasses HorizontalPager scroll interception
+  - `beyondBoundsPageCount = 1` pre-renders adjacent songs for instant swipe
+  - `Crossfade(pageSong?.id, tween(250))` — keyed on song identity, not entity fields; no re-fade on DB updates
+  - `zoomPerSong: mutableStateMapOf<String, Float>` at screen level — per-song in-session zoom, survives pager swipes
+  - All gesture closures use `currentSong.id` (concrete DB identity), not pager slot — immune to mid-swipe desync
+  - `didZoom` flag in pinch loop — single-finger taps never overwrite zoom via `onZoomChange`
+  - +/- HUD buttons read/write `zoomPerSong` as single source of truth; ViewModel is write-only for DB persistence
+  - `zoomPerSong.clear()` on `DisposableEffect` dispose — no stale entries across sessions
+  - `LaunchedEffect(song.id)` replaces `LaunchedEffect(textSizeMultiplier)` — `currentZoom` only resets on song change
 - **Song drag-to-reorder on Library screen (COMPLETE):**
   - ≡ handle visible when a Set tab is active; long-press triggers haptic + drag
   - `mutableStateListOf` local shadow list drives LazyColumn — no DB reads during drag

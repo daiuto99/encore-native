@@ -2,6 +2,8 @@ package com.encore.feature.performance
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -44,6 +46,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -51,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.AnnotatedString
@@ -69,6 +73,7 @@ import com.encore.core.data.preferences.DisplayPreferencesHolder
 import com.encore.core.ui.theme.SetColor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Viewer preferences
@@ -194,12 +199,17 @@ fun SongDetailScreen(
 
     var showControls by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    // Per-song in-session zoom map. Populated on first zoom gesture; falls back to DB value.
+    val zoomPerSong = remember { mutableStateMapOf<String, Float>() }
 
     // Keep screen on during performance
     val view = LocalView.current
     DisposableEffect(Unit) {
         view.keepScreenOn = true
-        onDispose { view.keepScreenOn = false }
+        onDispose {
+            view.keepScreenOn = false
+            zoomPerSong.clear()
+        }
     }
 
     LaunchedEffect(songId) {
@@ -253,6 +263,7 @@ fun SongDetailScreen(
             // ── HorizontalPager — one page per song in the set ───────────────
             HorizontalPager(
                 state = pagerState,
+                beyondBoundsPageCount = 1,
                 modifier = Modifier.fillMaxSize()
             ) { page ->
                 val pageSongId = effectiveSongIds.getOrNull(page) ?: songId
@@ -260,22 +271,41 @@ fun SongDetailScreen(
                 val pageScrollState = rememberScrollState()
                 val isActivePage = page == pagerState.currentPage
 
-                if (pageSong != null) {
-                    SongContent(
-                        song = pageSong!!,
-                        scrollState = pageScrollState,
-                        textSizeMultiplier = if (isActivePage) textSizeMultiplier
-                                             else pageSong!!.lastZoomLevel,
-                        chordAccentColor = chordAccentColor,
-                        onZoomChange = { if (isActivePage) viewModel.updateTextSize(it) },
-                        onSingleTap = { showControls = !showControls },
-                        onDoubleTap = {
-                            if (isActivePage) { viewModel.resetTextSize(); showControls = true }
+                Crossfade(
+                    targetState = pageSong?.id,
+                    animationSpec = tween(250)
+                ) { _ ->
+                    val currentSong = pageSong
+                    if (currentSong != null) {
+                        // Use currentSong.id (concrete DB identity) — not pageSongId (pager slot).
+                        // This locks every gesture closure to the exact song being displayed,
+                        // immune to slot reuse during mid-swipe beyondBoundsPageCount rendering.
+                        val concreteSongId = currentSong.id
+                        val effectiveZoom = zoomPerSong[concreteSongId] ?: currentSong.lastZoomLevel
+                        SongContent(
+                            song = currentSong,
+                            scrollState = pageScrollState,
+                            textSizeMultiplier = effectiveZoom,
+                            chordAccentColor = chordAccentColor,
+                            onZoomChange = { zoom ->
+                                zoomPerSong[concreteSongId] = zoom
+                                if (isActivePage) viewModel.updateTextSize(zoom)
+                            },
+                            onSingleTap = { showControls = !showControls },
+                            onDoubleTap = {
+                                // Map write is unconditional — the key is song-specific so it's
+                                // always safe. ViewModel reset only fires for the active page.
+                                zoomPerSong[concreteSongId] = 1.0f
+                                if (isActivePage) {
+                                    viewModel.resetTextSize()
+                                    showControls = true
+                                }
+                            }
+                        )
+                    } else {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = Color.White)
                         }
-                    )
-                } else {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = Color.White)
                     }
                 }
             }
@@ -373,14 +403,20 @@ fun SongDetailScreen(
                     .align(Alignment.BottomEnd)
                     .padding(16.dp)
             ) {
+                val activeSongId = effectiveSongIds.getOrNull(pagerState.currentPage) ?: songId
+                val activeZoom = zoomPerSong[activeSongId] ?: textSizeMultiplier
                 FloatingZoomControls(
-                    currentZoom = textSizeMultiplier,
+                    currentZoom = activeZoom,
                     onZoomIn = {
-                        viewModel.updateTextSize(textSizeMultiplier + 0.1f)
+                        val newZoom = (activeZoom + 0.1f).coerceIn(0.5f, 3.0f)
+                        zoomPerSong[activeSongId] = newZoom
+                        viewModel.updateTextSize(newZoom)
                         showControls = true
                     },
                     onZoomOut = {
-                        viewModel.updateTextSize(textSizeMultiplier - 0.1f)
+                        val newZoom = (activeZoom - 0.1f).coerceIn(0.5f, 3.0f)
+                        zoomPerSong[activeSongId] = newZoom
+                        viewModel.updateTextSize(newZoom)
                         showControls = true
                     }
                 )
@@ -419,7 +455,8 @@ fun SongContent(
     }
     val vp = remember { ViewerPreferences() }
 
-    LaunchedEffect(textSizeMultiplier) { currentZoom = textSizeMultiplier }
+    // Reset local zoom only when the song itself changes, not on every zoom tick.
+    LaunchedEffect(song.id) { currentZoom = textSizeMultiplier }
 
     Column(
         modifier = modifier
@@ -427,6 +464,7 @@ fun SongContent(
             .pointerInput("zoom") {
                 awaitEachGesture {
                     var pressed = true
+                    var didZoom = false
                     while (pressed) {
                         val event = awaitPointerEvent()
                         if (event.changes.size >= 2) {
@@ -434,22 +472,37 @@ fun SongContent(
                             if (zoomChange != 1f) {
                                 currentZoom = (currentZoom * zoomChange).coerceIn(0.5f, 3.0f)
                                 event.changes.forEach { it.consume() }
-                                // currentZoom (local state) updates every frame for smooth visual.
-                                // onZoomChange (ViewModel/DB write) is deferred to gesture end
-                                // to prevent mid-gesture recomposition from fighting the pager.
+                                didZoom = true
                             }
                         }
                         pressed = event.changes.any { it.pressed }
                     }
-                    // Persist zoom once — when all fingers lift
-                    onZoomChange(currentZoom)
+                    // Only persist if a real pinch occurred — single-finger taps (including
+                    // double-tap reset) must not overwrite the zoom that onDoubleTap just set.
+                    if (didZoom) onZoomChange(currentZoom)
                 }
             }
             .pointerInput("tap") {
-                detectTapGestures(
-                    onDoubleTap = { onDoubleTap() },
-                    onTap = { onSingleTap() }
-                )
+                // Use Initial pass so double-tap is detected before HorizontalPager's
+                // scroll handler on Main pass can consume the pointer events.
+                awaitEachGesture {
+                    val down = awaitPointerEvent(PointerEventPass.Initial)
+                    if (down.changes.size != 1 || !down.changes[0].pressed) return@awaitEachGesture
+
+                    // Wait for first finger up
+                    do {
+                        val up = awaitPointerEvent(PointerEventPass.Initial)
+                        if (up.changes.none { it.pressed }) break
+                    } while (true)
+
+                    // Watch for second tap within the double-tap window
+                    val isDoubleTap = withTimeoutOrNull(viewConfiguration.doubleTapTimeoutMillis) {
+                        val second = awaitPointerEvent(PointerEventPass.Initial)
+                        second.changes.size == 1 && second.changes[0].pressed
+                    } ?: false
+
+                    if (isDoubleTap) onDoubleTap() else onSingleTap()
+                }
             }
             .verticalScroll(scrollState)
             // top padding clears the slim header (~48 dp) + small gap

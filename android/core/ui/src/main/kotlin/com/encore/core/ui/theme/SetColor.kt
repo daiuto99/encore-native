@@ -20,10 +20,10 @@ object SetColor {
      */
     fun getSetColor(setNumber: Int): Color {
         return when (setNumber) {
-            1 -> Color(0xFF3B82F6) // Blue
-            2 -> Color(0xFFF97316) // Orange
-            3 -> Color(0xFF10B981) // Green
-            4 -> Color(0xFF8B5CF6) // Purple
+            1 -> Color(0xFF5AC8FA) // Soft Blue
+            2 -> Color(0xFF4CD964) // Soft Green
+            3 -> Color(0xFFAF52DE) // Soft Purple
+            4 -> Color(0xFF8B5CF6) // Purple (unchanged)
             else -> Color(0xFF6B7280) // Gray fallback
         }
     }

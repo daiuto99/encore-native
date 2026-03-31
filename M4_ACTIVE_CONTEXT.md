@@ -46,18 +46,39 @@ Add cloud-backed account and sync behavior without breaking the offline-first lo
 - Conflict detection and conflict-resolution UI
 - Setlist management screen: create, rename, delete setlists
 
-## Current Recommendation
-Work M4 in this order:
-1. Define sync state machine and API contract
-2. Implement Manual Sync Now flow against real API calls
-3. Conflict detection and resolution UI
+## Zen UI — Phase 1 COMPLETE (this session)
+- **`EncoreTheme.kt`** — `EncoreColors` data class + `DarkEncoreColors` / `LightEncoreColors` / `LocalEncoreColors` in `core:ui`. All color references flow from here. Wire to Settings screen in a future session.
+- **Dark/Light toggle** — Sun/Moon icon in `EncoreHeader` and Performance slim header. State hoisted in `MainScreen`, provided via `CompositionLocalProvider` above `NavHost` so both screens share one source of truth.
+- **Zen Cards** — 72dp `Surface(RoundedCornerShape(12.dp))` cards, `#1C1C1E` dark / `#FFFFFF` light, 8dp spacing, `2dp` elevation in light mode only.
+- **Left accent bars** — 4dp, Set 1 `#5AC8FA` / Set 2 `#4CD964` / Set 3 `#AF52DE`. Identical in both themes.
+- **Typography** — Title Bold + `titleText`, Artist `artistText (60% alpha)`, glass key badge (`titleText × 10%` bg + `25%` border).
+- **SwipeToDismiss** clipped to `RoundedCornerShape(12.dp)` — red reveal does not bleed outside card.
+- **SetColor** updated to Zen pastels for Sets 1–3.
 
-## Next Session Starts Here
-1. **UI polish pass** — review the Library screen and Performance Mode for visual improvements (typography, spacing, color, layout density). No new features yet.
-2. **Song Details / Settings screen** — a dedicated screen for editing song metadata (key, title, artist) and viewer preferences (font size defaults, section colors). Scope TBD at session start.
+## Song Edit Modal COMPLETE (this session)
+- **Swipe-right** on any Library card reveals blue (`#5AC8FA`) background + Edit icon → opens `SongEditBottomSheet`.
+- **Performance header** — Edit pencil icon opens same modal for the active song.
+- **`SongEditBottomSheet`** (in `feature/library`, accessible from `app` module): Title, Artist, Key, Harmony Mode switch, Line Highlight segmented buttons (None / Chords Bold / Lyrics Faded).
+- **DB v4 migration** — `is_harmony_mode INTEGER DEFAULT 0`, `highlight_style INTEGER DEFAULT 0` added to `songs` table via `MIGRATION_3_4`.
+- **Safety** — `onPageChanged` callback dismisses edit modal when user swipes to a new song in Performance Mode.
+- **Zen styling** — `navigationBarsPadding()` clears system dock, 20dp field spacing, themed field colors.
+
+## Known Tweaks Needed (next session)
+- Edit modal visual polish pass — user noted tweaks needed but didn't specify; start session by asking.
+- `isHarmonyMode` and `highlightStyle` are persisted to DB but not yet wired to the Performance viewer renderer. That is the next rendering task.
+- Light mode: `ModalBottomSheet` scrim and system bars may need further theming pass.
+- `SetsSection` `FilterChip` unselected state still uses `MaterialTheme` colors in some edge cases.
+
+## Remaining M4 Work
+- Single active device session policy
+- Wire `SyncStatus` to real Ktor API calls
+- Manual **Sync Now** action
+- Conflict detection and conflict-resolution UI
+- Setlist management screen: create, rename, delete setlists
 
 ## Known Facts for Next Session
-- `SetlistDetailScreen.kt` is a separate screen the user does not use for the main workflow — do not touch it
+- `SetlistDetailScreen.kt` is a separate screen the user does not use — do not touch it
 - The Library screen (`feature/library`) is the correct location for all set-tab and song-list work
+- `SongEditBottomSheet` is in `feature/library` and imported by the `app` module for the Performance screen path
 - Build filter: `./gradlew assembleDebug 2>&1 | grep -E "FAILED|^e: |BUILD SUCCESSFUL"`
 - ADB path: `~/Library/Android/sdk/platform-tools/adb`

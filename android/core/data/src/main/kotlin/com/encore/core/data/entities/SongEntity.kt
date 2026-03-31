@@ -72,5 +72,11 @@ data class SongEntity(
     val localUpdatedAt: Long, // Last local modification timestamp
 
     @ColumnInfo(name = "last_synced_at")
-    val lastSyncedAt: Long? = null // Last successful sync timestamp
+    val lastSyncedAt: Long? = null, // Last successful sync timestamp
+
+    @ColumnInfo(name = "is_harmony_mode")
+    val isHarmonyMode: Boolean = false, // Harmony mode viewer toggle
+
+    @ColumnInfo(name = "highlight_style")
+    val highlightStyle: Int = 0 // 0 = None, 1 = Chords Bold, 2 = Lyrics Faded
 )

@@ -38,7 +38,7 @@ import java.util.UUID
         SetEntity::class,
         SetEntryEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 @TypeConverters(EncoreTypeConverters::class)
@@ -81,6 +81,16 @@ abstract class EncoreDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration from version 3 to 4: Add isHarmonyMode and highlightStyle to songs.
+         */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE songs ADD COLUMN is_harmony_mode INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE songs ADD COLUMN highlight_style INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /**
          * Get singleton database instance.
          *
          * @param context Application context
@@ -93,7 +103,7 @@ abstract class EncoreDatabase : RoomDatabase() {
                     EncoreDatabase::class.java,
                     DATABASE_NAME
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .fallbackToDestructiveMigration()
                     .addCallback(DatabaseCallback(context.applicationContext))
                     .build()

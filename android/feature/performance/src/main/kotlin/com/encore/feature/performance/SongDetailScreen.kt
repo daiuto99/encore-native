@@ -31,7 +31,10 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.outlined.NightsStay
+import androidx.compose.material.icons.outlined.WbSunny
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -70,6 +73,7 @@ import androidx.compose.ui.unit.sp
 import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.preferences.DisplayPreferences
 import com.encore.core.data.preferences.DisplayPreferencesHolder
+import com.encore.core.ui.theme.LocalEncoreColors
 import com.encore.core.ui.theme.SetColor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -188,6 +192,9 @@ fun SongDetailScreen(
     songId: String,
     setNumber: Int = -1,
     onNavigateBack: () -> Unit,
+    onToggleDarkMode: (() -> Unit)? = null,
+    onEditClick: ((com.encore.core.data.entities.SongEntity) -> Unit)? = null,
+    onPageChanged: (() -> Unit)? = null,
     onNavigateToSong: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -247,12 +254,14 @@ fun SongDetailScreen(
     LaunchedEffect(pagerState.currentPage) {
         val currentId = effectiveSongIds.getOrNull(pagerState.currentPage) ?: return@LaunchedEffect
         viewModel.onPageChanged(currentId, setNumber)
+        onPageChanged?.invoke()
     }
 
+    val encoreColors = LocalEncoreColors.current
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(encoreColors.screenBackground)
     ) {
         if (song == null) {
             // ── Initial load spinner ─────────────────────────────────────────
@@ -310,12 +319,12 @@ fun SongDetailScreen(
                 }
             }
 
-            // ── Slim header (✕ + title + artist) ────────────────────────────
+            // ── Slim header (✕ + title + artist + dark mode toggle) ─────────
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.TopStart)
-                    .background(Color.Black.copy(alpha = 0.80f))
+                    .background(encoreColors.screenBackground.copy(alpha = 0.80f))
                     .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -326,7 +335,7 @@ fun SongDetailScreen(
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Back",
-                        tint = Color.White.copy(alpha = 0.55f),
+                        tint = encoreColors.titleText.copy(alpha = 0.55f),
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -334,7 +343,7 @@ fun SongDetailScreen(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = song!!.title,
-                        color = Color.White,
+                        color = encoreColors.titleText,
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
@@ -343,10 +352,36 @@ fun SongDetailScreen(
                     if (song!!.artist != "Unknown Artist") {
                         Text(
                             text = song!!.artist,
-                            color = Color.White.copy(alpha = 0.50f),
+                            color = encoreColors.artistText,
                             style = MaterialTheme.typography.labelSmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                onToggleDarkMode?.let { toggle ->
+                    IconButton(
+                        onClick = toggle,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (encoreColors.isDark) Icons.Outlined.WbSunny else Icons.Outlined.NightsStay,
+                            contentDescription = if (encoreColors.isDark) "Light mode" else "Dark mode",
+                            tint = encoreColors.iconTint,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+                onEditClick?.let { edit ->
+                    IconButton(
+                        onClick = { song?.let { edit(it) } },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Edit song",
+                            tint = encoreColors.iconTint,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
@@ -367,7 +402,7 @@ fun SongDetailScreen(
                     Icon(
                         imageVector = Icons.Default.ChevronLeft,
                         contentDescription = "Previous song",
-                        tint = Color.White.copy(alpha = 0.25f),
+                        tint = encoreColors.titleText.copy(alpha = 0.25f),
                         modifier = Modifier.size(40.dp)
                     )
                 }
@@ -388,7 +423,7 @@ fun SongDetailScreen(
                     Icon(
                         imageVector = Icons.Default.ChevronRight,
                         contentDescription = "Next song",
-                        tint = Color.White.copy(alpha = 0.25f),
+                        tint = encoreColors.titleText.copy(alpha = 0.25f),
                         modifier = Modifier.size(40.dp)
                     )
                 }
@@ -448,6 +483,7 @@ fun SongContent(
     onDoubleTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val encoreColors = LocalEncoreColors.current
     var currentZoom by remember { mutableFloatStateOf(textSizeMultiplier) }
     val displayPreferences = remember { DisplayPreferencesHolder.getPreferences() }
     val sections = remember(song.markdownBody, displayPreferences) {
@@ -514,7 +550,7 @@ fun SongContent(
                 is SongSection.KeyLabel -> {
                     Text(
                         text = "Key  ${section.key}",
-                        color = chordAccentColor ?: Color.White.copy(alpha = vp.keyBadgeAlpha),
+                        color = chordAccentColor ?: encoreColors.lyricText.copy(alpha = vp.keyBadgeAlpha),
                         fontSize = (vp.keyBadgeFontSizeSp * textSizeMultiplier).sp,
                         fontWeight = FontWeight.Medium,
                         fontFamily = FontFamily.Monospace,
@@ -565,7 +601,7 @@ fun SongContent(
                                     text = buildChordLine(
                                         rawLine,
                                         chordAccentColor,
-                                        Color.White.copy(alpha = vp.lyricAlpha)
+                                        encoreColors.lyricText.copy(alpha = vp.lyricAlpha)
                                     ),
                                     fontSize = (vp.bodyFontSizeSp * textSizeMultiplier).sp,
                                     lineHeight = (vp.lineHeightSp * textSizeMultiplier).sp,

@@ -589,6 +589,28 @@ class LibraryViewModel(
         viewModelScope.launch { songRepository.deleteSong(song) }
     }
 
+    fun updateSongMetadata(
+        songId: String,
+        title: String,
+        artist: String,
+        key: String?,
+        isHarmonyMode: Boolean = false,
+        highlightStyle: Int = 0
+    ) {
+        viewModelScope.launch {
+            val existing = songRepository.getSongById(songId) ?: return@launch
+            songRepository.upsertSong(
+                existing.copy(
+                    title = title,
+                    artist = artist,
+                    currentKey = key,
+                    isHarmonyMode = isHarmonyMode,
+                    highlightStyle = highlightStyle
+                )
+            )
+        }
+    }
+
     /**
      * Add a song to a set by number, auto-creating a default setlist + set if needed.
      * Never shows "not found" — the repository ensures the set exists.

@@ -10,11 +10,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,10 +34,20 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Switch
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.FloatingActionButton
@@ -87,6 +100,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.encore.core.data.entities.SetEntity
 import com.encore.core.data.entities.SongEntity
+import com.encore.core.ui.theme.LocalEncoreColors
 import com.encore.core.ui.theme.SetColor
 import kotlin.math.roundToInt
 
@@ -339,7 +353,8 @@ fun SongList(
     LazyColumn(
         state = listState,
         modifier = modifier,
-        contentPadding = PaddingValues(vertical = 4.dp)
+        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         items(localSongs, key = { it.id }) { song ->
             val index = localSongs.indexOf(song)
@@ -403,8 +418,8 @@ fun SongList(
                     .zIndex(if (isDragging) 1f else 0f)
                     .then(if (isDragging) Modifier
                         .scale(1.03f)
-                        .shadow(8.dp, RoundedCornerShape(8.dp))
-                        .border(2.dp, Color.Red.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                        .shadow(8.dp, RoundedCornerShape(12.dp))
+                        .border(2.dp, Color.Red.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
                     else Modifier)
             )
         }
@@ -434,6 +449,7 @@ fun SongListItem(
     dragHandleModifier: Modifier = Modifier,
     modifier: Modifier = Modifier
 ) {
+    val encoreColors = LocalEncoreColors.current
     val sets by remember(song.id) { viewModel.observeSetsContainingSong(song.id) }
         .collectAsState(initial = emptyList())
     var showConfirmDialog by remember { mutableStateOf(false) }
@@ -559,127 +575,167 @@ fun SongListItem(
         )
     }
 
+    var showEditSheet by remember { mutableStateOf(false) }
+
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
-            value == SwipeToDismissBoxValue.EndToStart
+            value == SwipeToDismissBoxValue.EndToStart || value == SwipeToDismissBoxValue.StartToEnd
         }
     )
 
     LaunchedEffect(dismissState.currentValue) {
-        if (dismissState.currentValue == SwipeToDismissBoxValue.EndToStart) {
-            showConfirmDialog = true
-            dismissState.snapTo(SwipeToDismissBoxValue.Settled)
+        when (dismissState.currentValue) {
+            SwipeToDismissBoxValue.EndToStart -> {
+                showConfirmDialog = true
+                dismissState.snapTo(SwipeToDismissBoxValue.Settled)
+            }
+            SwipeToDismissBoxValue.StartToEnd -> {
+                showEditSheet = true
+                dismissState.snapTo(SwipeToDismissBoxValue.Settled)
+            }
+            else -> {}
         }
+    }
+
+    if (showEditSheet) {
+        SongEditBottomSheet(
+            song = song,
+            onSave = { title, artist, key, harmonyMode, highlightStyle ->
+                viewModel.updateSongMetadata(song.id, title, artist, key, harmonyMode, highlightStyle)
+                showEditSheet = false
+            },
+            onDismiss = { showEditSheet = false }
+        )
     }
 
     SwipeToDismissBox(
         state = dismissState,
-        enableDismissFromStartToEnd = false,
+        enableDismissFromStartToEnd = !isDragging,
         enableDismissFromEndToStart = !isDragging,
         backgroundContent = {
+            val isEditSwipe = dismissState.targetValue == SwipeToDismissBoxValue.StartToEnd
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.error),
-                contentAlignment = Alignment.CenterEnd
+                    .background(
+                        color = if (isEditSwipe) Color(0xFF5AC8FA) else MaterialTheme.colorScheme.error,
+                        shape = RoundedCornerShape(12.dp)
+                    ),
+                contentAlignment = if (isEditSwipe) Alignment.CenterStart else Alignment.CenterEnd
             ) {
                 Icon(
-                    imageVector = Icons.Default.Delete,
-                    contentDescription = if (activeSetFilter != null) "Remove from set" else "Delete",
+                    imageVector = if (isEditSwipe) Icons.Default.Edit else Icons.Default.Delete,
+                    contentDescription = if (isEditSwipe) "Edit" else if (activeSetFilter != null) "Remove from set" else "Delete",
                     tint = Color.White,
-                    modifier = Modifier.padding(end = 20.dp)
+                    modifier = Modifier.padding(start = if (isEditSwipe) 20.dp else 0.dp, end = if (isEditSwipe) 0.dp else 20.dp)
                 )
             }
         },
         modifier = modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
             .let { if (isDragging) it.padding(horizontal = 4.dp) else it }
     ) {
-        Row(
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = encoreColors.cardBackground,
+            shadowElevation = encoreColors.cardElevation,
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 60.dp)
-                .background(Color.Black)
+                .height(72.dp)
                 .clickable(onClick = onClick)
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
         ) {
-            // Drag handle — only shown when set filter is active
-            if (activeSetFilter != null) {
-                Icon(
-                    imageVector = Icons.Default.Menu,
-                    contentDescription = "Drag to reorder",
-                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
-                    modifier = Modifier
-                        .size(20.dp)
-                        .then(dragHandleModifier)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-            }
-
-            // Single-line: [Bold Title] — [Grey Artist], ellipsis on overflow
-            val titleColor = rowAccentColor ?: MaterialTheme.colorScheme.onSurface
-            Text(
-                text = buildAnnotatedString {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = titleColor)) {
-                        append(song.title)
-                    }
-                    if (song.artist != "Unknown Artist") {
-                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.22f))) {
-                            append("  —  ")
-                        }
-                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) {
-                            append(song.artist)
-                        }
-                    }
-                },
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-
-            // Key badge — ghost pill, directly left of Set Circles
-            song.currentKey?.let { key ->
-                KeyBadge(key = key, accentColor = rowAccentColor)
-                Spacer(modifier = Modifier.width(4.dp))
-            }
-
-            // Set membership circles
-            Spacer(modifier = Modifier.width(6.dp))
-            sets.forEach { set ->
-                SetNumberCircle(
-                    setNumber = set.number,
-                    modifier = Modifier.padding(end = 4.dp)
-                )
-            }
-
-            // Add-to-Set pill button with outline border
-            Spacer(modifier = Modifier.width(4.dp))
-            OutlinedButton(
-                onClick = { showAddToSetDialog = true },
-                shape = RoundedCornerShape(50.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                modifier = Modifier
-                    .height(28.dp)
-                    .padding(end = 8.dp)
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = "Add to set",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(14.dp)
+                // Left accent bar — 4dp wide, full height, set color
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(4.dp)
+                        .background(rowAccentColor ?: Color.Transparent)
                 )
+
+                // Content row with internal padding
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Drag handle — only shown when set filter is active
+                    if (activeSetFilter != null) {
+                        Icon(
+                            imageVector = Icons.Default.Menu,
+                            contentDescription = "Drag to reorder",
+                            tint = encoreColors.titleText.copy(alpha = 0.3f),
+                            modifier = Modifier
+                                .size(20.dp)
+                                .then(dragHandleModifier)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                    }
+
+                    // Single-line: [Bold Title] — [Artist]
+                    Text(
+                        text = buildAnnotatedString {
+                            withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = encoreColors.titleText)) {
+                                append(song.title)
+                            }
+                            if (song.artist != "Unknown Artist") {
+                                withStyle(SpanStyle(color = encoreColors.separatorText)) {
+                                    append("  —  ")
+                                }
+                                withStyle(SpanStyle(color = encoreColors.artistText)) {
+                                    append(song.artist)
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    // Key badge — glass pill
+                    song.currentKey?.let { key ->
+                        KeyBadge(key = key, accentColor = rowAccentColor)
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
+
+                    // Set membership circles
+                    Spacer(modifier = Modifier.width(6.dp))
+                    sets.forEach { set ->
+                        SetNumberCircle(
+                            setNumber = set.number,
+                            modifier = Modifier.padding(end = 4.dp)
+                        )
+                    }
+
+                    // Add-to-Set pill button
+                    Spacer(modifier = Modifier.width(4.dp))
+                    OutlinedButton(
+                        onClick = { showAddToSetDialog = true },
+                        shape = RoundedCornerShape(50.dp),
+                        border = BorderStroke(1.dp, encoreColors.titleText.copy(alpha = 0.2f)),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                        modifier = Modifier
+                            .height(28.dp)
+                            .padding(end = 8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Add to set",
+                            tint = encoreColors.artistText,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
             }
         }
     }
-
-    HorizontalDivider(
-        thickness = 0.5.dp,
-        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-    )
 }
 
 /**
@@ -709,9 +765,9 @@ fun SearchBar(
         },
         singleLine = true,
         colors = TextFieldDefaults.colors(
-            focusedContainerColor = MaterialTheme.colorScheme.surface,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-            disabledContainerColor = MaterialTheme.colorScheme.surface
+            focusedContainerColor = LocalEncoreColors.current.searchBarBackground,
+            unfocusedContainerColor = LocalEncoreColors.current.searchBarBackground,
+            disabledContainerColor = LocalEncoreColors.current.searchBarBackground
         ),
         shape = MaterialTheme.shapes.large
     )
@@ -753,17 +809,17 @@ fun KeyBadge(
     accentColor: Color? = null,
     modifier: Modifier = Modifier
 ) {
-    val bgColor = accentColor?.copy(alpha = 0.09f) ?: Color.White.copy(alpha = 0.07f)
-    val textColor = accentColor?.copy(alpha = 0.75f) ?: MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+    val encoreColors = LocalEncoreColors.current
     Box(
         modifier = modifier
-            .background(bgColor, RoundedCornerShape(50))
+            .background(encoreColors.titleText.copy(alpha = 0.10f), RoundedCornerShape(50))
+            .border(1.dp, encoreColors.titleText.copy(alpha = 0.25f), RoundedCornerShape(50))
             .padding(horizontal = 7.dp, vertical = 3.dp)
     ) {
         Text(
             text = key,
             style = MaterialTheme.typography.labelSmall,
-            color = textColor,
+            color = encoreColors.titleText.copy(alpha = 0.75f),
             fontWeight = FontWeight.Medium
         )
     }
@@ -797,6 +853,171 @@ fun EmptyLibraryMessage(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp)
             )
+        }
+    }
+}
+
+/**
+ * Edit modal — Title, Artist, Key, Harmony Mode, Highlight Style with Zen theming.
+ * Used by both Library (swipe-right) and Performance (header icon).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SongEditBottomSheet(
+    song: com.encore.core.data.entities.SongEntity,
+    onSave: (title: String, artist: String, key: String?, isHarmonyMode: Boolean, highlightStyle: Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val encoreColors = LocalEncoreColors.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var title by remember(song.id) { mutableStateOf(song.title) }
+    var artist by remember(song.id) { mutableStateOf(if (song.artist == "Unknown Artist") "" else song.artist) }
+    var key by remember(song.id) { mutableStateOf(song.currentKey ?: "") }
+    var harmonyMode by remember(song.id) { mutableStateOf(song.isHarmonyMode) }
+    var highlightStyle by remember(song.id) { mutableStateOf(song.highlightStyle) }
+
+    val highlightOptions = listOf("None", "Chords Bold", "Lyrics Faded")
+
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedTextColor = encoreColors.titleText,
+        unfocusedTextColor = encoreColors.titleText,
+        focusedBorderColor = encoreColors.titleText.copy(alpha = 0.5f),
+        unfocusedBorderColor = encoreColors.titleText.copy(alpha = 0.2f),
+        focusedLabelColor = encoreColors.artistText,
+        unfocusedLabelColor = encoreColors.artistText,
+        cursorColor = encoreColors.titleText,
+        focusedContainerColor = Color.Transparent,
+        unfocusedContainerColor = Color.Transparent,
+    )
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = encoreColors.cardBackground
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .navigationBarsPadding()
+                .padding(bottom = 16.dp)
+        ) {
+            Text(
+                text = "Edit Song",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = encoreColors.titleText
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+
+            OutlinedTextField(
+                value = title,
+                onValueChange = { title = it },
+                label = { Text("Title") },
+                singleLine = true,
+                colors = fieldColors,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+
+            OutlinedTextField(
+                value = artist,
+                onValueChange = { artist = it },
+                label = { Text("Artist") },
+                singleLine = true,
+                colors = fieldColors,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+
+            OutlinedTextField(
+                value = key,
+                onValueChange = { key = it },
+                label = { Text("Key  (e.g. G, Eb, F#m)") },
+                singleLine = true,
+                colors = fieldColors,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Harmony Mode toggle row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Harmony Mode",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        color = encoreColors.titleText
+                    )
+                    Text(
+                        text = "Show harmony annotations",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = encoreColors.artistText
+                    )
+                }
+                Switch(
+                    checked = harmonyMode,
+                    onCheckedChange = { harmonyMode = it }
+                )
+            }
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Line Highlight Style
+            Text(
+                text = "Line Highlight",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                color = encoreColors.titleText
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                highlightOptions.forEachIndexed { index, label ->
+                    SegmentedButton(
+                        selected = highlightStyle == index,
+                        onClick = { highlightStyle = index },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = highlightOptions.size),
+                        colors = SegmentedButtonDefaults.colors(
+                            activeContainerColor = encoreColors.titleText,
+                            inactiveContainerColor = Color.Transparent,
+                            activeBorderColor = encoreColors.titleText,
+                            inactiveBorderColor = encoreColors.titleText.copy(alpha = 0.3f)
+                        )
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (highlightStyle == index) encoreColors.screenBackground
+                                    else encoreColors.titleText
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+
+            androidx.compose.material3.Button(
+                onClick = {
+                    onSave(
+                        title.trim().ifBlank { song.title },
+                        artist.trim().ifBlank { "Unknown Artist" },
+                        key.trim().ifBlank { null },
+                        harmonyMode,
+                        highlightStyle
+                    )
+                },
+                shape = RoundedCornerShape(50),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+            ) {
+                Text(
+                    text = "Save",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
         }
     }
 }

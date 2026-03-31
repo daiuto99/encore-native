@@ -2,6 +2,11 @@ package com.encore.tablet.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.CompositionLocalProvider
+import com.encore.core.ui.theme.DarkEncoreColors
+import com.encore.core.ui.theme.EncoreColors
+import com.encore.core.ui.theme.LightEncoreColors
+import com.encore.core.ui.theme.LocalEncoreColors
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -75,9 +80,11 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.encore.core.data.auth.AuthState
 import com.encore.core.data.entities.SetEntity
+import com.encore.core.data.entities.SongEntity
 import com.encore.core.ui.theme.SetColor
 import com.encore.feature.library.LibraryListContent
 import com.encore.feature.library.LibraryViewModel
+import com.encore.feature.library.SongEditBottomSheet
 import com.encore.feature.performance.SongDetailScreen
 import com.encore.feature.performance.SongDetailViewModel
 import com.encore.tablet.auth.AuthViewModel
@@ -106,7 +113,21 @@ fun MainScreen(
     val navController = rememberNavController()
     val libraryViewModel: LibraryViewModel = viewModel(factory = viewModelFactory)
     val authViewModel: AuthViewModel = viewModel(factory = viewModelFactory)
+    var isDarkMode by remember { mutableStateOf(true) }
+    var editSong by remember { mutableStateOf<SongEntity?>(null) }
+    val encoreColors = if (isDarkMode) DarkEncoreColors else LightEncoreColors
 
+    CompositionLocalProvider(LocalEncoreColors provides encoreColors) {
+    editSong?.let { song ->
+        SongEditBottomSheet(
+            song = song,
+            onSave = { title, artist, key, harmonyMode, highlightStyle ->
+                libraryViewModel.updateSongMetadata(song.id, title, artist, key, harmonyMode, highlightStyle)
+                editSong = null
+            },
+            onDismiss = { editSong = null }
+        )
+    }
     NavHost(
         navController = navController,
         startDestination = "command_center",
@@ -116,6 +137,7 @@ fun MainScreen(
             CommandCenterScreen(
                 libraryViewModel = libraryViewModel,
                 authViewModel = authViewModel,
+                onToggleDarkMode = { isDarkMode = !isDarkMode },
                 onSongClick = { songId, setNumber ->
                     navController.navigate(Routes.songDetail(songId, setNumber))
                 }
@@ -140,6 +162,9 @@ fun MainScreen(
                 viewModel = viewModel,
                 songId = songId,
                 setNumber = setNumber,
+                onToggleDarkMode = { isDarkMode = !isDarkMode },
+                onEditClick = { song -> editSong = song },
+                onPageChanged = { editSong = null },
                 onNavigateBack = {
                     // popBackStack() returns false when the stack is empty or corrupted.
                     // Fall back to an explicit navigate so the user never lands on a blank screen.
@@ -163,6 +188,7 @@ fun MainScreen(
             )
         }
     }
+    } // end CompositionLocalProvider
 }
 
 
@@ -179,6 +205,7 @@ fun MainScreen(
 fun CommandCenterScreen(
     libraryViewModel: LibraryViewModel,
     authViewModel: AuthViewModel,
+    onToggleDarkMode: () -> Unit,
     onSongClick: (songId: String, setNumber: Int?) -> Unit
 ) {
     var selectedSetFilter by remember { mutableStateOf<Int?>(null) }
@@ -300,14 +327,15 @@ fun CommandCenterScreen(
         }
     }
 
+    val encoreColors = LocalEncoreColors.current
     Scaffold(
-        containerColor = Color(0xFF121212),
+        containerColor = encoreColors.screenBackground,
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFF121212))
+                .background(encoreColors.screenBackground)
                 .padding(paddingValues)
         ) {
             // ── Header ───────────────────────────────────────────────────────
@@ -316,6 +344,7 @@ fun CommandCenterScreen(
                 showAccountDropdown = showAccountDropdown,
                 connectedFolderUri = connectedFolderUri,
                 onImportClick = { showImportSheet = true },
+                onToggleDarkMode = onToggleDarkMode,
                 onPerformClick = {
                     val setNum = selectedSetFilter ?: 1
                     val firstSongId = if (selectedSetFilter != null) {
@@ -341,7 +370,7 @@ fun CommandCenterScreen(
             HorizontalDivider(
                 modifier = Modifier.padding(horizontal = 16.dp),
                 thickness = 0.5.dp,
-                color = MaterialTheme.colorScheme.outlineVariant
+                color = encoreColors.divider
             )
 
             // Song list (search bar + rows) — fills available space
@@ -565,9 +594,10 @@ fun SetsSection(
         )
     }
 
+    val encoreColors = LocalEncoreColors.current
     HorizontalDivider(
         thickness = 0.5.dp,
-        color = MaterialTheme.colorScheme.outlineVariant
+        color = encoreColors.divider
     )
     Column(
         modifier = modifier
@@ -582,7 +612,7 @@ fun SetsSection(
                 text = "Sets",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = encoreColors.titleText,
                 modifier = Modifier.weight(1f)
             )
             if (selectedSet != null) {
@@ -592,7 +622,8 @@ fun SetsSection(
                 ) {
                     Text(
                         text = "Show All",
-                        style = MaterialTheme.typography.labelMedium
+                        style = MaterialTheme.typography.labelMedium,
+                        color = encoreColors.iconTint
                     )
                 }
             }
@@ -636,12 +667,13 @@ fun SetsSection(
                         text = "+ New Set",
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Medium,
+                        color = encoreColors.titleText,
                         modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp)
                     )
                 },
                 colors = FilterChipDefaults.filterChipColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    containerColor = encoreColors.cardBackground,
+                    labelColor = encoreColors.titleText
                 )
             )
         }

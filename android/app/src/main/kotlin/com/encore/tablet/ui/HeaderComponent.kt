@@ -16,7 +16,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material.icons.outlined.NightsStay
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.WbSunny
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -37,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.encore.core.data.auth.AuthState
+import com.encore.core.ui.theme.LocalEncoreColors
 import com.encore.tablet.R
 
 /**
@@ -56,11 +59,13 @@ fun EncoreHeader(
     onImportClick: () -> Unit,
     onPerformClick: () -> Unit,
     onRefreshClick: () -> Unit,
+    onToggleDarkMode: () -> Unit,
     onShowDropdown: () -> Unit,
     onDropdownDismiss: () -> Unit,
     onSignOut: () -> Unit,
     onProfileSheetRequest: () -> Unit
 ) {
+    val encoreColors = LocalEncoreColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -79,7 +84,7 @@ fun EncoreHeader(
             text = "v1.0.2",
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Light,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+            color = encoreColors.subtleText
         )
 
         Spacer(modifier = Modifier.weight(1f))
@@ -90,7 +95,7 @@ fun EncoreHeader(
                 Icon(
                     imageVector = Icons.Outlined.Refresh,
                     contentDescription = "Refresh library",
-                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    tint = encoreColors.iconTint
                 )
             }
         }
@@ -100,7 +105,7 @@ fun EncoreHeader(
             Icon(
                 imageVector = Icons.Default.Upload,
                 contentDescription = "Import songs",
-                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                tint = encoreColors.iconTint
             )
         }
 
@@ -111,7 +116,7 @@ fun EncoreHeader(
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Medium,
                 letterSpacing = 1.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                color = encoreColors.iconTint
             )
         }
 
@@ -122,7 +127,7 @@ fun EncoreHeader(
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Medium,
                 letterSpacing = 1.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                color = encoreColors.iconTint
             )
         }
 
@@ -147,12 +152,21 @@ fun EncoreHeader(
 
         Spacer(modifier = Modifier.width(4.dp))
 
+        // ── Dark Mode Toggle ─────────────────────────────────────────────────
+        IconButton(onClick = onToggleDarkMode) {
+            Icon(
+                imageVector = if (encoreColors.isDark) Icons.Outlined.WbSunny else Icons.Outlined.NightsStay,
+                contentDescription = if (encoreColors.isDark) "Switch to light mode" else "Switch to dark mode",
+                tint = encoreColors.iconTint
+            )
+        }
+
         // ── Settings ─────────────────────────────────────────────────────────
         IconButton(onClick = {}) {
             Icon(
                 imageVector = Icons.Default.Settings,
                 contentDescription = "Settings",
-                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                tint = encoreColors.iconTint
             )
         }
 
@@ -169,7 +183,7 @@ fun EncoreHeader(
                 Box(
                     modifier = Modifier.border(
                         width = 1.dp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
+                        color = encoreColors.divider,
                         shape = CircleShape
                     ),
                     contentAlignment = Alignment.Center

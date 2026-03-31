@@ -5,8 +5,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.pager.HorizontalPager
@@ -423,9 +424,24 @@ fun SongContent(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .pointerInput("transform") {
-                detectTransformGestures { _, _, zoom, _ ->
-                    currentZoom = (currentZoom * zoom).coerceIn(0.5f, 3.0f)
+            .pointerInput("zoom") {
+                awaitEachGesture {
+                    var pressed = true
+                    while (pressed) {
+                        val event = awaitPointerEvent()
+                        if (event.changes.size >= 2) {
+                            val zoomChange = event.calculateZoom()
+                            if (zoomChange != 1f) {
+                                currentZoom = (currentZoom * zoomChange).coerceIn(0.5f, 3.0f)
+                                event.changes.forEach { it.consume() }
+                                // currentZoom (local state) updates every frame for smooth visual.
+                                // onZoomChange (ViewModel/DB write) is deferred to gesture end
+                                // to prevent mid-gesture recomposition from fighting the pager.
+                            }
+                        }
+                        pressed = event.changes.any { it.pressed }
+                    }
+                    // Persist zoom once — when all fingers lift
                     onZoomChange(currentZoom)
                 }
             }

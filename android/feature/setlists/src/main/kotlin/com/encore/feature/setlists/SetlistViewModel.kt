@@ -112,6 +112,18 @@ class SetlistViewModel(
     }
 
     /**
+     * Reorder a song within a set after a drag-and-drop operation.
+     *
+     * @param entryId SetEntry UUID of the moved song
+     * @param newPosition Target 0-indexed position in the set
+     */
+    fun reorderSongInSet(entryId: String, newPosition: Int) {
+        viewModelScope.launch {
+            setlistRepository.reorderSongInSet(entryId, newPosition)
+        }
+    }
+
+    /**
      * Get all sets containing a specific song.
      * Used for showing set membership badges in Library.
      *

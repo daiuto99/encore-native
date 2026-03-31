@@ -21,10 +21,10 @@ import kotlinx.coroutines.flow.Flow
 interface SetlistDao {
 
     /**
-     * Get all setlists ordered by name.
+     * Get all setlists ordered by creation date.
      * Returns a Flow for reactive UI updates.
      */
-    @Query("SELECT * FROM setlists ORDER BY name ASC")
+    @Query("SELECT * FROM setlists ORDER BY created_at ASC")
     fun getAllSetlists(): Flow<List<SetlistEntity>>
 
     /**
@@ -65,7 +65,7 @@ interface SetlistDao {
      * @return Flow of all setlists with nested sets
      */
     @Transaction
-    @Query("SELECT * FROM setlists ORDER BY name ASC")
+    @Query("SELECT * FROM setlists ORDER BY created_at ASC")
     fun getAllSetlistsWithSets(): Flow<List<SetlistWithSets>>
 
     /**
@@ -107,7 +107,7 @@ interface SetlistDao {
      * Get all setlists as a one-shot (non-Flow) result.
      * Used when we need to inspect setlist state inside a suspend function.
      */
-    @Query("SELECT * FROM setlists ORDER BY name ASC")
+    @Query("SELECT * FROM setlists ORDER BY created_at ASC")
     suspend fun getSetlistsOnce(): List<SetlistEntity>
 
     /**
@@ -119,7 +119,7 @@ interface SetlistDao {
     @Query("""
         SELECT * FROM setlists
         WHERE name LIKE '%' || :query || '%'
-        ORDER BY name ASC
+        ORDER BY created_at ASC
     """)
     fun searchSetlists(query: String): Flow<List<SetlistEntity>>
 }

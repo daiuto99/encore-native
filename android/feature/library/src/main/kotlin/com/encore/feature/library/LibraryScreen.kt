@@ -3,7 +3,11 @@ package com.encore.feature.library
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Box
@@ -53,20 +57,26 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -292,6 +302,7 @@ fun LibraryListContent(
  * - Left swipe: shows confirmation dialog (remove from set or delete)
  * - Drag handle (visible when set filter active): long-press to reorder
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SongList(
     songs: List<SongEntity>,
@@ -307,36 +318,72 @@ fun SongList(
     val listState = rememberLazyListState()
     val density = LocalDensity.current
     val itemHeightPx = remember(density) { with(density) { 60.dp.toPx() } }
+    val view = LocalView.current
+    val haptic = LocalHapticFeedback.current
 
-    // Drag-and-drop state
+    // Drag state
     var draggingIndex by remember { mutableStateOf<Int?>(null) }
-    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    var dragAccumY by remember { mutableFloatStateOf(0f) }
+
+    // Local shadow list — swapped live during drag; DB written only on drag end
+    val localSongs = remember { mutableStateListOf<SongEntity>() }
+    LaunchedEffect(songs) {
+        // Only sync from DB when no drag is active; delay lets animateItemPlacement finish
+        if (draggingIndex == null) {
+            delay(150)
+            localSongs.clear()
+            localSongs.addAll(songs)
+        }
+    }
 
     LazyColumn(
         state = listState,
         modifier = modifier,
         contentPadding = PaddingValues(vertical = 4.dp)
     ) {
-        items(songs, key = { it.id }) { song ->
-            val index = songs.indexOf(song)
+        items(localSongs, key = { it.id }) { song ->
+            val index = localSongs.indexOf(song)
             val isDragging = draggingIndex == index
 
             val dragHandleModifier = if (activeSetFilter != null) {
-                Modifier.pointerInput(song.id, songs.size) {
+                Modifier.pointerInput(song.id) {
                     detectDragGesturesAfterLongPress(
-                        onDragStart = { draggingIndex = index; dragOffsetY = 0f },
+                        onDragStart = {
+                            view.parent?.requestDisallowInterceptTouchEvent(true)
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            draggingIndex = localSongs.indexOf(song)
+                            dragAccumY = 0f
+                        },
                         onDrag = { change, drag ->
                             change.consume()
-                            dragOffsetY += drag.y
+                            dragAccumY += drag.y
+                            val currentIdx = draggingIndex ?: return@detectDragGesturesAfterLongPress
+                            val steps = (dragAccumY / itemHeightPx).toInt()
+                            if (steps != 0) {
+                                val newIdx = (currentIdx + steps).coerceIn(0, localSongs.size - 1)
+                                if (newIdx != currentIdx) {
+                                    localSongs.add(newIdx, localSongs.removeAt(currentIdx))
+                                    draggingIndex = newIdx
+                                    dragAccumY -= steps * itemHeightPx
+                                }
+                            }
                         },
                         onDragEnd = {
-                            val offsetInItems = (dragOffsetY / itemHeightPx).roundToInt()
-                            val targetIdx = (index + offsetInItems).coerceIn(0, songs.size - 1)
-                            if (targetIdx != index) onReorder(song.id, targetIdx)
+                            val finalIdx = draggingIndex
+                            val originalIdx = songs.indexOf(song)
+                            if (finalIdx != null && finalIdx != originalIdx) {
+                                onReorder(song.id, finalIdx)
+                            }
                             draggingIndex = null
-                            dragOffsetY = 0f
+                            dragAccumY = 0f
                         },
-                        onDragCancel = { draggingIndex = null; dragOffsetY = 0f }
+                        onDragCancel = {
+                            // Restore original order on cancel
+                            localSongs.clear()
+                            localSongs.addAll(songs)
+                            draggingIndex = null
+                            dragAccumY = 0f
+                        }
                     )
                 }
             } else Modifier
@@ -350,10 +397,15 @@ fun SongList(
                 onRemoveFromSet = onRemoveFromSet,
                 onAddToSet = { onAddToSet(song.id) },
                 isDragging = isDragging,
-                dragOffsetY = if (isDragging) dragOffsetY else 0f,
                 dragHandleModifier = dragHandleModifier,
                 modifier = Modifier
+                    .animateItemPlacement(spring(stiffness = Spring.StiffnessMediumLow))
                     .zIndex(if (isDragging) 1f else 0f)
+                    .then(if (isDragging) Modifier
+                        .scale(1.03f)
+                        .shadow(8.dp, RoundedCornerShape(8.dp))
+                        .border(2.dp, Color.Red.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                    else Modifier)
             )
         }
     }
@@ -379,7 +431,6 @@ fun SongListItem(
     onRemoveFromSet: (String, Int) -> Unit,
     onAddToSet: () -> Unit,
     isDragging: Boolean = false,
-    dragOffsetY: Float = 0f,
     dragHandleModifier: Modifier = Modifier,
     modifier: Modifier = Modifier
 ) {
@@ -524,7 +575,7 @@ fun SongListItem(
     SwipeToDismissBox(
         state = dismissState,
         enableDismissFromStartToEnd = false,
-        enableDismissFromEndToStart = true,
+        enableDismissFromEndToStart = !isDragging,
         backgroundContent = {
             Box(
                 modifier = Modifier

@@ -50,10 +50,13 @@ data class SongEntity(
     val isLeadGuitar: Boolean = false, // True when this song uses lead guitar part
 
     @ColumnInfo(name = "is_verified")
-    val isVerified: Boolean = false, // Master flag for Library Health Tool
+    val isVerified: Boolean = false, // True when last audit found no errors
+
+    @ColumnInfo(name = "validation_errors")
+    val validationErrors: String? = null, // Null = clean or unscanned; non-null = issues found
 
     @ColumnInfo(name = "last_verified_at")
-    val lastVerifiedAt: Long = 0L, // Unix timestamp (ms) of last verification
+    val lastVerifiedAt: Long = 0L, // Unix timestamp (ms) of last audit run
 
     @ColumnInfo(name = "last_zoom_level")
     val lastZoomLevel: Float = 1.0f, // Performance mode zoom level (1.0 = 100%, range 0.5-3.0)

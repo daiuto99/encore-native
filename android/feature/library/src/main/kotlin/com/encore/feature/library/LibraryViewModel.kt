@@ -250,6 +250,8 @@ class LibraryViewModel(
         val setId = _performSetId.value ?: return
         viewModelScope.launch {
             setlistRepository.addSongToSet(setId, songId)
+            val count = setlistRepository.getSongsInSet(setId).first().size
+            _statusMessage.value = "Staged ($count in set)"
         }
     }
 

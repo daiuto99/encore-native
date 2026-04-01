@@ -300,7 +300,7 @@ fun LibraryListContent(
                     onSongClick = onSongClick,
                     onDeleteSong = { song -> viewModel.deleteSong(song) },
                     onRemoveFromSet = { songId, setNum -> viewModel.removeSongFromSetNumber(songId, setNum) },
-                    onAddToSet = { /* handled inside item */ },
+                    onAddToSet = { songId -> viewModel.addToPerformSet(songId) },
                     onReorder = { songId, toIdx -> viewModel.reorderSong(songId, toIdx) },
                     onEditChart = onEditChart,
                     modifier = Modifier.fillMaxSize()
@@ -460,7 +460,6 @@ fun SongListItem(
     val sets by remember(song.id) { viewModel.observeSetsContainingSong(song.id) }
         .collectAsState(initial = emptyList())
     var showConfirmDialog by remember { mutableStateOf(false) }
-    var showAddToSetDialog by remember { mutableStateOf(false) }
 
     val rowAccentColor = remember(sets) {
         sets.minByOrNull { it.number }?.number?.let { SetColor.getSetColor(it) }
@@ -524,70 +523,14 @@ fun SongListItem(
         )
     }
 
-    // Add to Set picker dialog
-    if (showAddToSetDialog) {
-        val availableSets by viewModel.availableSets.collectAsState()
-        AlertDialog(
-            onDismissRequest = { showAddToSetDialog = false },
-            title = { Text("Add to Set") },
-            text = {
-                Column {
-                    availableSets.forEachIndexed { index, setEntity ->
-                        val setColor = SetColor.getSetColor(setEntity.number)
-                        val alreadyInSet = sets.any { it.number == setEntity.number }
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(enabled = !alreadyInSet) {
-                                    if (!alreadyInSet) {
-                                        showAddToSetDialog = false
-                                        viewModel.addSongToSetNumber(song.id, setEntity.number)
-                                    }
-                                }
-                                .padding(vertical = 12.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(20.dp)
-                                    .clip(CircleShape)
-                                    .background(if (alreadyInSet) setColor.copy(alpha = 0.3f) else setColor),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = setEntity.number.toString(),
-                                    color = Color.White,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = "Set ${setEntity.number}" + if (alreadyInSet) " (already added)" else "",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (alreadyInSet)
-                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
-                                else
-                                    MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                        if (index < availableSets.size - 1) HorizontalDivider(thickness = 0.5.dp)
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { showAddToSetDialog = false }) { Text("Cancel") }
-            }
-        )
-    }
 
     var showEditSheet by remember { mutableStateOf(false) }
 
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
             value == SwipeToDismissBoxValue.EndToStart || value == SwipeToDismissBoxValue.StartToEnd
-        }
+        },
+        positionalThreshold = { totalDistance -> totalDistance * 0.75f }
     )
 
     LaunchedEffect(dismissState.currentValue) {
@@ -686,8 +629,8 @@ fun SongListItem(
                     }
 
                     // Single-line: [Bold Title] — [Artist]
-                    Text(
-                        text = buildAnnotatedString {
+                    val titleText = remember(song.id, song.title, song.artist, encoreColors.titleText, encoreColors.artistText, encoreColors.separatorText) {
+                        buildAnnotatedString {
                             withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = encoreColors.titleText)) {
                                 append(song.title)
                             }
@@ -699,7 +642,10 @@ fun SongListItem(
                                     append(song.artist)
                                 }
                             }
-                        },
+                        }
+                    }
+                    Text(
+                        text = titleText,
                         modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.bodyLarge,
                         maxLines = 1,
@@ -722,10 +668,10 @@ fun SongListItem(
                         )
                     }
 
-                    // Add-to-Set pill button — 48dp tall hit target, icon visually smaller
+                    // Stage-for-perform pill — tap to add song to the perform set
                     Spacer(modifier = Modifier.width(4.dp))
                     OutlinedButton(
-                        onClick = { showAddToSetDialog = true },
+                        onClick = { onAddToSet() },
                         shape = RoundedCornerShape(50.dp),
                         border = BorderStroke(1.dp, encoreColors.titleText.copy(alpha = 0.2f)),
                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),

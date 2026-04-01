@@ -101,10 +101,62 @@ All interactive icon buttons standardised to **60dp** hit targets across all thr
 
 ---
 
-## Next — Library Health Tool
-- Implement the Library Health Scanner under Settings → Library Tools.
-- Scan for: missing metadata (no key, no artist), duplicate titles, chart formatting issues.
-- Results shown in a scrollable report inside the right panel.
+## Phase 4 — Horizontal Setlist Engine — COMPLETE
+
+### What was built
+- **In-memory staging via Set 1 DB:** `addToPerformSet(songId)` stages directly (no dialog); status message "Staged (N in set)" shown in library.
+- **SAVE SET:** Name dialog in header → `saveCurrentSetAs(name)`.
+- **LOAD SET:** Setlist picker dialog in header → `loadSetlistAsCurrent(setlistId)`.
+- **HorizontalPager nav in performance mode** with swipe between songs; "Page X of Y" fade indicator auto-hides after 2s.
+- **Bug fixes:** Ghost delete (swipe positionalThreshold → 75%), header overlap in performance mode, scroll jank in library (`buildAnnotatedString` wrapped in `remember`), sets tray `navigationBarsPadding()`.
+
+---
+
+## Performance Dashboard — COMPLETE (Floating Card)
+
+### Architecture
+- Replaced slim header Row with `PerformanceDashboard` composable — a floating `Surface(RoundedCornerShape(12dp))` card pinned at top.
+- Card height: **68dp**, floats with **8dp** inset on all sides, 1dp `divider`-color border matching library card style.
+- Song content scroll top padding: **84dp** (8dp gap + 68dp card + 8dp content gap).
+
+### Layout (left → right inside card)
+- **Key Anchor:** `background(harmonyColor×13%)` + `border(1dp, harmonyColor×35%)`, root 20sp ExtraBold Monospace, scale 9sp below
+- **Identity:** title 16sp Bold Monospace + artist bodySmall (weight(1f))
+- **Status Pill:** `Surface(RoundedCornerShape(50))` — guitar pick icon (20dp, harmony tinted, `ic_guitar_pick.xml`) + BPM column. 12dp spacer between pill and divider.
+- **Transposition warning:** ⚠ emoji (amber) if `displayKey ≠ originalKey`
+- **1dp vertical divider** (60% height)
+- **12dp spacer** on both sides of divider (equal, symmetric)
+- **Control Pill:** `Surface(RoundedCornerShape(50))` — three 60dp `IconButton`s (☀/🌙, ✏, ✕) with 20dp icons
+
+### Data parsers (private, in SongDetailScreen.kt)
+- `parseBpm(markdown)` — regex for `**BPM:** 120` / `**Tempo:** 120`
+- `splitKey(displayKey)` — splits "Dm" → ("D","m"), "D Major" → ("D","maj")
+- `stripLeadingTitle(markdown, title)` — drops first non-blank line if it matches song title
+
+### Resources
+- `feature/performance/src/main/res/drawable/ic_guitar_pick.xml` — custom 24×24 vector: rounded-triangle pick body + music note cutout, `fillType="evenOdd"`, works at any tint color.
+- `feature/performance/src/main/res/drawable/ic_electric_guitar.xml` — previous guitar silhouette (superseded by pick icon, kept for reference).
+
+---
+
+## Next Feature — Performance Mode Context Bar (PLANNED, not built)
+
+### What it is
+A **second floating card** above the existing Performance Dashboard showing set-level context and navigation.
+
+### Layout (left → right)
+- **Previous Song pill** (← arrow + truncated song title, or "..." if first song in set)
+- **Set Name** centered with set color
+- **Next Song pill** (truncated song title + → arrow, or "..." if last song in set)
+- **Current Time** — right-aligned, centered under the Control Pill column, live clock updating every second
+
+### Key implementation notes
+- Prev/Next wired to `pagerState` — `coroutineScope.launch { pagerState.animateScrollToPage(page ± 1) }`
+- Current time: `LaunchedEffect(Unit) { while(true) { currentTime = ...; delay(1000) } }`
+- **Set name threading:** Need to verify if `setName` is passed to `SongDetailScreen` or needs to be added to ViewModel/param chain
+- **Set color:** Need to check if `SetlistEntity` has a color field before assuming it can be shown
+- Scroll top padding will increase from **84dp → ~144dp** (additional ~52dp card + gap)
+- Edge case: first song → left pill disabled/"..."; last song → right pill disabled/"..."
 
 ---
 
@@ -117,8 +169,11 @@ All interactive icon buttons standardised to **60dp** hit targets across all thr
 - **Build filter:** `./gradlew assembleDebug 2>&1 | grep -E "FAILED|error:|BUILD SUCCESSFUL"`
 - **ADB path:** `~/Library/Android/sdk/platform-tools/adb`
 - **Settings entry point:** Gear icon in `EncoreHeader` → `Routes.SETTINGS = "settings"` composable in `MainScreen.kt` NavHost
+- **Performance card scroll padding:** currently `84dp` in `SongDetailScreen.kt`
+- **Icon sizes:** all `IconButton` = 60dp hit target, icon visual = 20-24dp
+- **Guitar pick icon:** `feature/performance/src/main/res/drawable/ic_guitar_pick.xml`
 
-## Remaining M4 Sync Work (after Settings polish)
+## Remaining M4 Sync Work (after UI polish)
 - Single active device session policy
 - Wire `SyncStatus` to real Ktor API calls
 - Manual **Sync Now** action

@@ -7,10 +7,12 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -18,11 +20,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,7 +37,7 @@ import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.ui.res.painterResource
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.outlined.NightsStay
 import androidx.compose.material.icons.outlined.WbSunny
@@ -209,6 +213,7 @@ fun SongDetailScreen(
     val performSongIds by viewModel.performSongIds.collectAsState()
 
     var showControls by remember { mutableStateOf(false) }
+    var showPageIndicator by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     // Per-song in-session zoom map. Populated on first zoom gesture; falls back to DB value.
     val zoomPerSong = remember { mutableStateMapOf<String, Float>() }
@@ -252,11 +257,16 @@ fun SongDetailScreen(
         }
     }
 
-    // Notify ViewModel when the user swipes to a new page
+    // Notify ViewModel when the user swipes to a new page; show "X / Y" indicator briefly
     LaunchedEffect(pagerState.currentPage) {
         val currentId = effectiveSongIds.getOrNull(pagerState.currentPage) ?: return@LaunchedEffect
         viewModel.onPageChanged(currentId, setNumber)
         onPageChanged?.invoke()
+        if (effectiveSongIds.size > 1) {
+            showPageIndicator = true
+            delay(2000)
+            showPageIndicator = false
+        }
     }
 
     val encoreColors = LocalEncoreColors.current
@@ -330,113 +340,21 @@ fun SongDetailScreen(
                 }
             }
 
-            // ── Slim header (✕ + title + artist + dark mode toggle) ─────────
-            Row(
+            // ── Performance Dashboard (pinned) ───────────────────────────
+            PerformanceDashboard(
+                song = song!!,
+                harmonyColor = parseColorSafe(
+                    if (encoreColors.isDark) appPreferences.darkHarmonyColor
+                    else appPreferences.lightHarmonyColor
+                ),
+                appPreferences = appPreferences,
+                onToggleDarkMode = onToggleDarkMode,
+                onEditClick = onEditClick,
+                onNavigateBack = onNavigateBack,
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.TopStart)
-                    .background(encoreColors.screenBackground.copy(alpha = 0.80f))
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = onNavigateBack,
-                    modifier = Modifier.size(60.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Back",
-                        tint = encoreColors.titleText.copy(alpha = 0.55f),
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(4.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = song!!.title,
-                        color = encoreColors.titleText,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    if (song!!.artist != "Unknown Artist") {
-                        Text(
-                            text = song!!.artist,
-                            color = encoreColors.artistText,
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-                onToggleDarkMode?.let { toggle ->
-                    IconButton(
-                        onClick = toggle,
-                        modifier = Modifier.size(60.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (encoreColors.isDark) Icons.Outlined.WbSunny else Icons.Outlined.NightsStay,
-                            contentDescription = if (encoreColors.isDark) "Light mode" else "Dark mode",
-                            tint = encoreColors.iconTint,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                }
-                // Lead guitar indicator
-                if (appPreferences.showLeadIndicator && song!!.isLeadGuitar) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .size(28.dp)
-                            .background(
-                                color = encoreColors.titleText.copy(alpha = 0.12f),
-                                shape = CircleShape
-                            )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.MusicNote,
-                            contentDescription = "Lead guitar",
-                            tint = encoreColors.iconTint,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(4.dp))
-                }
-                // "Not Original Key" badge
-                val currentDisplayKey = song!!.displayKey
-                val currentOriginalKey = song!!.originalKey
-                if (appPreferences.showTranspositionWarning &&
-                    currentDisplayKey != null && currentOriginalKey != null &&
-                    currentDisplayKey != currentOriginalKey) {
-                    Text(
-                        text = "Not Original Key",
-                        color = Color(0xFFFF9F0A),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier
-                            .background(
-                                color = Color(0xFFFF9F0A).copy(alpha = 0.15f),
-                                shape = RoundedCornerShape(4.dp)
-                            )
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                }
-                onEditClick?.let { edit ->
-                    IconButton(
-                        onClick = { song?.let { edit(it) } },
-                        modifier = Modifier.size(60.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = "Edit song",
-                            tint = encoreColors.iconTint,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                }
-            }
+            )
 
             // ── Prev song arrow ──────────────────────────────────────────────
             if (prevSongId != null) {
@@ -476,6 +394,30 @@ fun SongDetailScreen(
                         contentDescription = "Next song",
                         tint = encoreColors.titleText.copy(alpha = 0.25f),
                         modifier = Modifier.size(40.dp)
+                    )
+                }
+            }
+
+            // ── Page X of Y indicator ────────────────────────────────────────
+            AnimatedVisibility(
+                visible = showPageIndicator,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 24.dp)
+            ) {
+                androidx.compose.material3.Surface(
+                    shape = RoundedCornerShape(50),
+                    color = Color.White.copy(alpha = 0.15f),
+                    tonalElevation = 0.dp
+                ) {
+                    Text(
+                        text = "${pagerState.currentPage + 1} / ${effectiveSongIds.size}",
+                        color = Color.White.copy(alpha = 0.80f),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
                     )
                 }
             }
@@ -538,8 +480,9 @@ fun SongContent(
     val encoreColors = LocalEncoreColors.current
     var currentZoom by remember { mutableFloatStateOf(textSizeMultiplier) }
     val isDark = encoreColors.isDark
-    val sections = remember(song.markdownBody, appPreferences.showChords, appPreferences.showKeyInfo, isDark) {
-        parseSongSections(song.markdownBody, appPreferences, isDark)
+    val sections = remember(song.markdownBody, song.title, appPreferences.showChords, appPreferences.showKeyInfo, isDark) {
+        val body = stripLeadingTitle(song.markdownBody, song.title)
+        parseSongSections(body, appPreferences, isDark)
     }
     val vp = remember { ViewerPreferences() }
 
@@ -593,22 +536,13 @@ fun SongContent(
                 }
             }
             .verticalScroll(scrollState)
-            // top padding clears the slim header (~48 dp) + small gap
-            .padding(start = 24.dp, end = 24.dp, bottom = 24.dp, top = 52.dp)
+            // top padding clears the floating card: 8dp inset + 68dp card + 8dp gap = 84dp
+            .padding(start = 24.dp, end = 24.dp, bottom = 24.dp, top = 84.dp)
     ) {
         sections.forEachIndexed { index, section ->
             when (section) {
-                // ── Key badge ────────────────────────────────────────────────
-                is SongSection.KeyLabel -> {
-                    Text(
-                        text = "Key  ${section.key}",
-                        color = chordAccentColor ?: encoreColors.lyricText.copy(alpha = vp.keyBadgeAlpha),
-                        fontSize = (vp.keyBadgeFontSizeSp * textSizeMultiplier).sp,
-                        fontWeight = FontWeight.Medium,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.padding(bottom = 10.dp)
-                    )
-                }
+                // Key is displayed in PerformanceDashboard — skip from scroll content
+                is SongSection.KeyLabel -> { /* suppressed */ }
 
                 // ── Section header (HTML span or legacy # markdown) ──────────
                 is SongSection.Header -> {
@@ -711,11 +645,291 @@ fun SongContent(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Performance Dashboard
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Pinned floating "performance card" — visually identical to Library cards.
+ *
+ * Structure (left → right inside a floating Surface):
+ *  [Key Anchor] │ Title / Artist+metadata │ [Status Pill] │ 1dp divider │ [Control Pill]
+ *
+ * The card floats with 8dp horizontal + 8dp top inset so it never touches the screen edges.
+ * Total height consumed: 8dp (top gap) + 68dp (card) = 76dp.
+ */
+@Composable
+private fun PerformanceDashboard(
+    song: SongEntity,
+    harmonyColor: Color,
+    appPreferences: AppPreferences,
+    onToggleDarkMode: (() -> Unit)?,
+    onEditClick: ((SongEntity) -> Unit)?,
+    onNavigateBack: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val encoreColors = LocalEncoreColors.current
+    val bpm = remember(song.markdownBody) { parseBpm(song.markdownBody) }
+    val (keyRoot, keyScale) = remember(song.displayKey) { splitKey(song.displayKey) }
+
+    // Key anchor badge colours — library style (semi-transparent tint)
+    val keyBadgeBg     = harmonyColor.copy(alpha = 0.13f)
+    val keyBadgeBorder = harmonyColor.copy(alpha = 0.35f)
+
+    // Floating card — matches Library card exactly
+    Box(
+        modifier = modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+        contentAlignment = Alignment.TopCenter
+    ) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = encoreColors.cardBackground,
+            shadowElevation = encoreColors.cardElevation,
+            tonalElevation = 0.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(68.dp)
+                .border(1.dp, encoreColors.divider, RoundedCornerShape(12.dp))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // ── Key anchor (library KeyBadge style, enlarged) ────────────
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .background(keyBadgeBg, RoundedCornerShape(8.dp))
+                        .border(1.dp, keyBadgeBorder, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = keyRoot,
+                        color = harmonyColor,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontFamily = FontFamily.Monospace,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 21.sp
+                    )
+                    if (keyScale.isNotEmpty()) {
+                        Text(
+                            text = keyScale,
+                            color = harmonyColor.copy(alpha = 0.70f),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            fontFamily = FontFamily.Monospace,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 10.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(14.dp))
+
+                // ── Identity: Title + Artist ─────────────────────────────────
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = song.title,
+                        color = encoreColors.titleText,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (song.artist != "Unknown Artist") {
+                        Text(
+                            text = song.artist,
+                            color = encoreColors.artistText,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                // ── Status Pill: Lead icon + BPM ─────────────────────────────
+                val showStatusPill = (appPreferences.showLeadIndicator && song.isLeadGuitar) || bpm != null
+                if (showStatusPill) {
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = encoreColors.titleText.copy(alpha = 0.07f),
+                        tonalElevation = 0.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (appPreferences.showLeadIndicator && song.isLeadGuitar) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_guitar_pick),
+                                    contentDescription = "Lead guitar",
+                                    tint = harmonyColor,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            if (bpm != null) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        text = "$bpm",
+                                        color = encoreColors.titleText.copy(alpha = 0.88f),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        lineHeight = 14.sp
+                                    )
+                                    Text(
+                                        text = "BPM",
+                                        color = encoreColors.artistText.copy(alpha = 0.55f),
+                                        fontSize = 7.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        letterSpacing = 0.4.sp,
+                                        lineHeight = 8.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                }
+
+                // Transposition badge (outside status pill — distinct warning)
+                val displayKey = song.displayKey
+                val originalKey = song.originalKey
+                if (appPreferences.showTranspositionWarning &&
+                    displayKey != null && originalKey != null &&
+                    displayKey != originalKey) {
+                    Text(
+                        text = "⚠",
+                        color = Color(0xFFFF9F0A),
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                }
+
+                // ── 1dp Vertical Divider ─────────────────────────────────────
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight(0.6f)
+                        .width(1.dp)
+                        .background(encoreColors.divider)
+                )
+
+                // ── Control Pill: ☀ ✎ ✕ ────────────────────────────────────
+                Spacer(modifier = Modifier.width(12.dp))
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = encoreColors.titleText.copy(alpha = 0.06f),
+                    tonalElevation = 0.dp
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 0.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        onToggleDarkMode?.let { toggle ->
+                            IconButton(onClick = toggle, modifier = Modifier.size(60.dp)) {
+                                Icon(
+                                    imageVector = if (encoreColors.isDark) Icons.Outlined.WbSunny else Icons.Outlined.NightsStay,
+                                    contentDescription = if (encoreColors.isDark) "Light mode" else "Dark mode",
+                                    tint = encoreColors.iconTint,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        onEditClick?.let { edit ->
+                            IconButton(onClick = { edit(song) }, modifier = Modifier.size(60.dp)) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = "Edit song",
+                                    tint = encoreColors.iconTint,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        IconButton(onClick = onNavigateBack, modifier = Modifier.size(60.dp)) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close",
+                                tint = encoreColors.titleText.copy(alpha = 0.40f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Parser
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ChordSidekick / Obsidian Chord Sheets section header:
 //   <span style="color: (#FF5733); font-weight: bold;">## Verse 1</span>
+// BPM / Tempo metadata: **BPM:** 120  or  **Tempo:** 120  or  Tempo: 120
+private val BPM_PATTERN = Regex(
+    """(?i)(?:\*\*)?(?:bpm|tempo)(?:\*\*)?\s*:\s*(\d{2,3})""",
+    RegexOption.MULTILINE
+)
+
+private fun parseBpm(markdown: String): Int? =
+    BPM_PATTERN.find(markdown)?.groupValues?.getOrNull(1)?.toIntOrNull()
+
+/**
+ * Splits a key string into (root, scale) for the key block.
+ *
+ * Examples:
+ *   "D"       → ("D",  "")
+ *   "Dm"      → ("D",  "m")
+ *   "C#m"     → ("C#", "m")
+ *   "Bb"      → ("Bb", "")
+ *   "D Major" → ("D",  "maj")
+ *   "F# minor"→ ("F#", "min")
+ */
+private fun splitKey(displayKey: String?): Pair<String, String> {
+    if (displayKey.isNullOrBlank()) return Pair("?", "")
+    val lower = displayKey.lowercase().trim()
+    return when {
+        lower.endsWith(" major") -> Pair(displayKey.dropLast(6).trim(), "maj")
+        lower.endsWith(" minor") -> Pair(displayKey.dropLast(6).trim(), "min")
+        lower.endsWith("maj")    -> Pair(displayKey.dropLast(3).trim(), "maj")
+        lower.endsWith("min")    -> Pair(displayKey.dropLast(3).trim(), "min")
+        // Chord-style suffix: Am, Dm, C#m, Bbm — only if the root is non-empty
+        lower.endsWith("m") && displayKey.length > 1 -> {
+            val root = displayKey.dropLast(1)
+            if (root.all { it.isLetter() || it == '#' || it == 'b' })
+                Pair(root, "m")
+            else
+                Pair(displayKey, "")
+        }
+        else -> Pair(displayKey, "")
+    }
+}
+
+/**
+ * Removes the first non-blank line from the markdown body if it is a title header
+ * (`# SongTitle` or `## SongTitle`) that duplicates the song's metadata title.
+ *
+ * The Dashboard is the single source of truth for the title; rendering it again
+ * at the top of the scroll content creates a visual double-header.
+ */
+private fun stripLeadingTitle(markdown: String, title: String): String {
+    val lines = markdown.lines()
+    val firstNonBlank = lines.indexOfFirst { it.isNotBlank() }
+    if (firstNonBlank == -1) return markdown
+    val candidate = lines[firstNonBlank].trim().trimStart('#').trim()
+    return if (candidate.equals(title, ignoreCase = true))
+        lines.toMutableList().also { it.removeAt(firstNonBlank) }.joinToString("\n")
+    else
+        markdown
+}
+
 private val SPAN_HEADER_PATTERN = Regex(
     """<span style="color: \(?#([A-Fa-f0-9]{6})\)?; font-weight: bold;">##? ?(.*?)</span>"""
 )

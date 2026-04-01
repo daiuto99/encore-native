@@ -115,6 +115,22 @@ interface SongRepository {
      * @return Flow of songs ordered by set position
      */
     fun getSongsInSetOrdered(setNumber: Int): Flow<List<SongEntity>>
+
+    /**
+     * Get all songs as a one-shot list for audit scanning.
+     */
+    suspend fun getAllSongsOnce(): List<SongEntity>
+
+    /**
+     * Write the result of an audit scan for a single song.
+     */
+    suspend fun updateValidationResult(id: String, isVerified: Boolean, errors: String?, timestamp: Long)
+
+    /**
+     * Reactive stream of songs that have validation errors.
+     * Only includes songs that have been scanned and failed.
+     */
+    fun getInvalidSongs(): Flow<List<SongEntity>>
 }
 
 /**
@@ -207,4 +223,15 @@ class SongRepositoryImpl(
 
     override fun getSongsInSetOrdered(setNumber: Int): Flow<List<SongEntity>> =
         songDao.getSongsInSetOrdered(setNumber)
+
+    override suspend fun getAllSongsOnce(): List<SongEntity> = songDao.getAllSongsOnce()
+
+    override suspend fun updateValidationResult(
+        id: String,
+        isVerified: Boolean,
+        errors: String?,
+        timestamp: Long
+    ) = songDao.updateValidation(id, isVerified, errors, timestamp)
+
+    override fun getInvalidSongs(): Flow<List<SongEntity>> = songDao.getInvalidSongs()
 }

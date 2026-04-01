@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -59,11 +60,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
+import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.preferences.AppPreferences
 import com.encore.core.data.preferences.SectionStyle
 import com.encore.core.data.preferences.SongFontFamily
 import com.encore.core.data.preferences.ThemePreset
 import com.encore.core.ui.theme.LocalEncoreColors
+import com.encore.tablet.audit.LibraryAuditViewModel
 import com.encore.tablet.preferences.AppPreferencesViewModel
 import kotlin.math.roundToInt
 
@@ -86,6 +90,8 @@ private fun parseColorSafe(hex: String): Color =
 @Composable
 fun SettingsScreen(
     viewModel: AppPreferencesViewModel,
+    auditViewModel: LibraryAuditViewModel,
+    onEditSong: (SongEntity) -> Unit,
     onNavigateBack: () -> Unit
 ) {
     val prefs by viewModel.preferences.collectAsState()
@@ -164,7 +170,7 @@ fun SettingsScreen(
                 SettingsCategory.THEME          -> ThemePanel(prefs, viewModel)
                 SettingsCategory.TYPOGRAPHY     -> TypographyPanel(prefs, viewModel)
                 SettingsCategory.PERFORMANCE_HUD -> PerformanceHudPanel(prefs, viewModel)
-                SettingsCategory.LIBRARY_TOOLS  -> LibraryToolsPanel()
+                SettingsCategory.LIBRARY_TOOLS  -> LibraryHealthPanel(auditViewModel, onEditSong)
             }
         }
     }
@@ -556,38 +562,143 @@ private fun HudToggleRow(
     }
 }
 
-// ── Library Tools Panel ───────────────────────────────────────────────────────
+// ── Library Health Panel ──────────────────────────────────────────────────────
 
 @Composable
-private fun LibraryToolsPanel() {
+private fun LibraryHealthPanel(
+    auditViewModel: LibraryAuditViewModel,
+    onEditSong: (SongEntity) -> Unit
+) {
+    val context = LocalContext.current
     val encoreColors = LocalEncoreColors.current
+    val invalidSongs by auditViewModel.invalidSongs.collectAsState()
+    val isScanning by auditViewModel.isScanning.collectAsState()
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(24.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item { PanelHeader("Library Tools", "Utilities for managing your song library") }
+        item { PanelHeader("Library Health", "Scan charts for metadata gaps and formatting issues") }
+
+        // ── Summary card ─────────────────────────────────────────────────────
         item {
             SettingsCard {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier
-                        .weight(1f)
-                        .padding(end = 16.dp)) {
-                        Text("Library Health Scanner",
-                            style = MaterialTheme.typography.bodyMedium,
+                    Column(modifier = Modifier.weight(1f)) {
+                        val label = when {
+                            isScanning -> "Scanning library…"
+                            invalidSongs.isEmpty() -> "No issues found"
+                            else -> "${invalidSongs.size} song${if (invalidSongs.size == 1) "" else "s"} with issues"
+                        }
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.SemiBold,
-                            color = encoreColors.titleText)
-                        Spacer(Modifier.height(4.dp))
-                        Text("Scan for missing metadata, duplicate titles, and chart formatting issues",
+                            color = when {
+                                isScanning -> encoreColors.subtleText
+                                invalidSongs.isEmpty() -> encoreColors.titleText
+                                else -> MaterialTheme.colorScheme.error
+                            }
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = "Checks: missing title/artist/key, unclosed [h] tags, non-standard sections",
                             style = MaterialTheme.typography.bodySmall,
-                            color = encoreColors.subtleText)
+                            color = encoreColors.subtleText
+                        )
                     }
-                    OutlinedButton(onClick = {}, enabled = false) { Text("Run Scan") }
+                    Spacer(Modifier.width(16.dp))
+                    OutlinedButton(
+                        onClick = { auditViewModel.runScan(context) },
+                        enabled = !isScanning
+                    ) {
+                        Text(if (isScanning) "Scanning…" else "Run Scan")
+                    }
                 }
             }
+        }
+
+        // ── Issue list ───────────────────────────────────────────────────────
+        if (invalidSongs.isNotEmpty()) {
+            item {
+                Text(
+                    text = "Issues",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = encoreColors.subtleText,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            }
+            items(invalidSongs, key = { it.id }) { song ->
+                AuditIssueRow(song = song, onEditSong = onEditSong)
+            }
+        }
+    }
+}
+
+@Composable
+private fun AuditIssueRow(
+    song: SongEntity,
+    onEditSong: (SongEntity) -> Unit
+) {
+    val encoreColors = LocalEncoreColors.current
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onEditSong(song) },
+        colors = CardDefaults.cardColors(containerColor = encoreColors.cardBackground),
+        elevation = CardDefaults.cardElevation(defaultElevation = encoreColors.cardElevation),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = song.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = encoreColors.titleText
+                )
+                Text(
+                    text = song.artist,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = encoreColors.subtleText
+                )
+                Spacer(Modifier.height(6.dp))
+                // Each error is delimited by " • " in the stored string
+                song.validationErrors?.split(" • ")?.forEach { error ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(vertical = 1.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.error)
+                        )
+                        Text(
+                            text = error,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            Icon(
+                imageVector = Icons.Default.Edit,
+                contentDescription = "Open editor",
+                tint = encoreColors.subtleText,
+                modifier = Modifier.size(18.dp)
+            )
         }
     }
 }

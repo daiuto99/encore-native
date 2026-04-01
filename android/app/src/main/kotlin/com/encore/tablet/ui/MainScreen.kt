@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -83,6 +84,7 @@ import com.encore.core.data.entities.SetEntity
 import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.preferences.AppPreferences
 import com.encore.core.ui.theme.SetColor
+import com.encore.tablet.audit.LibraryAuditViewModel
 import com.encore.tablet.preferences.AppPreferencesViewModel
 import com.encore.feature.library.LibraryListContent
 import com.encore.feature.library.LibraryViewModel
@@ -118,6 +120,7 @@ fun MainScreen(
     val libraryViewModel: LibraryViewModel = viewModel(factory = viewModelFactory)
     val authViewModel: AuthViewModel = viewModel(factory = viewModelFactory)
     val appPrefsViewModel: AppPreferencesViewModel = viewModel(factory = viewModelFactory)
+    val auditViewModel: LibraryAuditViewModel = viewModel(factory = viewModelFactory)
     val appPreferences by appPrefsViewModel.preferences.collectAsState()
     var isDarkMode by remember { mutableStateOf(true) }
     var editSong by remember { mutableStateOf<SongEntity?>(null) }
@@ -161,6 +164,8 @@ fun MainScreen(
         composable(Routes.SETTINGS) {
             SettingsScreen(
                 viewModel = appPrefsViewModel,
+                auditViewModel = auditViewModel,
+                onEditSong = { song -> editSong = song },
                 onNavigateBack = { navController.popBackStack() }
             )
         }
@@ -252,6 +257,9 @@ fun CommandCenterScreen(
     val authState by authViewModel.authState.collectAsState()
     var showProfileSheet by remember { mutableStateOf(false) }
     var showImportSheet by remember { mutableStateOf(false) }
+    var showSaveSetDialog by remember { mutableStateOf(false) }
+    var showLoadSetDialog by remember { mutableStateOf(false) }
+    var saveSetName by remember { mutableStateOf("") }
     val profileSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showAccountDropdown by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -266,6 +274,7 @@ fun CommandCenterScreen(
     val availableSets by libraryViewModel.availableSets.collectAsState()
     val songs by libraryViewModel.songs.collectAsState()
     val performSetEntries by libraryViewModel.performSetEntries.collectAsState()
+    val setlists by libraryViewModel.setlists.collectAsState()
 
     // Folder Sync — OpenDocumentTree gives a persistent tree URI
     val folderPickerLauncher = rememberLauncherForActivityResult(
@@ -330,6 +339,79 @@ fun CommandCenterScreen(
         }
     }
 
+    // ── Save Set dialog ───────────────────────────────────────────────────────
+    if (showSaveSetDialog) {
+        AlertDialog(
+            onDismissRequest = { showSaveSetDialog = false; saveSetName = "" },
+            title = { Text("Save Current Set") },
+            text = {
+                androidx.compose.material3.OutlinedTextField(
+                    value = saveSetName,
+                    onValueChange = { saveSetName = it },
+                    label = { Text("Setlist name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val name = saveSetName.trim()
+                        if (name.isNotEmpty()) {
+                            libraryViewModel.saveCurrentSetAs(name)
+                            showSaveSetDialog = false
+                            saveSetName = ""
+                        }
+                    },
+                    enabled = saveSetName.isNotBlank()
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSaveSetDialog = false; saveSetName = "" }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // ── Load Set dialog ───────────────────────────────────────────────────────
+    if (showLoadSetDialog) {
+        AlertDialog(
+            onDismissRequest = { showLoadSetDialog = false },
+            title = { Text("Load Setlist") },
+            text = {
+                if (setlists.isEmpty()) {
+                    Text(
+                        "No saved setlists yet. Save the current set first.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Column {
+                        setlists.forEach { setlist ->
+                            TextButton(
+                                onClick = {
+                                    libraryViewModel.loadSetlistAsCurrent(setlist.id)
+                                    showLoadSetDialog = false
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = setlist.name,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                            HorizontalDivider(thickness = 0.5.dp)
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showLoadSetDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
     if (showImportSheet) {
         ImportModal(
             onDismiss = { showImportSheet = false },
@@ -380,6 +462,8 @@ fun CommandCenterScreen(
                 showAccountDropdown = showAccountDropdown,
                 connectedFolderUri = connectedFolderUri,
                 onImportClick = { showImportSheet = true },
+                onSaveSetClick = { showSaveSetDialog = true },
+                onLoadSetClick = { showLoadSetDialog = true },
                 onToggleDarkMode = onToggleDarkMode,
                 onPerformClick = {
                     val setNum = selectedSetFilter ?: 1
@@ -640,6 +724,7 @@ fun SetsSection(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .navigationBarsPadding()
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         Row(

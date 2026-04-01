@@ -49,7 +49,6 @@ import com.encore.tablet.R
  * Left  — Encore logo + version badge
  * Right — Import | SAVE SET | LOAD SET | PERFORM | Settings | UserAvatar
  *
- * PERFORM / SAVE SET / LOAD SET are no-op placeholders for Phase 4.3.5.
  * Import triggers the SAF file picker via [onImportClick].
  */
 @Composable
@@ -59,6 +58,8 @@ fun EncoreHeader(
     connectedFolderUri: String?,
     onImportClick: () -> Unit,
     onPerformClick: () -> Unit,
+    onSaveSetClick: () -> Unit,
+    onLoadSetClick: () -> Unit,
     onRefreshClick: () -> Unit,
     onToggleDarkMode: () -> Unit,
     onShowDropdown: () -> Unit,
@@ -112,7 +113,7 @@ fun EncoreHeader(
         }
 
         // ── SAVE SET ─────────────────────────────────────────────────────────
-        TextButton(onClick = {}) {
+        TextButton(onClick = onSaveSetClick) {
             Text(
                 text = "SAVE SET",
                 style = MaterialTheme.typography.labelMedium,
@@ -123,7 +124,7 @@ fun EncoreHeader(
         }
 
         // ── LOAD SET ─────────────────────────────────────────────────────────
-        TextButton(onClick = {}) {
+        TextButton(onClick = onLoadSetClick) {
             Text(
                 text = "LOAD SET",
                 style = MaterialTheme.typography.labelMedium,

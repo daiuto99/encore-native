@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import com.encore.feature.library.LibraryViewModel
 import com.encore.feature.performance.SongDetailViewModel
 import com.encore.feature.setlists.SetlistViewModel
+import com.encore.tablet.audit.LibraryAuditViewModel
 import com.encore.tablet.auth.AuthViewModel
 import com.encore.tablet.preferences.AppPreferencesViewModel
 
@@ -48,6 +49,11 @@ class ViewModelFactory(
             modelClass.isAssignableFrom(AppPreferencesViewModel::class.java) -> {
                 AppPreferencesViewModel(
                     appContainer.appPreferencesRepository
+                ) as T
+            }
+            modelClass.isAssignableFrom(LibraryAuditViewModel::class.java) -> {
+                LibraryAuditViewModel(
+                    appContainer.songRepository
                 ) as T
             }
             else -> throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")

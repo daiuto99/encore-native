@@ -38,7 +38,7 @@ import java.util.UUID
         SetEntity::class,
         SetEntryEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 @TypeConverters(EncoreTypeConverters::class)
@@ -159,6 +159,19 @@ abstract class EncoreDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration from version 5 to 6: Add validation_errors column for Library Health Tool.
+         * Nullable TEXT — null means unscanned or clean; a non-null value is a semicolon-separated
+         * list of issues found by LibraryAuditWorker.
+         */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE songs ADD COLUMN validation_errors TEXT"
+                )
+            }
+        }
+
+        /**
          * Get singleton database instance.
          *
          * @param context Application context
@@ -171,7 +184,7 @@ abstract class EncoreDatabase : RoomDatabase() {
                     EncoreDatabase::class.java,
                     DATABASE_NAME
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .fallbackToDestructiveMigration()
                     .addCallback(DatabaseCallback(context.applicationContext))
                     .build()

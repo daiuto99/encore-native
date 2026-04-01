@@ -8,6 +8,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -26,6 +28,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -211,6 +214,9 @@ fun SongDetailScreen(
     val prevSongId by viewModel.prevSongId.collectAsState()
     val nextSongId by viewModel.nextSongId.collectAsState()
     val performSongIds by viewModel.performSongIds.collectAsState()
+    val setName by viewModel.setName.collectAsState()
+    val prevSong by viewModel.prevSong.collectAsState()
+    val nextSong by viewModel.nextSong.collectAsState()
 
     var showControls by remember { mutableStateOf(false) }
     var showPageIndicator by remember { mutableStateOf(false) }
@@ -340,21 +346,39 @@ fun SongDetailScreen(
                 }
             }
 
-            // ── Performance Dashboard (pinned) ───────────────────────────
-            PerformanceDashboard(
-                song = song!!,
-                harmonyColor = parseColorSafe(
-                    if (encoreColors.isDark) appPreferences.darkHarmonyColor
-                    else appPreferences.lightHarmonyColor
-                ),
-                appPreferences = appPreferences,
-                onToggleDarkMode = onToggleDarkMode,
-                onEditClick = onEditClick,
-                onNavigateBack = onNavigateBack,
+            // ── Context Bar + Performance Dashboard (pinned) ─────────────
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.TopStart)
-            )
+            ) {
+                PerformanceDashboard(
+                    song = song!!,
+                    harmonyColor = parseColorSafe(
+                        if (encoreColors.isDark) appPreferences.darkHarmonyColor
+                        else appPreferences.lightHarmonyColor
+                    ),
+                    appPreferences = appPreferences,
+                    onToggleDarkMode = onToggleDarkMode,
+                    onEditClick = onEditClick,
+                    onNavigateBack = onNavigateBack,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (setName.isNotEmpty()) {
+                    PerformanceContextBar(
+                        setName = setName,
+                        setColor = SetColor.getSetColor(setNumber),
+                        prevSong = prevSong,
+                        nextSong = nextSong,
+                        onPrevClick = {
+                            scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
+                        },
+                        onNextClick = {
+                            scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
+                        }
+                    )
+                }
+            }
 
             // ── Prev song arrow ──────────────────────────────────────────────
             if (prevSongId != null) {
@@ -537,7 +561,7 @@ fun SongContent(
             }
             .verticalScroll(scrollState)
             // top padding clears the floating card: 8dp inset + 68dp card + 8dp gap = 84dp
-            .padding(start = 24.dp, end = 24.dp, bottom = 24.dp, top = 84.dp)
+            .padding(start = 24.dp, end = 24.dp, bottom = 24.dp, top = 144.dp)
     ) {
         sections.forEachIndexed { index, section ->
             when (section) {
@@ -639,6 +663,172 @@ fun SongContent(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Performance Context Bar
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Floating card pinned above [PerformanceDashboard] showing set-level navigation context.
+ *
+ * Layout (left → right):
+ *  - Prev song pill (← title) or "..." when first song
+ *  - Set name centred in set colour
+ *  - Next song pill (title →) or "..." when last song
+ *  - Divider + live clock (HH:MM:SS, 1-second tick)
+ */
+@Composable
+private fun PerformanceContextBar(
+    setName: String,
+    setColor: Color,
+    prevSong: SongEntity?,
+    nextSong: SongEntity?,
+    onPrevClick: () -> Unit,
+    onNextClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val encoreColors = LocalEncoreColors.current
+    var currentTime by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            val cal = java.util.Calendar.getInstance()
+            currentTime = "%02d:%02d:%02d".format(
+                cal.get(java.util.Calendar.HOUR_OF_DAY),
+                cal.get(java.util.Calendar.MINUTE),
+                cal.get(java.util.Calendar.SECOND)
+            )
+            delay(1000)
+        }
+    }
+
+    Box(modifier = modifier.padding(start = 8.dp, end = 8.dp, top = 0.dp, bottom = 8.dp)) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = encoreColors.cardBackground,
+            shadowElevation = encoreColors.cardElevation,
+            tonalElevation = 0.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp)
+                .border(1.dp, encoreColors.divider, RoundedCornerShape(12.dp))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // ── Prev Song pill ───────────────────────────────────────────
+                if (prevSong != null) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(encoreColors.titleText.copy(alpha = 0.07f))
+                            .clickable(onClick = onPrevClick)
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ChevronLeft,
+                            contentDescription = "Previous song",
+                            tint = encoreColors.titleText.copy(alpha = 0.65f),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = prevSong.title,
+                            color = encoreColors.titleText.copy(alpha = 0.65f),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 150.dp)
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "...",
+                        color = encoreColors.titleText.copy(alpha = 0.22f),
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(horizontal = 10.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                // ── Set Name (centre) ────────────────────────────────────────
+                Text(
+                    text = setName,
+                    color = setColor,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                // ── Next Song pill ───────────────────────────────────────────
+                if (nextSong != null) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(encoreColors.titleText.copy(alpha = 0.07f))
+                            .clickable(onClick = onNextClick)
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Text(
+                            text = nextSong.title,
+                            color = encoreColors.titleText.copy(alpha = 0.65f),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 150.dp)
+                        )
+                        Icon(
+                            imageVector = Icons.Default.ChevronRight,
+                            contentDescription = "Next song",
+                            tint = encoreColors.titleText.copy(alpha = 0.65f),
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "...",
+                        color = encoreColors.titleText.copy(alpha = 0.22f),
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(horizontal = 10.dp)
+                    )
+                }
+
+                // ── Divider + Clock (aligns under Control Pill) ──────────────
+                Spacer(modifier = Modifier.width(10.dp))
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .fillMaxHeight(0.55f)
+                        .background(encoreColors.divider)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = currentTime,
+                    color = encoreColors.titleText.copy(alpha = 0.55f),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    fontFamily = FontFamily.Monospace,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.width(76.dp)
+                )
             }
         }
     }

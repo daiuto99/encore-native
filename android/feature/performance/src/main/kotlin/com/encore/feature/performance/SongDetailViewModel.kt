@@ -59,6 +59,16 @@ class SongDetailViewModel(
     private val _nextSongId = MutableStateFlow<String?>(null)
     val nextSongId: StateFlow<String?> = _nextSongId.asStateFlow()
 
+    // Set context for the Performance Context Bar
+    private val _setName = MutableStateFlow("")
+    val setName: StateFlow<String> = _setName.asStateFlow()
+
+    private val _prevSong = MutableStateFlow<SongEntity?>(null)
+    val prevSong: StateFlow<SongEntity?> = _prevSong.asStateFlow()
+
+    private val _nextSong = MutableStateFlow<SongEntity?>(null)
+    val nextSong: StateFlow<SongEntity?> = _nextSong.asStateFlow()
+
     // Song cache + pager state
     private val _songCache = MutableStateFlow<Map<String, SongEntity>>(emptyMap())
     private val _performSongIds = MutableStateFlow<List<String>>(emptyList())
@@ -94,11 +104,13 @@ class SongDetailViewModel(
                 _currentSetNumber.value = setNumber
             }
         }
-        // Recompute prev/next for arrow affordance
+        // Recompute prev/next for arrow affordance and context bar
         val ids = _performSongIds.value
         val idx = ids.indexOf(songId)
         _prevSongId.value = ids.getOrNull(idx - 1)
         _nextSongId.value = ids.getOrNull(idx + 1)
+        _prevSong.value = ids.getOrNull(idx - 1)?.let { _songCache.value[it] }
+        _nextSong.value = ids.getOrNull(idx + 1)?.let { _songCache.value[it] }
     }
 
     // Debounce job for saving zoom level
@@ -138,11 +150,21 @@ class SongDetailViewModel(
                     val idx = songsInSet.indexOfFirst { it.id == songId }
                     _prevSongId.value = if (idx > 0) songsInSet[idx - 1].id else null
                     _nextSongId.value = if (idx < songsInSet.size - 1) songsInSet[idx + 1].id else null
+                    _prevSong.value = if (idx > 0) songsInSet[idx - 1] else null
+                    _nextSong.value = if (idx < songsInSet.size - 1) songsInSet[idx + 1] else null
+                    // Resolve setlist name for context bar
+                    val setlistName = try {
+                        setlistRepository.getSetlistWithSets(setEntity.setlistId)?.setlist?.name
+                    } catch (e: Exception) { null }
+                    _setName.value = setlistName ?: "Set $setNumber"
                     Log.d(TAG, "Set $setNumber (id=${setEntity.id}): ${songsInSet.size} songs, idx=$idx")
                 } else {
                     _performSongIds.value = if (song != null) listOf(songId) else emptyList()
                     _prevSongId.value = null
                     _nextSongId.value = null
+                    _prevSong.value = null
+                    _nextSong.value = null
+                    _setName.value = ""
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load set $setNumber context, falling back to single-song", e)

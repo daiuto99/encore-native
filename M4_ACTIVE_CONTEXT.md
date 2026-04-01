@@ -139,24 +139,22 @@ All interactive icon buttons standardised to **60dp** hit targets across all thr
 
 ---
 
-## Next Feature — Performance Mode Context Bar (PLANNED, not built)
+## Performance Context Bar — COMPLETE
 
-### What it is
-A **second floating card** above the existing Performance Dashboard showing set-level context and navigation.
+### What was built
+- `PerformanceContextBar` composable (private, in `SongDetailScreen.kt`) — 44dp floating card below `PerformanceDashboard`.
+- Layout: **← prev pill** | **set name (set color)** | **next pill →** | 1dp divider | **HH:MM:SS live clock**
+- Pills show truncated title or `"..."` when at first/last song; clicking animates pager.
+- Card hidden when `setName` is empty (single-song / no-set mode).
+- Scroll top padding: **84dp → 144dp**.
 
-### Layout (left → right)
-- **Previous Song pill** (← arrow + truncated song title, or "..." if first song in set)
-- **Set Name** centered with set color
-- **Next Song pill** (truncated song title + → arrow, or "..." if last song in set)
-- **Current Time** — right-aligned, centered under the Control Pill column, live clock updating every second
+### ViewModel additions (`SongDetailViewModel.kt`)
+- `setName: StateFlow<String>` — resolved from `setlistRepository.getSetlistWithSets()?.setlist?.name`, falls back to `"Set $N"`.
+- `prevSong: StateFlow<SongEntity?>` and `nextSong: StateFlow<SongEntity?>` — populated in `loadSong()` and `onPageChanged()`.
 
-### Key implementation notes
-- Prev/Next wired to `pagerState` — `coroutineScope.launch { pagerState.animateScrollToPage(page ± 1) }`
-- Current time: `LaunchedEffect(Unit) { while(true) { currentTime = ...; delay(1000) } }`
-- **Set name threading:** Need to verify if `setName` is passed to `SongDetailScreen` or needs to be added to ViewModel/param chain
-- **Set color:** Need to check if `SetlistEntity` has a color field before assuming it can be shown
-- Scroll top padding will increase from **84dp → ~144dp** (additional ~52dp card + gap)
-- Edge case: first song → left pill disabled/"..."; last song → right pill disabled/"..."
+### Key decisions
+- **Set color:** `SetColor.getSetColor(setNumber)` — no DB change needed; `SetlistEntity` has no color field.
+- **Set name:** threaded through ViewModel, not a composable param.
 
 ---
 
@@ -169,7 +167,7 @@ A **second floating card** above the existing Performance Dashboard showing set-
 - **Build filter:** `./gradlew assembleDebug 2>&1 | grep -E "FAILED|error:|BUILD SUCCESSFUL"`
 - **ADB path:** `~/Library/Android/sdk/platform-tools/adb`
 - **Settings entry point:** Gear icon in `EncoreHeader` → `Routes.SETTINGS = "settings"` composable in `MainScreen.kt` NavHost
-- **Performance card scroll padding:** currently `84dp` in `SongDetailScreen.kt`
+- **Performance card scroll padding:** currently `144dp` in `SongDetailScreen.kt` (dashboard 84dp + context bar 52dp + gap 8dp)
 - **Icon sizes:** all `IconButton` = 60dp hit target, icon visual = 20-24dp
 - **Guitar pick icon:** `feature/performance/src/main/res/drawable/ic_guitar_pick.xml`
 

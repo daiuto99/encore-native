@@ -722,22 +722,22 @@ fun SongListItem(
                         )
                     }
 
-                    // Add-to-Set pill button
+                    // Add-to-Set pill button — 48dp tall hit target, icon visually smaller
                     Spacer(modifier = Modifier.width(4.dp))
                     OutlinedButton(
                         onClick = { showAddToSetDialog = true },
                         shape = RoundedCornerShape(50.dp),
                         border = BorderStroke(1.dp, encoreColors.titleText.copy(alpha = 0.2f)),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
                         modifier = Modifier
-                            .height(28.dp)
+                            .height(60.dp)
                             .padding(end = 8.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Add,
                             contentDescription = "Add to set",
                             tint = encoreColors.artistText,
-                            modifier = Modifier.size(14.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }

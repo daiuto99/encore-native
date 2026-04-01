@@ -5,6 +5,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,11 +22,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -41,6 +45,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -57,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import com.encore.core.data.preferences.AppPreferences
 import com.encore.core.data.preferences.SectionStyle
 import com.encore.core.data.preferences.SongFontFamily
+import com.encore.core.data.preferences.ThemePreset
 import com.encore.core.ui.theme.LocalEncoreColors
 import com.encore.tablet.preferences.AppPreferencesViewModel
 import kotlin.math.roundToInt
@@ -172,6 +178,9 @@ private fun ThemePanel(prefs: AppPreferences, viewModel: AppPreferencesViewModel
     var selectedTab by remember { mutableStateOf(0) }
     val isDark = selectedTab == 0
 
+    val darkUserPresets by viewModel.darkUserPresets.collectAsState()
+    val lightUserPresets by viewModel.lightUserPresets.collectAsState()
+
     val sections = (if (isDark) prefs.darkSectionStyles else prefs.lightSectionStyles)
         .entries.toList()
     val bgColor = if (isDark) prefs.darkBgColor else prefs.lightBgColor
@@ -214,7 +223,15 @@ private fun ThemePanel(prefs: AppPreferences, viewModel: AppPreferencesViewModel
             contentPadding = PaddingValues(24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            item {
+            item(key = "presets_$selectedTab") {
+                PresetSection(
+                    builtInPresets = if (isDark) BuiltInThemes.DARK else BuiltInThemes.LIGHT,
+                    userPresets = if (isDark) darkUserPresets else lightUserPresets,
+                    isDark = isDark,
+                    viewModel = viewModel
+                )
+            }
+            item(key = "bg_$selectedTab") {
                 SettingsCard {
                     BgColorRow(label = "Background Color", hexColor = bgColor, onUpdate = onBgUpdate)
                 }
@@ -573,6 +590,235 @@ private fun LibraryToolsPanel() {
             }
         }
     }
+}
+
+// ── Preset UI ─────────────────────────────────────────────────────────────────
+
+@Composable
+private fun PresetSection(
+    builtInPresets: List<ThemePreset>,
+    userPresets: List<ThemePreset>,
+    isDark: Boolean,
+    viewModel: AppPreferencesViewModel
+) {
+    val encoreColors = LocalEncoreColors.current
+    var selectedPreset by remember(isDark) { mutableStateOf<ThemePreset?>(null) }
+    var showSaveDialog by remember { mutableStateOf(false) }
+
+    if (showSaveDialog) {
+        SavePresetDialog(
+            onDismiss = { showSaveDialog = false },
+            onSave = { name ->
+                viewModel.saveCurrentAsPreset(name, isDark)
+                showSaveDialog = false
+            }
+        )
+    }
+
+    SettingsCard {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // ── Built-in presets ──────────────────────────────────────────────
+            Text(
+                text = "Built-in",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = encoreColors.subtleText
+            )
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                builtInPresets.forEach { preset ->
+                    PresetChip(
+                        preset = preset,
+                        isSelected = selectedPreset?.id == preset.id,
+                        onClick = { selectedPreset = preset }
+                    )
+                }
+            }
+
+            HorizontalDivider(color = encoreColors.divider)
+
+            // ── User presets ──────────────────────────────────────────────────
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Saved",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = encoreColors.subtleText,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = { showSaveDialog = true }) {
+                    Text("Save New Preset", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            if (userPresets.isEmpty()) {
+                Text(
+                    text = "No saved presets yet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = encoreColors.subtleText
+                )
+            } else {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    userPresets.forEach { preset ->
+                        PresetChip(
+                            preset = preset,
+                            isSelected = selectedPreset?.id == preset.id,
+                            onClick = { selectedPreset = preset },
+                            onDelete = { viewModel.deletePreset(preset.id, isDark) }
+                        )
+                    }
+                }
+            }
+
+            // ── Color preview + Use Preset ────────────────────────────────────
+            val preview = selectedPreset
+            if (preview != null) {
+                HorizontalDivider(color = encoreColors.divider)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Color swatches for the selected preset
+                    listOf(
+                        "BG"  to preview.bgColor,
+                        "Lyric" to preview.lyricColor,
+                        "Chord" to preview.chordColor,
+                        "Harmony" to preview.harmonyColor
+                    ).forEach { (label, hex) ->
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .clip(CircleShape)
+                                    .background(parseColorSafe(hex))
+                                    .border(0.5.dp, encoreColors.divider, CircleShape)
+                            )
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = encoreColors.subtleText
+                            )
+                        }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.loadPreset(preview, isDark)
+                            selectedPreset = null
+                        }
+                    ) {
+                        Text("Use Preset")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PresetChip(
+    preset: ThemePreset,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    onDelete: (() -> Unit)? = null
+) {
+    val encoreColors = LocalEncoreColors.current
+    val primary = MaterialTheme.colorScheme.primary
+    val borderColor = if (isSelected) primary else encoreColors.divider
+    val borderWidth = if (isSelected) 2.dp else 1.dp
+
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                if (isSelected) primary.copy(alpha = 0.08f)
+                else encoreColors.cardBackground
+            )
+            .border(borderWidth, borderColor, RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        // Color preview dots (bg + chord)
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(parseColorSafe(preset.bgColor))
+                .border(0.5.dp, encoreColors.divider, CircleShape)
+        )
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(parseColorSafe(preset.chordColor))
+        )
+        Text(
+            text = preset.name,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+            color = if (isSelected) primary else encoreColors.titleText
+        )
+        if (onDelete != null) {
+            Spacer(Modifier.width(2.dp))
+            Box(
+                modifier = Modifier
+                    .size(16.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onDelete),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Delete preset",
+                    tint = encoreColors.subtleText,
+                    modifier = Modifier.size(12.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SavePresetDialog(
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Save Preset") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Preset name") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { if (name.isNotBlank()) onSave(name) },
+                enabled = name.isNotBlank()
+            ) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }
 
 // ── Shared Composables ────────────────────────────────────────────────────────

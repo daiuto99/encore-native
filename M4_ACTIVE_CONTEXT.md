@@ -66,47 +66,50 @@ Add cloud-backed account and sync behavior without breaking the offline-first lo
 
 ---
 
-## Next Session — Theme Presets
+## Theme Presets — COMPLETE
 
-### What to build
-A save/load preset system for the Theme panel. Designed, not yet built.
+### What was built
+- `core/data/.../preferences/ThemePreset.kt` — data class: `id`, `name`, `isBuiltIn`, `bgColor`, `lyricColor`, `chordColor`, `harmonyColor`, `sectionStyles`.
+- `app/.../settings/BuiltInThemes.kt` — 5 factory presets as hardcoded constants, never stored in DataStore.
+  - **Dark bank:** Midnight Mainstage, Neon Night-Shift
+  - **Light bank:** Studio Daylight, Bourbon & Vinyl, Solar Flare
+- `AppPreferencesRepository` extended: `DARK_USER_PRESETS` / `LIGHT_USER_PRESETS` DataStore keys; `loadPreset`, `savePreset`, `deletePreset`; `encodePresets`/`decodePresets` JSON helpers.
+- `AppPreferencesViewModel` extended: `darkUserPresets`/`lightUserPresets` StateFlows; `loadPreset`, `saveCurrentAsPreset`, `deletePreset`.
+- `SettingsScreen` ThemePanel preset UI: built-in chips + user preset chips; tap to select → color preview strip (BG/Lyric/Chord/Harmony swatches) → **Use Preset** button commits atomically. **Save New Preset** captures current live theme by name.
 
-### Architecture (ready to implement)
+### Renderer wiring (SongDetailScreen)
+- `chordAccentColor` falls back to `appPreferences.darkChordColor`/`lightChordColor` (via `parseColorSafe`) when not in a set context.
+- Lyric color reads from `appPreferences.darkLyricColor`/`lightLyricColor`.
+- `buildChordLine` now takes `harmonyColor: Color` parameter; passes `appPreferences.darkHarmonyColor`/`lightHarmonyColor` from call site.
+- Added `parseColorSafe(hex)` private helper.
 
-**Data model:**
-```kotlin
-data class ThemePreset(
-    val id: String,      // UUID or slugified name for built-ins
-    val name: String,
-    val bgColor: String,
-    val sectionStyles: Map<String, SectionStyle>,
-    val isBuiltIn: Boolean = false   // built-ins are read-only, never stored in DataStore
-)
-```
+---
 
-**Storage:** Single DataStore key `ap_theme_presets_json` — JSON array of user-saved presets. Built-in presets are hardcoded constants (no storage needed).
+## Touch Target Polish — COMPLETE
 
-**Built-in presets (3, ship with app):**
-- `Stage` — true black background, high-contrast vivid section colors
-- `Rehearsal` — system light grey background, softer section colors
-- `High Contrast` — OLED black, maximum brightness section colors for harsh lighting
+All interactive icon buttons standardised to **60dp** hit targets across all three main surfaces:
 
-Built-ins are read-only (no delete button). User presets appear in a separate "Saved" section with delete. Loading any preset calls the same write path into DataStore.
+| Surface | Buttons |
+|---|---|
+| `EncoreHeader` | Dark mode toggle, Settings gear, User avatar |
+| `LibraryScreen` | '+' add-to-set pill button (60dp height) |
+| `SongDetailScreen` | Close (✕), Dark mode toggle, Edit pencil |
 
-**Key open question:** Are presets per-mode (dark presets apply to dark tab, light presets to light tab) or mode-agnostic (one preset sets both)?  Per-mode is simpler and matches the current tab structure.
+- Icon visuals remain 24dp; the extra space is purely tap surface.
+- `IconButton` carries built-in Material ripple — visual feedback consistent on all buttons.
+- Spacer between PERFORM pill and icon cluster increased to 8dp on both sides to prevent misfires.
 
-**Estimated scope:** ~200–250 lines. One session. No new Room table, no new navigation, no new ViewModel class.
+---
 
-**Files to create/modify:**
-- `core/data/.../preferences/ThemePreset.kt` — NEW
-- `AppPreferencesRepository.kt` — add `ap_theme_presets_json` key + CRUD methods
-- `AppPreferencesViewModel.kt` — add `savePreset`, `loadPreset`, `deletePreset`
-- `SettingsScreen.kt` — add preset UI to ThemePanel (chips/rows, save dialog, built-in section)
+## Next — Library Health Tool
+- Implement the Library Health Scanner under Settings → Library Tools.
+- Scan for: missing metadata (no key, no artist), duplicate titles, chart formatting issues.
+- Results shown in a scrollable report inside the right panel.
 
 ---
 
 ## Known Facts for Next Session
-- **DataStore files:** `user_prefs` (auth, `UserPreferencesRepository`), `app_prefs` (visual prefs, `AppPreferencesRepository`). Do not mix.
+- **DataStore files:** `user_prefs` (auth), `app_prefs` (visual prefs). Do not mix.
 - **DB version:** 5
 - **`SetlistDetailScreen.kt`** — do not touch (user does not use it)
 - **`SongEditBottomSheet`** is in `feature/library`, imported by `app` module

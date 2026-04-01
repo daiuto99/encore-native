@@ -237,8 +237,6 @@ fun SongDetailScreen(
 
     BackHandler { onNavigateBack() }
 
-    val chordAccentColor = if (setNumber > 0) SetColor.getSetColor(setNumber) else null
-
     // Effective list: always ≥ 1 entry so pager never has pageCount = 0
     val effectiveSongIds = if (performSongIds.isEmpty()) listOf(songId) else performSongIds
     val initialPage = remember(effectiveSongIds, songId) {
@@ -262,6 +260,14 @@ fun SongDetailScreen(
     }
 
     val encoreColors = LocalEncoreColors.current
+    val chordAccentColor = if (setNumber > 0) {
+        SetColor.getSetColor(setNumber)
+    } else {
+        parseColorSafe(
+            if (encoreColors.isDark) appPreferences.darkChordColor
+            else appPreferences.lightChordColor
+        )
+    }
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -335,13 +341,13 @@ fun SongDetailScreen(
             ) {
                 IconButton(
                     onClick = onNavigateBack,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(60.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Back",
                         tint = encoreColors.titleText.copy(alpha = 0.55f),
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(24.dp)
                     )
                 }
                 Spacer(modifier = Modifier.width(4.dp))
@@ -367,13 +373,13 @@ fun SongDetailScreen(
                 onToggleDarkMode?.let { toggle ->
                     IconButton(
                         onClick = toggle,
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(60.dp)
                     ) {
                         Icon(
                             imageVector = if (encoreColors.isDark) Icons.Outlined.WbSunny else Icons.Outlined.NightsStay,
                             contentDescription = if (encoreColors.isDark) "Light mode" else "Dark mode",
                             tint = encoreColors.iconTint,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
@@ -420,13 +426,13 @@ fun SongDetailScreen(
                 onEditClick?.let { edit ->
                     IconButton(
                         onClick = { song?.let { edit(it) } },
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(60.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Edit,
                             contentDescription = "Edit song",
                             tint = encoreColors.iconTint,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
@@ -675,7 +681,14 @@ fun SongContent(
                                     text = buildChordLine(
                                         lineToRender,
                                         chordAccentColor,
-                                        encoreColors.lyricText.copy(alpha = vp.lyricAlpha),
+                                        parseColorSafe(
+                                            if (isDark) appPreferences.darkLyricColor
+                                            else appPreferences.lightLyricColor
+                                        ).copy(alpha = vp.lyricAlpha),
+                                        harmonyColor = parseColorSafe(
+                                            if (isDark) appPreferences.darkHarmonyColor
+                                            else appPreferences.lightHarmonyColor
+                                        ),
                                         isHarmonyLine = isHarmonyLine
                                     ),
                                     fontSize = (vp.bodyFontSizeSp * textSizeMultiplier).sp,
@@ -822,6 +835,13 @@ private enum class SpanType { CHORD, HARMONY, TECH_NOTE }
 private data class BodySpan(val range: IntRange, val type: SpanType, val text: String)
 
 // Fallback accent when no set context
+/** Parses a hex color string (e.g. "#FF9F0A") into a [Color], falling back to [Color.Gray]. */
+private fun parseColorSafe(hex: String): Color = try {
+    Color(android.graphics.Color.parseColor(hex))
+} catch (_: Exception) {
+    Color.Gray
+}
+
 private val DEFAULT_CHORD_COLOR = Color(0xFF3B82F6) // Blue
 
 /**
@@ -830,20 +850,19 @@ private val DEFAULT_CHORD_COLOR = Color(0xFF3B82F6) // Blue
  * - Strips Markdown bold (`**`) markers.
  * - `` `[Chord]` `` segments → [chordColor] (brackets visible, backticks stripped).
  * - Legacy bare chord lines → entire line in [chordColor].
- * - `[h]Text[/h]` → Bold + Orange + Underline (harmony annotation; always rendered).
+ * - `[h]Text[/h]` → Bold + [harmonyColor] + Underline (harmony annotation; always rendered).
  * - `*(text)*` → subtle grey italic (technical/director note).
  * - Lyric text → [lyricColor].
  */
-private val HARMONY_COLOR = Color(0xFFFF9F0A)
-
 private fun buildChordLine(
     rawLine: String,
     chordColor: Color?,
     lyricColor: Color,
+    harmonyColor: Color = Color(0xFFFF9F0A),
     isHarmonyLine: Boolean = false
 ): AnnotatedString {
     val effectiveChordColor = chordColor ?: DEFAULT_CHORD_COLOR
-    val effectiveLyricColor = if (isHarmonyLine) HARMONY_COLOR else lyricColor
+    val effectiveLyricColor = if (isHarmonyLine) harmonyColor else lyricColor
 
     // Strip markdown bold markers so `**Key:**` lines don't show asterisks
     val line = rawLine.replace("**", "")
@@ -903,7 +922,7 @@ private fun buildChordLine(
                 }
                 SpanType.HARMONY -> withStyle(
                     SpanStyle(
-                        color = HARMONY_COLOR,
+                        color = harmonyColor,
                         fontWeight = FontWeight.Bold,
                         textDecoration = TextDecoration.Underline
                     )

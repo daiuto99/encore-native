@@ -42,6 +42,14 @@ data class AppPreferences(
     val darkBgColor: String = "#000000",
     val lightBgColor: String = "#F2F2F7",
 
+    // ── Dual-theme body text colors ───────────────────────────────────────────
+    val darkLyricColor: String = "#D1D1D6",   // Midnight Mainstage default
+    val lightLyricColor: String = "#1C1C1E",  // Studio Daylight default
+    val darkChordColor: String = "#FFD60A",
+    val lightChordColor: String = "#007AFF",
+    val darkHarmonyColor: String = "#FF9F0A",
+    val lightHarmonyColor: String = "#A35200",
+
     // ── Font family ───────────────────────────────────────────────────────────
     val fontFamily: SongFontFamily = SongFontFamily.SANS_SERIF
 ) {

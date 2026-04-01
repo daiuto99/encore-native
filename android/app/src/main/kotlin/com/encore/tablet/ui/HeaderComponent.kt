@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -132,7 +133,7 @@ fun EncoreHeader(
             )
         }
 
-        Spacer(modifier = Modifier.width(4.dp))
+        Spacer(modifier = Modifier.width(8.dp))
 
         // ── PERFORM ──────────────────────────────────────────────────────────
         Button(
@@ -151,23 +152,31 @@ fun EncoreHeader(
             )
         }
 
-        Spacer(modifier = Modifier.width(4.dp))
+        Spacer(modifier = Modifier.width(8.dp))
 
         // ── Dark Mode Toggle ─────────────────────────────────────────────────
-        IconButton(onClick = onToggleDarkMode) {
+        IconButton(
+            onClick = onToggleDarkMode,
+            modifier = Modifier.size(60.dp)
+        ) {
             Icon(
                 imageVector = if (encoreColors.isDark) Icons.Outlined.WbSunny else Icons.Outlined.NightsStay,
                 contentDescription = if (encoreColors.isDark) "Switch to light mode" else "Switch to dark mode",
-                tint = encoreColors.iconTint
+                tint = encoreColors.iconTint,
+                modifier = Modifier.size(24.dp)
             )
         }
 
         // ── Settings ─────────────────────────────────────────────────────────
-        IconButton(onClick = onSettingsClick) {
+        IconButton(
+            onClick = onSettingsClick,
+            modifier = Modifier.size(60.dp)
+        ) {
             Icon(
                 imageVector = Icons.Default.Settings,
                 contentDescription = "Settings",
-                tint = encoreColors.iconTint
+                tint = encoreColors.iconTint,
+                modifier = Modifier.size(24.dp)
             )
         }
 
@@ -179,7 +188,8 @@ fun EncoreHeader(
                         is AuthState.Authenticated -> onShowDropdown()
                         else -> onProfileSheetRequest()
                     }
-                }
+                },
+                modifier = Modifier.size(60.dp)
             ) {
                 Box(
                     modifier = Modifier.border(

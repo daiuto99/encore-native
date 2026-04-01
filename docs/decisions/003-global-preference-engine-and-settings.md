@@ -63,11 +63,32 @@ Stored as enum name string in DataStore (`ap_font_family`). Decoded with `runCat
 
 The Theme category uses a `TabRow` (Dark Mode / Light Mode) rather than a single long scrollable list. This keeps the background color and section style matrix for each mode independently browsable without scrolling past the other.
 
-### 7. Built-in theme presets (designed, not yet built)
+### 7. Built-in theme presets
 
-Three factory presets will ship with the app as hardcoded constants (`BuiltInThemes` object). They are never written to DataStore — loading one calls the same write path as user-created presets. User-saved presets are stored under `ap_theme_presets_json` as a JSON array.
+Five factory presets ship as hardcoded constants in `BuiltInThemes` (`app` module). They are never written to DataStore and cannot be deleted. Loading one calls the same atomic `loadPreset()` write path as user-created presets.
 
-Built-ins are rendered in a separate "Built-in" UI section with no delete button. User presets appear in a "Saved" section with delete. The design question of per-mode vs. mode-agnostic presets is deferred to implementation time; per-mode is preferred to match the current tab structure.
+**Dark bank:** Midnight Mainstage, Neon Night-Shift
+**Light bank:** Studio Daylight, Bourbon & Vinyl, Solar Flare
+
+User-saved presets are stored per-mode under `ap_dark_user_presets` / `ap_light_user_presets` as JSON arrays. Per-mode storage matches the Dark Mode / Light Mode tab structure and prevents cross-contamination between stage and rehearsal configurations.
+
+`ThemePreset` bundles `bgColor`, `lyricColor`, `chordColor`, `harmonyColor`, and `sectionStyles`. All are written atomically in a single DataStore `edit {}` block.
+
+Preset UX: tapping a chip selects it and shows a 4-swatch color preview (BG / Lyric / Chord / Harmony). "Use Preset" commits. "Save New Preset" captures the current live theme by name with a UUID id.
+
+### 8. Renderer color wiring (SongDetailScreen)
+
+Three previously hardcoded colors were wired to `AppPreferences`:
+
+- **Chord color:** `chordAccentColor` falls back to `appPreferences.darkChordColor` / `lightChordColor` (via `parseColorSafe`) instead of null when not in a set context.
+- **Lyric color:** passed as `parseColorSafe(darkLyricColor / lightLyricColor).copy(alpha)` instead of `encoreColors.lyricText`.
+- **Harmony color:** `buildChordLine` now takes an explicit `harmonyColor: Color` parameter; call site passes `darkHarmonyColor` / `lightHarmonyColor` from prefs.
+
+`parseColorSafe(hex: String): Color` is a private file-level helper using `android.graphics.Color.parseColor`, falling back to `Color.Gray`.
+
+### 9. Touch target standardisation
+
+All icon buttons across `EncoreHeader`, `LibraryScreen`, and `SongDetailScreen` use **60dp** `Modifier.size` on the `IconButton` wrapper, with icon visuals at 24dp. `OutlinedButton` for the song-list '+' pill is 60dp tall. `IconButton` carries Material3's built-in ripple — no custom indication needed.
 
 ---
 
@@ -75,14 +96,17 @@ Built-ins are rendered in a separate "Built-in" UI section with no delete button
 
 | File | Change |
 |---|---|
-| `core/data/.../preferences/AppPreferences.kt` | NEW — `SongFontFamily`, `SectionStyle`, `AppPreferences` data classes |
-| `core/data/.../preferences/AppPreferencesRepository.kt` | NEW — DataStore-backed repo, JSON helpers, `promoteToGlobal` |
-| `core/data/.../preferences/DisplayPreferences.kt` | Stripped — removed `DisplayPreferencesHolder` singleton; kept constants only |
-| `app/.../preferences/AppPreferencesViewModel.kt` | NEW — `StateFlow<AppPreferences>`, write-helper wrappers |
+| `core/data/.../preferences/AppPreferences.kt` | `SongFontFamily`, `SectionStyle`, `AppPreferences` — 6 new per-theme color fields |
+| `core/data/.../preferences/ThemePreset.kt` | NEW — `ThemePreset` data class |
+| `core/data/.../preferences/AppPreferencesRepository.kt` | Extended — per-theme color keys, `loadPreset`/`savePreset`/`deletePreset`, JSON array helpers |
+| `core/data/.../preferences/DisplayPreferences.kt` | Stripped — `DisplayPreferencesHolder` singleton removed |
+| `app/.../preferences/AppPreferencesViewModel.kt` | Extended — `darkUserPresets`/`lightUserPresets` StateFlows; preset CRUD methods |
+| `app/.../settings/BuiltInThemes.kt` | NEW — 5 factory presets as hardcoded constants |
+| `app/.../settings/SettingsScreen.kt` | Extended — preset UI added to ThemePanel (`PresetSection`, `PresetChip`, `SavePresetDialog`) |
 | `app/.../di/AppContainer.kt` | Added `appPreferencesRepository` lazy val |
-| `app/.../di/ViewModelFactory.kt` | Wired `AppPreferencesViewModel`; added `AppPreferencesRepository` to `LibraryViewModel` |
-| `app/.../settings/SettingsScreen.kt` | NEW — two-pane Settings UI |
-| `app/.../navigation/Navigation.kt` | Added `Routes.SETTINGS = "settings"` |
-| `app/.../ui/HeaderComponent.kt` | Gear icon wired to `onSettingsClick` callback |
-| `app/.../ui/MainScreen.kt` | Settings composable in NavHost; `onSettingsClick` callback threaded through |
-| `feature/performance/.../SongDetailScreen.kt` | `AppPreferences` parameter replaces `DisplayPreferencesHolder`; `isDark` passed to `parseSongSections` |
+| `app/.../di/ViewModelFactory.kt` | Wired `AppPreferencesViewModel` |
+| `app/.../navigation/Navigation.kt` | `Routes.SETTINGS = "settings"` |
+| `app/.../ui/HeaderComponent.kt` | Gear icon wired; icon buttons at 60dp; 8dp spacer around PERFORM |
+| `app/.../ui/MainScreen.kt` | Settings composable in NavHost |
+| `feature/library/.../LibraryScreen.kt` | '+' pill button height 60dp |
+| `feature/performance/.../SongDetailScreen.kt` | Renderer wired to prefs colors; `buildChordLine` harmonyColor param; all header IconButtons at 60dp |

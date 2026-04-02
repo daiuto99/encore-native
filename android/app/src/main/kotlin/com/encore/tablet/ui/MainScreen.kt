@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.FileOpen
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -293,6 +294,28 @@ fun CommandCenterScreen(
         if (uris.isNotEmpty()) libraryViewModel.importSongs(context, uris)
     }
 
+    // Set export — CreateDocument lets the user choose where to save the .encore.json file
+    var pendingExportSetlistId by remember { mutableStateOf<String?>(null) }
+    var pendingExportSetlistName by remember { mutableStateOf<String?>(null) }
+    val exportSetlistLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        val setlistId = pendingExportSetlistId
+        if (uri != null && setlistId != null) {
+            libraryViewModel.exportSetlistToUri(context, setlistId, uri)
+        }
+        pendingExportSetlistId = null
+        pendingExportSetlistName = null
+    }
+
+    // Set import — GetContent filtered to JSON files
+    val importSetLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        showImportSheet = false
+        uri?.let { libraryViewModel.importSetFromJson(context, it) }
+    }
+
     // "Importing…" Snackbar with Cancel — dismissed automatically when import finishes
     LaunchedEffect(isImporting) {
         if (isImporting) {
@@ -387,18 +410,39 @@ fun CommandCenterScreen(
                 } else {
                     Column {
                         setlists.forEach { setlist ->
-                            TextButton(
-                                onClick = {
-                                    libraryViewModel.loadSetlistAsCurrent(setlist.id)
-                                    showLoadSetDialog = false
-                                },
-                                modifier = Modifier.fillMaxWidth()
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = setlist.name,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
+                                TextButton(
+                                    onClick = {
+                                        libraryViewModel.loadSetlistAsCurrent(setlist.id)
+                                        showLoadSetDialog = false
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = setlist.name,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        pendingExportSetlistId = setlist.id
+                                        pendingExportSetlistName = setlist.name
+                                        showLoadSetDialog = false
+                                        val filename = "${setlist.name.replace(" ", "_")}.encore.json"
+                                        exportSetlistLauncher.launch(filename)
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Share,
+                                        contentDescription = "Export",
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                             HorizontalDivider(thickness = 0.5.dp)
                         }
@@ -417,6 +461,7 @@ fun CommandCenterScreen(
             onDismiss = { showImportSheet = false },
             onSyncFolder = { folderPickerLauncher.launch(null) },
             onImportFiles = { filePickerLauncher.launch("*/*") },
+            onImportSet = { importSetLauncher.launch("application/json") },
             syncProgress = syncProgress,
             connectedFolderUri = connectedFolderUri
         )
@@ -532,6 +577,7 @@ fun ImportModal(
     onDismiss: () -> Unit,
     onSyncFolder: () -> Unit,
     onImportFiles: () -> Unit,
+    onImportSet: (() -> Unit)? = null,
     syncProgress: SyncProgress?,
     connectedFolderUri: String? = null
 ) {
@@ -661,6 +707,27 @@ fun ImportModal(
                             text = "Import Files",
                             style = MaterialTheme.typography.labelLarge
                         )
+                    }
+                    if (onImportSet != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = onImportSet,
+                            shape = CircleShape,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FileOpen,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "Import Set (.json)",
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     TextButton(

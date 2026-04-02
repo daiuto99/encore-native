@@ -3,6 +3,7 @@ package com.encore.feature.performance
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.encore.core.data.entities.SetlistEntity
 import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.repository.SetlistRepository
 import com.encore.core.data.repository.SongRepository
@@ -10,10 +11,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
@@ -68,6 +71,20 @@ class SongDetailViewModel(
 
     private val _nextSong = MutableStateFlow<SongEntity?>(null)
     val nextSong: StateFlow<SongEntity?> = _nextSong.asStateFlow()
+
+    // Save / Load set operations
+    private val _currentSetId = MutableStateFlow<String?>(null)
+
+    /** All named setlists — drives the Load dialog picker. */
+    val setlists: StateFlow<List<SetlistEntity>> = setlistRepository.getSetlists()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _saveSuccess = MutableStateFlow<String?>(null)
+    val saveSuccess: StateFlow<String?> = _saveSuccess.asStateFlow()
+
+    /** Incremented when loadSetlist() completes so the composable can reset to page 0. */
+    private val _pagerResetTrigger = MutableStateFlow(0)
+    val pagerResetTrigger: StateFlow<Int> = _pagerResetTrigger.asStateFlow()
 
     // Song cache + pager state
     private val _songCache = MutableStateFlow<Map<String, SongEntity>>(emptyMap())
@@ -140,6 +157,7 @@ class SongDetailViewModel(
             try {
                 if (setNumber > 0) {
                     val setEntity = setlistRepository.getOrCreateSetByNumber(setNumber)
+                    _currentSetId.value = setEntity.id
                     val songsInSet = setlistRepository.getSongsInSet(setEntity.id).first()
                         .map { it.song }
                     _performSongIds.value = songsInSet.map { it.id }
@@ -216,6 +234,89 @@ class SongDetailViewModel(
      */
     fun resetTextSize() {
         updateTextSize(1.0f)
+    }
+
+    /**
+     * Save current Set 1 contents as a new named setlist.
+     * Creates a snapshot copy — the working Set 1 is unaffected.
+     */
+    fun saveCurrentSet(name: String) {
+        val setId = _currentSetId.value ?: return
+        viewModelScope.launch {
+            try {
+                val result = setlistRepository.createSetlist(name)
+                val newSetlistId = result.getOrNull() ?: return@launch
+                val newSets = setlistRepository.getSetsForSetlist(newSetlistId).first()
+                val newSetId = newSets.firstOrNull()?.id ?: return@launch
+                val currentEntries = setlistRepository.getSongsInSet(setId).first()
+                currentEntries.forEach { setlistRepository.addSongToSet(newSetId, it.song.id) }
+                _saveSuccess.value = "Saved as \"$name\""
+                Log.d(TAG, "Saved set as: $name")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to save set", e)
+            }
+        }
+    }
+
+    /**
+     * Replace Set 1 contents with songs from [setlistId] and reload the pager.
+     * Destructively clears Set 1 then refills from the chosen setlist's first set.
+     * Signals the composable to scroll to page 0 via [pagerResetTrigger].
+     */
+    fun loadSetlist(setlistId: String) {
+        val setId = _currentSetId.value ?: return
+        viewModelScope.launch {
+            try {
+                // Clear existing Set 1
+                val existingEntries = setlistRepository.getSongsInSet(setId).first()
+                existingEntries.forEach { setlistRepository.removeSongFromSet(it.entry.id) }
+
+                // Copy songs from the chosen setlist's first set into Set 1
+                val sets = setlistRepository.getSetsForSetlist(setlistId).first()
+                val sourceSetId = sets.minByOrNull { it.number }?.id ?: return@launch
+                val sourceSongs = setlistRepository.getSongsInSet(sourceSetId).first()
+                sourceSongs.forEach { setlistRepository.addSongToSet(setId, it.song.id) }
+
+                // Reload pager from the now-updated Set 1
+                val newEntries = setlistRepository.getSongsInSet(setId).first()
+                val newSongs = newEntries.map { it.song }
+                val newIds = newSongs.map { it.id }
+                _performSongIds.value = newIds
+
+                // Reseed cache with first 3 songs
+                val seedCache = mutableMapOf<String, SongEntity>()
+                newSongs.take(3).forEach { s -> seedCache[s.id] = s }
+                _songCache.value = seedCache
+
+                // Update dashboard to the first song in the new set
+                val firstSong = newSongs.firstOrNull()
+                _song.value = firstSong
+                firstSong?.let { _textSizeMultiplier.value = it.lastZoomLevel }
+
+                // Reset prev/next to position 0
+                _prevSongId.value = null
+                _prevSong.value = null
+                _nextSongId.value = newIds.getOrNull(1)
+                _nextSong.value = newSongs.getOrNull(1)
+
+                // Update set name in context bar
+                val loadedName = try {
+                    setlistRepository.getSetlistWithSets(setlistId)?.setlist?.name
+                } catch (e: Exception) { null }
+                _setName.value = loadedName ?: _setName.value
+
+                // Signal composable to scroll to page 0
+                _pagerResetTrigger.value += 1
+                Log.d(TAG, "Loaded setlist $setlistId: ${newSongs.size} songs")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to load setlist $setlistId", e)
+            }
+        }
+    }
+
+    /** Clear save success message after the composable has displayed it. */
+    fun clearSaveSuccess() {
+        _saveSuccess.value = null
     }
 
     /**

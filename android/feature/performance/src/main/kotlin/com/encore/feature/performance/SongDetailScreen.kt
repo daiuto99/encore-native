@@ -42,6 +42,8 @@ import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.ui.res.painterResource
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.outlined.NightsStay
@@ -49,11 +51,15 @@ import androidx.compose.material.icons.outlined.WbSunny
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -83,6 +89,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import com.encore.core.data.entities.SetlistEntity
 import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.preferences.AppPreferences
 import com.encore.core.ui.theme.LocalEncoreColors
@@ -219,9 +227,14 @@ fun SongDetailScreen(
     val setName by viewModel.setName.collectAsState()
     val prevSong by viewModel.prevSong.collectAsState()
     val nextSong by viewModel.nextSong.collectAsState()
+    val setlists by viewModel.setlists.collectAsState()
+    val saveSuccess by viewModel.saveSuccess.collectAsState()
+    val pagerResetTrigger by viewModel.pagerResetTrigger.collectAsState()
 
     var showControls by remember { mutableStateOf(false) }
     var showPageIndicator by remember { mutableStateOf(false) }
+    var showSaveDialog by remember { mutableStateOf(false) }
+    var showLoadDialog by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     // Per-song in-session zoom map. Populated on first zoom gesture; falls back to DB value.
     val zoomPerSong = remember { mutableStateMapOf<String, Float>() }
@@ -262,6 +275,19 @@ fun SongDetailScreen(
         val targetPage = effectiveSongIds.indexOf(songId).coerceAtLeast(0)
         if (targetPage != pagerState.currentPage) {
             pagerState.scrollToPage(targetPage)
+        }
+    }
+
+    // After loadSetlist() completes, scroll to page 0 so the user sees the new set from the top
+    LaunchedEffect(pagerResetTrigger) {
+        if (pagerResetTrigger > 0) pagerState.scrollToPage(0)
+    }
+
+    // Auto-clear save success feedback after 2.5 seconds
+    LaunchedEffect(saveSuccess) {
+        if (saveSuccess != null) {
+            delay(2500)
+            viewModel.clearSaveSuccess()
         }
     }
 
@@ -364,6 +390,8 @@ fun SongDetailScreen(
                     onToggleDarkMode = onToggleDarkMode,
                     onEditClick = onEditClick,
                     onNavigateBack = onNavigateBack,
+                    onSaveClick = if (setNumber > 0) ({ showSaveDialog = true }) else null,
+                    onLoadClick = if (setNumber > 0) ({ showLoadDialog = true }) else null,
                     modifier = Modifier.fillMaxWidth()
                 )
                 if (setName.isNotEmpty()) {
@@ -372,6 +400,7 @@ fun SongDetailScreen(
                         setColor = SetColor.getSetColor(setNumber),
                         prevSong = prevSong,
                         nextSong = nextSong,
+                        saveSuccess = saveSuccess,
                         onPrevClick = {
                             scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
                         },
@@ -476,6 +505,27 @@ fun SongDetailScreen(
                 )
             }
         }
+    }
+
+    // ── Save / Load dialogs (shown over the performance screen) ──────────────
+    if (showSaveDialog) {
+        SaveSetDialog(
+            onDismiss = { showSaveDialog = false },
+            onSave = { name ->
+                viewModel.saveCurrentSet(name)
+                showSaveDialog = false
+            }
+        )
+    }
+    if (showLoadDialog) {
+        LoadSetDialog(
+            setlists = setlists,
+            onDismiss = { showLoadDialog = false },
+            onLoad = { id ->
+                viewModel.loadSetlist(id)
+                showLoadDialog = false
+            }
+        )
     }
 }
 
@@ -764,6 +814,7 @@ private fun PerformanceContextBar(
     setColor: Color,
     prevSong: SongEntity?,
     nextSong: SongEntity?,
+    saveSuccess: String?,
     onPrevClick: () -> Unit,
     onNextClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -838,10 +889,10 @@ private fun PerformanceContextBar(
 
                 Spacer(modifier = Modifier.width(8.dp))
 
-                // ── Set Name (centre) ────────────────────────────────────────
+                // ── Set Name / Save feedback (centre) ────────────────────────
                 Text(
-                    text = setName,
-                    color = setColor,
+                    text = saveSuccess ?: setName,
+                    color = if (saveSuccess != null) Color(0xFF4CAF50) else setColor,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center,
@@ -932,6 +983,8 @@ private fun PerformanceDashboard(
     onToggleDarkMode: (() -> Unit)?,
     onEditClick: ((SongEntity) -> Unit)?,
     onNavigateBack: () -> Unit,
+    onSaveClick: (() -> Unit)? = null,
+    onLoadClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val encoreColors = LocalEncoreColors.current
@@ -1118,6 +1171,26 @@ private fun PerformanceDashboard(
                                 )
                             }
                         }
+                        onSaveClick?.let { save ->
+                            IconButton(onClick = save, modifier = Modifier.size(60.dp)) {
+                                Icon(
+                                    imageVector = Icons.Default.SaveAlt,
+                                    contentDescription = "Save set",
+                                    tint = encoreColors.iconTint,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        onLoadClick?.let { load ->
+                            IconButton(onClick = load, modifier = Modifier.size(60.dp)) {
+                                Icon(
+                                    imageVector = Icons.Default.FolderOpen,
+                                    contentDescription = "Load setlist",
+                                    tint = encoreColors.iconTint,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
                         IconButton(onClick = onNavigateBack, modifier = Modifier.size(60.dp)) {
                             Icon(
                                 imageVector = Icons.Default.Close,
@@ -1127,6 +1200,167 @@ private fun PerformanceDashboard(
                             )
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Save / Load dialogs
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Zen-styled dialog for naming and saving the current set.
+ */
+@Composable
+private fun SaveSetDialog(
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit
+) {
+    val encoreColors = LocalEncoreColors.current
+    var name by remember { mutableStateOf("") }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = encoreColors.cardBackground,
+            tonalElevation = 0.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, encoreColors.divider, RoundedCornerShape(16.dp))
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Text(
+                    text = "Save Set",
+                    color = encoreColors.titleText,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                )
+                Spacer(Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Set name") },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = encoreColors.titleText.copy(alpha = 0.6f),
+                        unfocusedBorderColor = encoreColors.divider,
+                        focusedLabelColor = encoreColors.titleText.copy(alpha = 0.6f),
+                        unfocusedLabelColor = encoreColors.artistText,
+                        focusedTextColor = encoreColors.titleText,
+                        unfocusedTextColor = encoreColors.titleText
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(20.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel", color = encoreColors.artistText)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (name.isNotBlank())
+                            encoreColors.titleText.copy(alpha = 0.12f)
+                        else
+                            encoreColors.titleText.copy(alpha = 0.04f),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(enabled = name.isNotBlank()) { onSave(name.trim()) }
+                    ) {
+                        Text(
+                            text = "Save",
+                            color = if (name.isNotBlank()) encoreColors.titleText
+                                    else encoreColors.titleText.copy(alpha = 0.30f),
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Zen-styled dialog for picking a saved setlist to load into the current performance set.
+ */
+@Composable
+private fun LoadSetDialog(
+    setlists: List<SetlistEntity>,
+    onDismiss: () -> Unit,
+    onLoad: (String) -> Unit
+) {
+    val encoreColors = LocalEncoreColors.current
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = encoreColors.cardBackground,
+            tonalElevation = 0.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .border(1.dp, encoreColors.divider, RoundedCornerShape(16.dp))
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Text(
+                    text = "Load Setlist",
+                    color = encoreColors.titleText,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                )
+                Spacer(Modifier.height(16.dp))
+                if (setlists.isEmpty()) {
+                    Text(
+                        text = "No saved setlists yet. Save the current set first.",
+                        color = encoreColors.artistText,
+                        fontSize = 14.sp
+                    )
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        setlists.forEach { setlist ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { onLoad(setlist.id) }
+                                    .padding(horizontal = 8.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = setlist.name,
+                                    color = encoreColors.titleText,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Icon(
+                                    imageVector = Icons.Default.ChevronRight,
+                                    contentDescription = null,
+                                    tint = encoreColors.titleText.copy(alpha = 0.30f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            HorizontalDivider(color = encoreColors.divider, thickness = 0.5.dp)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text("Cancel", color = encoreColors.artistText)
                 }
             }
         }

@@ -34,6 +34,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.UUID
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * ViewModel for Library Screen.
@@ -782,6 +784,125 @@ class LibraryViewModel(
             if (match != null) return match.groupValues[1].trim()
         }
         return null
+    }
+
+    /**
+     * Serialize a setlist to JSON and write it to [outputUri] via SAF.
+     *
+     * Format: { version: 1, name: "...", songs: [{ title, artist, displayKey?, markdownBody }] }
+     * File extension convention: .encore.json
+     */
+    fun exportSetlistToUri(context: Context, setlistId: String, outputUri: Uri) {
+        viewModelScope.launch {
+            try {
+                val setlistWithSets = setlistRepository.getSetlistWithSets(setlistId) ?: run {
+                    _statusMessage.value = "Setlist not found"
+                    return@launch
+                }
+                val sourceSetId = setlistWithSets.sets.minByOrNull { it.set.number }?.set?.id ?: return@launch
+                val entries = setlistRepository.getSongsInSet(sourceSetId).first()
+
+                val songsArray = JSONArray()
+                entries.forEach { e ->
+                    val obj = JSONObject()
+                    obj.put("title", e.song.title)
+                    obj.put("artist", e.song.artist)
+                    if (e.song.displayKey != null) obj.put("displayKey", e.song.displayKey)
+                    obj.put("markdownBody", e.song.markdownBody)
+                    songsArray.put(obj)
+                }
+
+                val root = JSONObject()
+                root.put("version", 1)
+                root.put("name", setlistWithSets.setlist.name)
+                root.put("songs", songsArray)
+
+                context.contentResolver.openOutputStream(outputUri)?.use { stream ->
+                    stream.bufferedWriter().use { writer -> writer.write(root.toString(2)) }
+                }
+                _statusMessage.value = "Exported \"${setlistWithSets.setlist.name}\""
+            } catch (e: Exception) {
+                Log.e(TAG, "Export failed", e)
+                _statusMessage.value = "Export failed"
+            }
+        }
+    }
+
+    /**
+     * Read an Encore set export JSON file and import it as a new named setlist.
+     *
+     * Songs that already exist (matched by title + artist) are reused without
+     * duplication. New songs are created and added to the library.
+     */
+    fun importSetFromJson(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val content = context.contentResolver.openInputStream(uri)?.use { stream ->
+                    stream.bufferedReader().use { it.readText() }
+                } ?: run {
+                    _statusMessage.value = "Could not read file"
+                    return@launch
+                }
+
+                val root = JSONObject(content)
+                val name = root.optString("name", "Imported Set").ifBlank { "Imported Set" }
+                val songsArray = root.optJSONArray("songs") ?: run {
+                    _statusMessage.value = "Invalid set file"
+                    return@launch
+                }
+
+                val newSetlistId = setlistRepository.createSetlist(name).getOrNull() ?: run {
+                    _statusMessage.value = "Could not create setlist"
+                    return@launch
+                }
+                val newSets = setlistRepository.getSetsForSetlist(newSetlistId).first()
+                val newSetId = newSets.firstOrNull()?.id ?: return@launch
+
+                val now = System.currentTimeMillis()
+                var addedCount = 0
+                var reusedCount = 0
+
+                for (i in 0 until songsArray.length()) {
+                    val obj = songsArray.getJSONObject(i)
+                    val title = obj.optString("title").trim()
+                    val artist = obj.optString("artist").trim()
+                    if (title.isEmpty()) continue
+                    val displayKey = obj.optString("displayKey").takeIf { it.isNotEmpty() }
+                    val markdownBody = obj.optString("markdownBody")
+
+                    val existing = songRepository.findDuplicate(title, artist, "local-user")
+                    val songId = if (existing != null) {
+                        reusedCount++
+                        existing.id
+                    } else {
+                        val song = SongEntity(
+                            id = UUID.randomUUID().toString(),
+                            userId = "local-user",
+                            title = title,
+                            artist = artist,
+                            displayKey = displayKey,
+                            markdownBody = markdownBody,
+                            originalImportBody = markdownBody,
+                            version = 1,
+                            createdAt = now,
+                            updatedAt = now,
+                            syncStatus = SyncStatus.PENDING_UPLOAD,
+                            localUpdatedAt = now,
+                            lastSyncedAt = null
+                        )
+                        songRepository.upsertSong(song)
+                        addedCount++
+                        song.id
+                    }
+                    setlistRepository.addSongToSet(newSetId, songId)
+                }
+
+                _statusMessage.value = "Imported \"$name\" ($addedCount new, $reusedCount matched)"
+            } catch (e: Exception) {
+                Log.e(TAG, "Set JSON import failed", e)
+                _statusMessage.value = "Import failed: ${e.message}"
+            }
+        }
     }
 
     companion object {

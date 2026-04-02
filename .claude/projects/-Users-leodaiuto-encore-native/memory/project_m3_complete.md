@@ -1,6 +1,6 @@
 ---
 name: Project State — Setlist Engine & Performance Mode
-description: Current state after Phase 4 + Context Bar — both floating cards complete, next feature TBD
+description: Current state after Phase 4 + Web Export/Import — setlist JSON bridge to web companion complete
 type: project
 ---
 
@@ -35,6 +35,13 @@ Phase 4 Horizontal Setlist Engine is complete. Performance Dashboard and Perform
 - Tune: bar alpha `0.38f`, background alpha `0.07f`, gap `vp.sectionTopPaddingDp` (20dp default)
 - `IntrinsicSize.Min` on the card Row makes the accent bar stretch full card height
 
-**Why:** User wants set-level context visible during performance — know where they are in the set and what's coming next. Section cards add polish and professionalism.
+**Set Export/Import (Web Companion Bridge — LibraryViewModel + MainScreen):**
+- `exportSetlistToUri(context, setlistId, outputUri)` — serializes to `.encore.json` via SAF CreateDocument
+- `importSetFromJson(context, uri)` — parses JSON, deduplicates by LOWER(title+artist), creates new setlist
+- Export UI: share icon per row in Load Set dialog; Import UI: "Import Set (.json)" in Import modal
+- Dedup rule: existing songs reused as-is (markdownBody NOT overwritten); new songs created in library
+- Full spec: `docs/api/set-export-format.md`; decision: `docs/decisions/004-set-export-import-format.md`
 
-**How to apply:** Both floating cards and section cards are done. Next session start from M4_ACTIVE_CONTEXT.md for remaining work.
+**Why:** Web companion needs to push setlists to Android without a backend. JSON file exchange via SAF bridges the gap until Ktor sync is built.
+
+**How to apply:** Both floating cards, section cards, and set export/import are done. Next session start from M4_ACTIVE_CONTEXT.md for remaining M4 sync work (Ktor, conflict resolution, etc.).

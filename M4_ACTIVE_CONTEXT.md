@@ -112,6 +112,26 @@ All interactive icon buttons standardised to **60dp** hit targets across all thr
 
 ---
 
+## Set Export / Import (Web Companion Bridge) — COMPLETE
+
+### What was built
+- **`EncoreSetExport.kt`** — data classes documenting the JSON shape (`core/data/.../transfer/`).
+- **`LibraryViewModel.exportSetlistToUri(context, setlistId, outputUri)`** — serializes a setlist to `.encore.json` via SAF `CreateDocument`.
+- **`LibraryViewModel.importSetFromJson(context, uri)`** — parses `.encore.json`, deduplicates songs by title+artist, creates new named setlist.
+- **Export UI:** Share icon per row in the Load Set dialog → system file picker to choose save location.
+- **Import UI:** "Import Set (.json)" button added to Import modal → system file picker filtered to JSON.
+
+### Key behaviour
+- Deduplication: existing songs (matched by `LOWER(title+artist)`) are reused; `markdownBody` is **not** overwritten on match — preserves local edits.
+- New songs are created in the library as a side effect of import.
+- Status snackbar: `Imported "Name" (N new, M matched)`.
+
+### Spec / docs
+- Full web companion integration spec: `docs/api/set-export-format.md`
+- Architecture decision: `docs/decisions/004-set-export-import-format.md`
+
+---
+
 ## Performance Dashboard — COMPLETE (Floating Card)
 
 ### Architecture

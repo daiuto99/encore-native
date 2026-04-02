@@ -179,8 +179,11 @@ All interactive icon buttons standardised to **60dp** hit targets across all thr
 - Grouping is `remember(sections)` — recomputes only when song content changes, not on zoom.
 - `sectionColor` resolved same priority order as before: `SectionStyle` map → HTML span color → `chordAccentColor` fallback.
 - `lyricColor` and `harmonyColor` hoisted above the render loop (were re-parsed per line previously).
-- `IntrinsicSize.Min` on the card `Row` ensures the accent bar stretches to full card height.
+- Card is a single `Column` with `drawBehind` — NOT a `Row` + `IntrinsicSize.Min`. `drawBehind` fires after layout so the background and accent bar always match the Column's actual measured height, including at any zoom level.
 - Cards only appear when a `Header` exists; body-only content at song start renders flat.
+
+### Why drawBehind (not Row + IntrinsicSize)
+`IntrinsicSize.Min` computes height before zoom is applied, causing cards to clip zoomed content. `drawBehind` draws after final measurement so it always matches actual content height.
 
 ---
 

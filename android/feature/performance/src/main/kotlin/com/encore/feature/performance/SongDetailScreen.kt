@@ -10,6 +10,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -25,7 +27,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -612,7 +613,8 @@ fun SongContent(
             }
 
             if (header != null) {
-                // ── Section card: 4dp accent bar + subtle tinted background ───
+                // ── Section card: drawBehind paints background + accent bar
+                //    after layout so the Column sizes freely with zoom ─────────
                 val styleEntry = vp.sectionStyles[normalizeSectionName(header.text)]
                 val headerFontSizeSp = styleEntry?.fontSize?.value
                     ?: when (header.level) {
@@ -620,42 +622,39 @@ fun SongContent(
                         2    -> vp.h2FontSizeSp
                         else -> vp.hnFontSizeSp
                     }
-                Row(
+                val bgColor    = sectionColor.copy(alpha = 0.07f)
+                val barColor   = sectionColor.copy(alpha = 0.38f)
+                val barWidthPx = 4f  // dp — converted in drawBehind via density
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(8.dp))
-                        .background(sectionColor.copy(alpha = 0.07f))
-                        .height(IntrinsicSize.Min)
+                        .drawBehind {
+                            drawRect(color = bgColor)
+                            drawRect(
+                                color = barColor,
+                                size = Size(barWidthPx * density, size.height)
+                            )
+                        }
+                        .padding(start = 16.dp, top = 10.dp, end = 10.dp, bottom = 12.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .width(4.dp)
-                            .fillMaxHeight()
-                            .background(sectionColor.copy(alpha = 0.38f))
+                    Text(
+                        text = header.text,
+                        color = sectionColor,
+                        fontSize = (headerFontSizeSp * textSizeMultiplier).sp,
+                        fontWeight = if (styleEntry?.isBold != false) FontWeight.Bold else FontWeight.Normal,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(bottom = vp.sectionBottomPaddingDp.dp)
                     )
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(start = 12.dp, top = 10.dp, end = 10.dp, bottom = 12.dp)
-                    ) {
-                        Text(
-                            text = header.text,
-                            color = sectionColor,
-                            fontSize = (headerFontSizeSp * textSizeMultiplier).sp,
-                            fontWeight = if (styleEntry?.isBold != false) FontWeight.Bold else FontWeight.Normal,
-                            fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.padding(bottom = vp.sectionBottomPaddingDp.dp)
-                        )
-                        SectionBodyLines(
-                            bodies = bodies,
-                            chordAccentColor = chordAccentColor,
-                            lyricColor = lyricColor,
-                            harmonyColor = harmonyColor,
-                            appPreferences = appPreferences,
-                            textSizeMultiplier = textSizeMultiplier,
-                            vp = vp
-                        )
-                    }
+                    SectionBodyLines(
+                        bodies = bodies,
+                        chordAccentColor = chordAccentColor,
+                        lyricColor = lyricColor,
+                        harmonyColor = harmonyColor,
+                        appPreferences = appPreferences,
+                        textSizeMultiplier = textSizeMultiplier,
+                        vp = vp
+                    )
                 }
             } else {
                 // No header — body-only block before first section tag, render flat

@@ -158,6 +158,32 @@ All interactive icon buttons standardised to **60dp** hit targets across all thr
 
 ---
 
+## Section Cards — COMPLETE
+
+### What was built
+- Each song section (Intro, Verse, Chorus, etc.) now renders as a subtle floating card in `SongContent` (`SongDetailScreen.kt`).
+- The flat `sections.forEachIndexed` loop was replaced with a **grouping pass** that pairs each `SongSection.Header` with its subsequent `SongSection.Body` items.
+- `SectionBodyLines` extracted as a private `@Composable` function — reused by both the card path and the headerless (pre-section) path.
+
+### Card visual design
+| Property | Value | How to tune |
+|---|---|---|
+| Background tint | `sectionColor.copy(alpha = 0.07f)` | Raise alpha for more presence (try 0.10–0.12) |
+| Left accent bar width | `4.dp` | Increase for bolder separation |
+| Left accent bar alpha | `sectionColor.copy(alpha = 0.38f)` | Raise for a more vivid stripe |
+| Corner radius | `RoundedCornerShape(8.dp)` | Match to taste |
+| Internal padding | `start=12dp, top=10dp, end=10dp, bottom=12dp` | Adjust breathing room |
+| Gap between cards | `vp.sectionTopPaddingDp` (currently `20dp` via `ViewerPreferences`) | Change `sectionTopPaddingDp` default |
+
+### Architecture notes
+- Grouping is `remember(sections)` — recomputes only when song content changes, not on zoom.
+- `sectionColor` resolved same priority order as before: `SectionStyle` map → HTML span color → `chordAccentColor` fallback.
+- `lyricColor` and `harmonyColor` hoisted above the render loop (were re-parsed per line previously).
+- `IntrinsicSize.Min` on the card `Row` ensures the accent bar stretches to full card height.
+- Cards only appear when a `Header` exists; body-only content at song start renders flat.
+
+---
+
 ## Known Facts for Next Session
 - **DataStore files:** `user_prefs` (auth), `app_prefs` (visual prefs). Do not mix.
 - **DB version:** 5

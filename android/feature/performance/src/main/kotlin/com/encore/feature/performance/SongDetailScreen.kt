@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -563,104 +564,181 @@ fun SongContent(
             // top padding clears the floating card: 8dp inset + 68dp card + 8dp gap = 84dp
             .padding(start = 24.dp, end = 24.dp, bottom = 24.dp, top = 144.dp)
     ) {
-        sections.forEachIndexed { index, section ->
-            when (section) {
-                // Key is displayed in PerformanceDashboard — skip from scroll content
-                is SongSection.KeyLabel -> { /* suppressed */ }
+        // Hoist per-song color lookups out of the render loop
+        val lyricColor = parseColorSafe(
+            if (isDark) appPreferences.darkLyricColor else appPreferences.lightLyricColor
+        ).copy(alpha = vp.lyricAlpha)
+        val harmonyColor = parseColorSafe(
+            if (isDark) appPreferences.darkHarmonyColor else appPreferences.lightHarmonyColor
+        )
 
-                // ── Section header (HTML span or legacy # markdown) ──────────
-                is SongSection.Header -> {
-                    // Priority: SectionStyle map (configurable) → HTML span color → fallback
-                    val styleEntry = vp.sectionStyles[normalizeSectionName(section.text)]
-
-                    val headerColor = styleEntry?.color
-                        ?: section.color?.let {
-                            try { Color(android.graphics.Color.parseColor(it)) }
-                            catch (_: Exception) { null }
-                        }
-                        ?: (chordAccentColor ?: MaterialTheme.colorScheme.primary)
-
-                    val headerFontSizeSp = styleEntry?.fontSize?.value
-                        ?: when (section.level) {
-                            1    -> vp.h1FontSizeSp
-                            2    -> vp.h2FontSizeSp
-                            else -> vp.hnFontSizeSp
-                        }
-
-                    Text(
-                        text = section.text,
-                        color = headerColor,
-                        fontSize = (headerFontSizeSp * textSizeMultiplier).sp,
-                        fontWeight = if (styleEntry?.isBold != false) FontWeight.Bold else FontWeight.Normal,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.padding(
-                            top = if (index > 0) vp.sectionTopPaddingDp.dp else 0.dp,
-                            bottom = vp.sectionBottomPaddingDp.dp
-                        )
-                    )
+        // Group flat section list into [Header + its Bodies] for card rendering.
+        // KeyLabel entries are suppressed here — displayed in PerformanceDashboard.
+        val groups = remember(sections) {
+            val result = mutableListOf<Pair<SongSection.Header?, MutableList<SongSection.Body>>>()
+            var current: Pair<SongSection.Header?, MutableList<SongSection.Body>>? = null
+            for (s in sections) {
+                when (s) {
+                    is SongSection.KeyLabel -> {}
+                    is SongSection.Header -> {
+                        current?.let { result.add(it) }
+                        current = Pair(s, mutableListOf())
+                    }
+                    is SongSection.Body -> {
+                        if (current == null) current = Pair(null, mutableListOf())
+                        current!!.second.add(s)
+                    }
                 }
+            }
+            current?.let { result.add(it) }
+            result
+        }
 
-                // ── Body block (lyrics + chords) ─────────────────────────────
-                is SongSection.Body -> {
-                    if (section.markdown.isNotBlank()) {
-                        // Pre-scan for multi-line [h]...[/h] harmony blocks.
-                        // Same-line [h]Text[/h] is handled inside buildChordLine via HARMONY_TAG_PATTERN.
-                        var inHarmonyBlock = false
-                        section.markdown.lines().forEach { rawLine ->
-                            val hasOpen = rawLine.contains("[h]")
-                            val hasClose = rawLine.contains("[/h]")
-                            val isHarmonyLine: Boolean
-                            val lineToRender: String
-                            when {
-                                hasOpen && hasClose -> {
-                                    // Self-contained — let buildChordLine handle it
-                                    isHarmonyLine = false
-                                    lineToRender = rawLine
-                                }
-                                hasOpen -> {
-                                    inHarmonyBlock = true
-                                    isHarmonyLine = true
-                                    lineToRender = rawLine.replace("[h]", "")
-                                }
-                                hasClose -> {
-                                    isHarmonyLine = true
-                                    lineToRender = rawLine.replace("[/h]", "")
-                                    inHarmonyBlock = false
-                                }
-                                else -> {
-                                    isHarmonyLine = inHarmonyBlock
-                                    lineToRender = rawLine
-                                }
-                            }
-                            if (lineToRender.isBlank()) {
-                                Spacer(modifier = Modifier.height(6.dp))
-                            } else {
-                                Text(
-                                    text = buildChordLine(
-                                        lineToRender,
-                                        chordAccentColor,
-                                        parseColorSafe(
-                                            if (isDark) appPreferences.darkLyricColor
-                                            else appPreferences.lightLyricColor
-                                        ).copy(alpha = vp.lyricAlpha),
-                                        harmonyColor = parseColorSafe(
-                                            if (isDark) appPreferences.darkHarmonyColor
-                                            else appPreferences.lightHarmonyColor
-                                        ),
-                                        isHarmonyLine = isHarmonyLine
-                                    ),
-                                    fontSize = (vp.bodyFontSizeSp * textSizeMultiplier).sp,
-                                    lineHeight = (vp.lineHeightSp * textSizeMultiplier).sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                                // chordSpacing: extra gap after a chord-only line
-                                val isChordLine = isPureBacktickChordLine(lineToRender) ||
-                                    isBareChordLine(lineToRender)
-                                if (isChordLine && appPreferences.chordSpacing > 0f) {
-                                    Spacer(Modifier.height(appPreferences.chordSpacing.dp))
-                                }
-                            }
-                        }
+        groups.forEachIndexed { groupIndex, (header, bodies) ->
+            // Gap between section cards
+            if (groupIndex > 0) Spacer(Modifier.height(vp.sectionTopPaddingDp.dp))
+
+            // Resolve this section's accent colour
+            val sectionColor: Color = if (header != null) {
+                val styleEntry = vp.sectionStyles[normalizeSectionName(header.text)]
+                styleEntry?.color
+                    ?: header.color?.let {
+                        try { Color(android.graphics.Color.parseColor(it)) }
+                        catch (_: Exception) { null }
+                    }
+                    ?: (chordAccentColor ?: MaterialTheme.colorScheme.primary)
+            } else {
+                chordAccentColor ?: MaterialTheme.colorScheme.primary
+            }
+
+            if (header != null) {
+                // ── Section card: 4dp accent bar + subtle tinted background ───
+                val styleEntry = vp.sectionStyles[normalizeSectionName(header.text)]
+                val headerFontSizeSp = styleEntry?.fontSize?.value
+                    ?: when (header.level) {
+                        1    -> vp.h1FontSizeSp
+                        2    -> vp.h2FontSizeSp
+                        else -> vp.hnFontSizeSp
+                    }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(sectionColor.copy(alpha = 0.07f))
+                        .height(IntrinsicSize.Min)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(4.dp)
+                            .fillMaxHeight()
+                            .background(sectionColor.copy(alpha = 0.38f))
+                    )
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 12.dp, top = 10.dp, end = 10.dp, bottom = 12.dp)
+                    ) {
+                        Text(
+                            text = header.text,
+                            color = sectionColor,
+                            fontSize = (headerFontSizeSp * textSizeMultiplier).sp,
+                            fontWeight = if (styleEntry?.isBold != false) FontWeight.Bold else FontWeight.Normal,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(bottom = vp.sectionBottomPaddingDp.dp)
+                        )
+                        SectionBodyLines(
+                            bodies = bodies,
+                            chordAccentColor = chordAccentColor,
+                            lyricColor = lyricColor,
+                            harmonyColor = harmonyColor,
+                            appPreferences = appPreferences,
+                            textSizeMultiplier = textSizeMultiplier,
+                            vp = vp
+                        )
+                    }
+                }
+            } else {
+                // No header — body-only block before first section tag, render flat
+                SectionBodyLines(
+                    bodies = bodies,
+                    chordAccentColor = chordAccentColor,
+                    lyricColor = lyricColor,
+                    harmonyColor = harmonyColor,
+                    appPreferences = appPreferences,
+                    textSizeMultiplier = textSizeMultiplier,
+                    vp = vp
+                )
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Section body renderer
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Renders a list of [SongSection.Body] items line by line.
+ * Handles multi-line [h]...[/h] harmony blocks and chord-spacing gaps.
+ * Extracted so it can be called from both the card path and the headerless path.
+ */
+@Composable
+private fun SectionBodyLines(
+    bodies: List<SongSection.Body>,
+    chordAccentColor: Color?,
+    lyricColor: Color,
+    harmonyColor: Color,
+    appPreferences: AppPreferences,
+    textSizeMultiplier: Float,
+    vp: ViewerPreferences
+) {
+    bodies.forEach { body ->
+        if (body.markdown.isNotBlank()) {
+            var inHarmonyBlock = false
+            body.markdown.lines().forEach { rawLine ->
+                val hasOpen = rawLine.contains("[h]")
+                val hasClose = rawLine.contains("[/h]")
+                val isHarmonyLine: Boolean
+                val lineToRender: String
+                when {
+                    hasOpen && hasClose -> {
+                        // Self-contained — let buildChordLine handle it
+                        isHarmonyLine = false
+                        lineToRender = rawLine
+                    }
+                    hasOpen -> {
+                        inHarmonyBlock = true
+                        isHarmonyLine = true
+                        lineToRender = rawLine.replace("[h]", "")
+                    }
+                    hasClose -> {
+                        isHarmonyLine = true
+                        lineToRender = rawLine.replace("[/h]", "")
+                        inHarmonyBlock = false
+                    }
+                    else -> {
+                        isHarmonyLine = inHarmonyBlock
+                        lineToRender = rawLine
+                    }
+                }
+                if (lineToRender.isBlank()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                } else {
+                    Text(
+                        text = buildChordLine(
+                            lineToRender,
+                            chordAccentColor,
+                            lyricColor,
+                            harmonyColor = harmonyColor,
+                            isHarmonyLine = isHarmonyLine
+                        ),
+                        fontSize = (vp.bodyFontSizeSp * textSizeMultiplier).sp,
+                        lineHeight = (vp.lineHeightSp * textSizeMultiplier).sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    val isChordLine = isPureBacktickChordLine(lineToRender) || isBareChordLine(lineToRender)
+                    if (isChordLine && appPreferences.chordSpacing > 0f) {
+                        Spacer(Modifier.height(appPreferences.chordSpacing.dp))
                     }
                 }
             }

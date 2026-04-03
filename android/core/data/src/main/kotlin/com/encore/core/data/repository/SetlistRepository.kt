@@ -168,6 +168,8 @@ interface SetlistRepository {
      */
     suspend fun getSetsContainingSong(songId: String): List<SetEntity>
 
+    fun observeSetsContainingSong(songId: String): Flow<List<SetEntity>>
+
     /**
      * Find the SetEntryEntity for a specific song within a specific set.
      * Used to obtain the entryId needed for remove and reorder operations.
@@ -449,6 +451,10 @@ class SetlistRepositoryImpl(
 
     override suspend fun getSetsContainingSong(songId: String): List<SetEntity> {
         return setDao.getSetsContainingSong(songId)
+    }
+
+    override fun observeSetsContainingSong(songId: String): Flow<List<SetEntity>> {
+        return setDao.observeSetsContainingSong(songId)
     }
 
     override suspend fun getEntryForSongInSet(setId: String, songId: String): SetEntryEntity? {

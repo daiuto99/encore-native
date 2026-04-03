@@ -2,12 +2,23 @@ package com.encore.tablet.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.CompositionLocalProvider
+import com.encore.core.ui.theme.DarkEncoreColors
+import com.encore.core.ui.theme.EncoreColors
+import com.encore.core.ui.theme.LightEncoreColors
+import com.encore.core.ui.theme.LocalEncoreColors
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import com.encore.feature.library.SyncProgress
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,6 +26,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -25,6 +37,9 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.FileOpen
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -35,6 +50,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -65,9 +81,17 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.encore.core.data.auth.AuthState
+import com.encore.core.data.entities.SetEntity
+import com.encore.core.data.entities.SongEntity
+import com.encore.core.data.preferences.AppPreferences
 import com.encore.core.ui.theme.SetColor
+import com.encore.tablet.audit.LibraryAuditViewModel
+import com.encore.tablet.preferences.AppPreferencesViewModel
 import com.encore.feature.library.LibraryListContent
 import com.encore.feature.library.LibraryViewModel
+import com.encore.feature.library.SongChartEditorScreen
+import com.encore.feature.library.SongEditBottomSheet
+import com.encore.tablet.settings.SettingsScreen
 import com.encore.feature.performance.SongDetailScreen
 import com.encore.feature.performance.SongDetailViewModel
 import com.encore.tablet.auth.AuthViewModel
@@ -96,7 +120,28 @@ fun MainScreen(
     val navController = rememberNavController()
     val libraryViewModel: LibraryViewModel = viewModel(factory = viewModelFactory)
     val authViewModel: AuthViewModel = viewModel(factory = viewModelFactory)
+    val appPrefsViewModel: AppPreferencesViewModel = viewModel(factory = viewModelFactory)
+    val auditViewModel: LibraryAuditViewModel = viewModel(factory = viewModelFactory)
+    val appPreferences by appPrefsViewModel.preferences.collectAsState()
+    var isDarkMode by remember { mutableStateOf(false) }
+    var editSong by remember { mutableStateOf<SongEntity?>(null) }
+    val encoreColors = if (isDarkMode) DarkEncoreColors else LightEncoreColors
 
+    CompositionLocalProvider(LocalEncoreColors provides encoreColors) {
+    editSong?.let { song ->
+        SongEditBottomSheet(
+            song = song,
+            onSave = { title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies ->
+                libraryViewModel.updateSongMetadata(song.id, title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies)
+                editSong = null
+            },
+            onDismiss = { editSong = null },
+            onEditChart = {
+                editSong = null
+                navController.navigate(Routes.chartEditor(song.id))
+            }
+        )
+    }
     NavHost(
         navController = navController,
         startDestination = "command_center",
@@ -106,9 +151,35 @@ fun MainScreen(
             CommandCenterScreen(
                 libraryViewModel = libraryViewModel,
                 authViewModel = authViewModel,
+                onToggleDarkMode = { isDarkMode = !isDarkMode },
                 onSongClick = { songId, setNumber ->
                     navController.navigate(Routes.songDetail(songId, setNumber))
-                }
+                },
+                onEditChart = { songId ->
+                    navController.navigate(Routes.chartEditor(songId))
+                },
+                onSettingsClick = { navController.navigate(Routes.SETTINGS) }
+            )
+        }
+
+        composable(Routes.SETTINGS) {
+            SettingsScreen(
+                viewModel = appPrefsViewModel,
+                auditViewModel = auditViewModel,
+                onEditSong = { song -> editSong = song },
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Routes.SONG_CHART_EDITOR,
+            arguments = listOf(navArgument("songId") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val songId = backStackEntry.arguments?.getString("songId") ?: return@composable
+            SongChartEditorScreen(
+                songId = songId,
+                viewModel = libraryViewModel,
+                onNavigateBack = { navController.popBackStack() }
             )
         }
 
@@ -130,6 +201,10 @@ fun MainScreen(
                 viewModel = viewModel,
                 songId = songId,
                 setNumber = setNumber,
+                appPreferences = appPreferences,
+                onToggleDarkMode = { isDarkMode = !isDarkMode },
+                onEditClick = { song -> editSong = song },
+                onPageChanged = { editSong = null },
                 onNavigateBack = {
                     // popBackStack() returns false when the stack is empty or corrupted.
                     // Fall back to an explicit navigate so the user never lands on a blank screen.
@@ -153,6 +228,7 @@ fun MainScreen(
             )
         }
     }
+    } // end CompositionLocalProvider
 }
 
 
@@ -169,7 +245,10 @@ fun MainScreen(
 fun CommandCenterScreen(
     libraryViewModel: LibraryViewModel,
     authViewModel: AuthViewModel,
-    onSongClick: (songId: String, setNumber: Int?) -> Unit
+    onToggleDarkMode: () -> Unit,
+    onSongClick: (songId: String, setNumber: Int?) -> Unit,
+    onEditChart: ((songId: String) -> Unit)? = null,
+    onSettingsClick: () -> Unit = {}
 ) {
     var selectedSetFilter by remember { mutableStateOf<Int?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -179,6 +258,9 @@ fun CommandCenterScreen(
     val authState by authViewModel.authState.collectAsState()
     var showProfileSheet by remember { mutableStateOf(false) }
     var showImportSheet by remember { mutableStateOf(false) }
+    var showSaveSetDialog by remember { mutableStateOf(false) }
+    var showLoadSetDialog by remember { mutableStateOf(false) }
+    var saveSetName by remember { mutableStateOf("") }
     val profileSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showAccountDropdown by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -190,6 +272,10 @@ fun CommandCenterScreen(
 
     val syncProgress by libraryViewModel.syncProgress.collectAsState()
     val connectedFolderUri by libraryViewModel.connectedFolderUri.collectAsState()
+    val availableSets by libraryViewModel.availableSets.collectAsState()
+    val songs by libraryViewModel.songs.collectAsState()
+    val performSetEntries by libraryViewModel.performSetEntries.collectAsState()
+    val setlists by libraryViewModel.setlists.collectAsState()
 
     // Folder Sync — OpenDocumentTree gives a persistent tree URI
     val folderPickerLauncher = rememberLauncherForActivityResult(
@@ -206,6 +292,28 @@ fun CommandCenterScreen(
     ) { uris ->
         showImportSheet = false
         if (uris.isNotEmpty()) libraryViewModel.importSongs(context, uris)
+    }
+
+    // Set export — CreateDocument lets the user choose where to save the .encore.json file
+    var pendingExportSetlistId by remember { mutableStateOf<String?>(null) }
+    var pendingExportSetlistName by remember { mutableStateOf<String?>(null) }
+    val exportSetlistLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        val setlistId = pendingExportSetlistId
+        if (uri != null && setlistId != null) {
+            libraryViewModel.exportSetlistToUri(context, setlistId, uri)
+        }
+        pendingExportSetlistId = null
+        pendingExportSetlistName = null
+    }
+
+    // Set import — GetContent filtered to JSON files
+    val importSetLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        showImportSheet = false
+        uri?.let { libraryViewModel.importSetFromJson(context, it) }
     }
 
     // "Importing…" Snackbar with Cancel — dismissed automatically when import finishes
@@ -254,11 +362,106 @@ fun CommandCenterScreen(
         }
     }
 
+    // ── Save Set dialog ───────────────────────────────────────────────────────
+    if (showSaveSetDialog) {
+        AlertDialog(
+            onDismissRequest = { showSaveSetDialog = false; saveSetName = "" },
+            title = { Text("Save Current Set") },
+            text = {
+                androidx.compose.material3.OutlinedTextField(
+                    value = saveSetName,
+                    onValueChange = { saveSetName = it },
+                    label = { Text("Setlist name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val name = saveSetName.trim()
+                        if (name.isNotEmpty()) {
+                            libraryViewModel.saveCurrentSetAs(name)
+                            showSaveSetDialog = false
+                            saveSetName = ""
+                        }
+                    },
+                    enabled = saveSetName.isNotBlank()
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSaveSetDialog = false; saveSetName = "" }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // ── Load Set dialog ───────────────────────────────────────────────────────
+    if (showLoadSetDialog) {
+        AlertDialog(
+            onDismissRequest = { showLoadSetDialog = false },
+            title = { Text("Load Setlist") },
+            text = {
+                if (setlists.isEmpty()) {
+                    Text(
+                        "No saved setlists yet. Save the current set first.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Column {
+                        setlists.forEach { setlist ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                TextButton(
+                                    onClick = {
+                                        libraryViewModel.loadSetlistAsCurrent(setlist.id)
+                                        showLoadSetDialog = false
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = setlist.name,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        pendingExportSetlistId = setlist.id
+                                        pendingExportSetlistName = setlist.name
+                                        showLoadSetDialog = false
+                                        val filename = "${setlist.name.replace(" ", "_")}.encore.json"
+                                        exportSetlistLauncher.launch(filename)
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Share,
+                                        contentDescription = "Export",
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            HorizontalDivider(thickness = 0.5.dp)
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showLoadSetDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
     if (showImportSheet) {
         ImportModal(
             onDismiss = { showImportSheet = false },
             onSyncFolder = { folderPickerLauncher.launch(null) },
             onImportFiles = { filePickerLauncher.launch("*/*") },
+            onImportSet = { importSetLauncher.launch("application/json") },
             syncProgress = syncProgress,
             connectedFolderUri = connectedFolderUri
         )
@@ -287,14 +490,15 @@ fun CommandCenterScreen(
         }
     }
 
+    val encoreColors = LocalEncoreColors.current
     Scaffold(
-        containerColor = Color(0xFF121212),
+        containerColor = encoreColors.screenBackground,
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFF121212))
+                .background(encoreColors.screenBackground)
                 .padding(paddingValues)
         ) {
             // ── Header ───────────────────────────────────────────────────────
@@ -303,33 +507,56 @@ fun CommandCenterScreen(
                 showAccountDropdown = showAccountDropdown,
                 connectedFolderUri = connectedFolderUri,
                 onImportClick = { showImportSheet = true },
+                onSaveSetClick = { showSaveSetDialog = true },
+                onLoadSetClick = { showLoadSetDialog = true },
+                onToggleDarkMode = onToggleDarkMode,
+                onPerformClick = {
+                    val setNum = selectedSetFilter ?: 1
+                    val firstSongId = if (selectedSetFilter != null) {
+                        songs.firstOrNull()?.id
+                    } else {
+                        performSetEntries.firstOrNull()?.song?.id
+                    }
+                    if (firstSongId != null) {
+                        onSongClick(firstSongId, setNum)
+                    } else {
+                        scope.launch {
+                            snackbarHostState.showSnackbar("No songs in set")
+                        }
+                    }
+                },
                 onRefreshClick = { libraryViewModel.refreshConnectedFolder(context) },
                 onShowDropdown = { showAccountDropdown = true },
                 onDropdownDismiss = { showAccountDropdown = false },
                 onSignOut = { authViewModel.signOut(); showAccountDropdown = false },
-                onProfileSheetRequest = { showProfileSheet = true }
+                onProfileSheetRequest = { showProfileSheet = true },
+                onSettingsClick = onSettingsClick
             )
 
             HorizontalDivider(
                 modifier = Modifier.padding(horizontal = 16.dp),
                 thickness = 0.5.dp,
-                color = MaterialTheme.colorScheme.outlineVariant
+                color = encoreColors.divider
             )
 
             // Song list (search bar + rows) — fills available space
             LibraryListContent(
                 viewModel = libraryViewModel,
                 onSongClick = { songId -> onSongClick(songId, selectedSetFilter) },
+                onEditChart = onEditChart,
                 modifier = Modifier.weight(1f)
             )
 
             // ── Sets Section ─────────────────────────────────────────────────
             SetsSection(
+                sets = availableSets,
                 selectedSet = selectedSetFilter,
                 onSetSelected = { setNumber ->
                     selectedSetFilter = if (selectedSetFilter == setNumber) null else setNumber
                 },
-                onClearFilter = { selectedSetFilter = null }
+                onClearFilter = { selectedSetFilter = null },
+                onCreateSet = { libraryViewModel.createNewSet() },
+                onDeleteSet = { set -> libraryViewModel.deleteSet(set) }
             )
         }
     }
@@ -350,6 +577,7 @@ fun ImportModal(
     onDismiss: () -> Unit,
     onSyncFolder: () -> Unit,
     onImportFiles: () -> Unit,
+    onImportSet: (() -> Unit)? = null,
     syncProgress: SyncProgress?,
     connectedFolderUri: String? = null
 ) {
@@ -480,6 +708,27 @@ fun ImportModal(
                             style = MaterialTheme.typography.labelLarge
                         )
                     }
+                    if (onImportSet != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = onImportSet,
+                            shape = CircleShape,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.FileOpen,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "Import Set (.json)",
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                        }
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
                     TextButton(
                         onClick = onDismiss,
@@ -497,25 +746,52 @@ fun ImportModal(
 }
 
 /**
- * Sets management footer with global color-coded filter chips (Sets 1–4).
+ * Sets management footer — dynamic chips driven by sets that exist in the DB.
  *
- * Active state uses the set's persistent color (blue/orange/green/purple).
- * Selecting an active set deselects it (toggle behavior).
+ * Active state uses the set's persistent color. Selecting an active set deselects
+ * it (toggle). "New Set" chip appended at the end creates the next numbered set.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SetsSection(
+    sets: List<SetEntity>,
     selectedSet: Int?,
     onSetSelected: (Int) -> Unit,
     onClearFilter: () -> Unit,
+    onCreateSet: () -> Unit,
+    onDeleteSet: (SetEntity) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var setToDelete by remember { mutableStateOf<SetEntity?>(null) }
+
+    if (setToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { setToDelete = null },
+            title = { Text("Delete Set ${setToDelete!!.number}?") },
+            text = { Text("This will remove the set and all its song assignments. Songs will not be deleted.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteSet(setToDelete!!)
+                        setToDelete = null
+                    }
+                ) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { setToDelete = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    val encoreColors = LocalEncoreColors.current
     HorizontalDivider(
         thickness = 0.5.dp,
-        color = MaterialTheme.colorScheme.outlineVariant
+        color = encoreColors.divider
     )
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .navigationBarsPadding()
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         Row(
@@ -526,7 +802,7 @@ fun SetsSection(
                 text = "Sets",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = encoreColors.titleText,
                 modifier = Modifier.weight(1f)
             )
             if (selectedSet != null) {
@@ -536,26 +812,60 @@ fun SetsSection(
                 ) {
                     Text(
                         text = "Show All",
-                        style = MaterialTheme.typography.labelMedium
+                        style = MaterialTheme.typography.labelMedium,
+                        color = encoreColors.iconTint
                     )
                 }
             }
         }
         Spacer(modifier = Modifier.height(6.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            for (setNumber in 1..4) {
-                val setColor = SetColor.getSetColor(setNumber)
-                FilterChip(
-                    selected = selectedSet == setNumber,
-                    onClick = { onSetSelected(setNumber) },
-                    label = { Text("Set $setNumber") },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = setColor,
-                        selectedLabelColor = Color.White,
-                        labelColor = setColor
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            sets.forEach { set ->
+                val setColor = SetColor.getSetColor(set.number)
+                val isSelected = selectedSet == set.number
+                Surface(
+                    shape = CircleShape,
+                    color = if (isSelected) setColor else Color.Transparent,
+                    border = BorderStroke(1.dp, setColor),
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .combinedClickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = androidx.compose.material.ripple.rememberRipple(),
+                            onClick = { onSetSelected(set.number) },
+                            onLongClick = { if (set.number > 1) setToDelete = set }
+                        )
+                ) {
+                    Text(
+                        text = "Set ${set.number}",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        color = if (isSelected) Color.White else setColor,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
                     )
-                )
+                }
             }
+            FilterChip(
+                selected = false,
+                onClick = onCreateSet,
+                label = {
+                    Text(
+                        text = "+ New Set",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        color = encoreColors.titleText,
+                        modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp)
+                    )
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    containerColor = encoreColors.cardBackground,
+                    labelColor = encoreColors.titleText
+                )
+            )
         }
     }
 }

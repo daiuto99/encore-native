@@ -157,4 +157,19 @@ interface SetDao {
         ORDER BY sets.number ASC
     """)
     suspend fun getSetsContainingSong(songId: String): List<SetEntity>
+
+    /**
+     * Observe all sets that contain a specific song as a Flow.
+     * Emits a new list whenever set entries change (song added/removed from any set).
+     *
+     * @param songId Song UUID
+     * @return Flow of sets containing the song, ordered by set number
+     */
+    @Query("""
+        SELECT DISTINCT sets.* FROM sets
+        INNER JOIN set_entries ON sets.id = set_entries.set_id
+        WHERE set_entries.song_id = :songId
+        ORDER BY sets.number ASC
+    """)
+    fun observeSetsContainingSong(songId: String): Flow<List<SetEntity>>
 }

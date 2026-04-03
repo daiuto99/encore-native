@@ -38,7 +38,7 @@ import java.util.UUID
         SetEntity::class,
         SetEntryEntity::class
     ],
-    version = 3,
+    version = 6,
     exportSchema = true
 )
 @TypeConverters(EncoreTypeConverters::class)
@@ -81,6 +81,97 @@ abstract class EncoreDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration from version 3 to 4: Add isHarmonyMode and highlightStyle to songs.
+         */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE songs ADD COLUMN is_harmony_mode INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE songs ADD COLUMN highlight_style INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /**
+         * Migration from version 4 to 5:
+         * - Rename current_key → display_key
+         * - Add original_key (nullable)
+         * - Add is_lead_guitar (Boolean, default 0)
+         * - Add is_verified (Boolean, default 0)
+         * - Add last_verified_at (Long, default current time)
+         * - Drop lead_marker and harmony_markup
+         *
+         * SQLite does not support DROP COLUMN before 3.35 or RENAME COLUMN portably,
+         * so we recreate the table, copy data, drop old, and rename.
+         */
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                val now = System.currentTimeMillis()
+                database.execSQL("""
+                    CREATE TABLE songs_new (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        user_id TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        artist TEXT NOT NULL,
+                        display_key TEXT,
+                        original_key TEXT,
+                        markdown_body TEXT NOT NULL,
+                        original_import_body TEXT,
+                        is_lead_guitar INTEGER NOT NULL DEFAULT 0,
+                        is_verified INTEGER NOT NULL DEFAULT 0,
+                        last_verified_at INTEGER NOT NULL DEFAULT 0,
+                        last_zoom_level REAL NOT NULL DEFAULT 1.0,
+                        owner_id TEXT,
+                        version INTEGER NOT NULL DEFAULT 1,
+                        created_at INTEGER NOT NULL,
+                        updated_at INTEGER NOT NULL,
+                        sync_status TEXT NOT NULL DEFAULT 'SYNCED',
+                        local_updated_at INTEGER NOT NULL,
+                        last_synced_at INTEGER,
+                        is_harmony_mode INTEGER NOT NULL DEFAULT 0,
+                        highlight_style INTEGER NOT NULL DEFAULT 0
+                    )
+                """.trimIndent())
+                database.execSQL("""
+                    INSERT INTO songs_new (
+                        id, user_id, title, artist, display_key, original_key,
+                        markdown_body, original_import_body,
+                        is_lead_guitar, is_verified, last_verified_at,
+                        last_zoom_level, owner_id, version, created_at, updated_at,
+                        sync_status, local_updated_at, last_synced_at,
+                        is_harmony_mode, highlight_style
+                    )
+                    SELECT
+                        id, user_id, title, artist, current_key, NULL,
+                        markdown_body, original_import_body,
+                        0, 0, $now,
+                        last_zoom_level, owner_id, version, created_at, updated_at,
+                        sync_status, local_updated_at, last_synced_at,
+                        is_harmony_mode, highlight_style
+                    FROM songs
+                """.trimIndent())
+                database.execSQL("DROP TABLE songs")
+                database.execSQL("ALTER TABLE songs_new RENAME TO songs")
+                // Recreate indexes
+                database.execSQL("CREATE INDEX index_songs_user_id_title ON songs (user_id, title)")
+                database.execSQL("CREATE INDEX index_songs_user_id_artist ON songs (user_id, artist)")
+                database.execSQL("CREATE UNIQUE INDEX index_songs_user_id_title_artist ON songs (user_id, title, artist)")
+                database.execSQL("CREATE INDEX index_songs_sync_status ON songs (sync_status)")
+            }
+        }
+
+        /**
+         * Migration from version 5 to 6: Add validation_errors column for Library Health Tool.
+         * Nullable TEXT — null means unscanned or clean; a non-null value is a semicolon-separated
+         * list of issues found by LibraryAuditWorker.
+         */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE songs ADD COLUMN validation_errors TEXT"
+                )
+            }
+        }
+
+        /**
          * Get singleton database instance.
          *
          * @param context Application context
@@ -93,7 +184,7 @@ abstract class EncoreDatabase : RoomDatabase() {
                     EncoreDatabase::class.java,
                     DATABASE_NAME
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .fallbackToDestructiveMigration()
                     .addCallback(DatabaseCallback(context.applicationContext))
                     .build()
@@ -134,11 +225,10 @@ abstract class EncoreDatabase : RoomDatabase() {
                     userId = "local-user", // Hardcoded for Milestone 2
                     title = "Amazing Grace",
                     artist = "John Newton",
-                    currentKey = "G",
+                    displayKey = "G",
+                    originalKey = "G",
                     markdownBody = AMAZING_GRACE_MARKDOWN,
                     originalImportBody = AMAZING_GRACE_FULL_MARKDOWN,
-                    leadMarker = null,
-                    harmonyMarkup = null,
                     lastZoomLevel = 1.0f,
                     version = 1,
                     createdAt = now,

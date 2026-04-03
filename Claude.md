@@ -1,24 +1,30 @@
-# ENCORE NATIVE ANDROID COMMAND CENTER
+# Encore Android — Working Rules
 
-## 1. Primary Source of Truth
-- **Product Vision:** @docs/01_Encore_Product_Overview.md
-- **Technical Rules:** @docs/03_Encore_Technical_Specification.md (Follow Section 12 for Repo Structure)
-- **Roadmap:** @docs/05_Build_Roadmap.md (Do not skip milestones)
+## Core Constraints
+- Platform: Native Android only (Kotlin + Jetpack Compose)
+- Device: 11-inch tablet, portrait only
+- Architecture: Offline-first; Room is the source of truth during performance
+- Song model: Markdown-based master song model
 
-## 2. Definition of Done (DoD)
-Before any task or milestone is marked "Complete," the following must be true:
-- **Builds:** The app must compile successfully: `./gradlew assembleDebug`.
-- **Checklist:** All items for the current milestone in @docs/06_Delivery_Checklist.md must be produced.
-- **Test:** The feature must pass the relevant P1 criteria in @docs/07_Acceptance_Test_Plan.md.
-- **Git:** Work must be on a feature branch with clean, descriptive commits.
+## Workflow Rules
+- Plan before editing
+- **Source of Truth:** Always refer to `M4_ACTIVE_CONTEXT.md` for current progress and task priority.
+- If a technical detail is unspecified, use modern Android best practices and document the choice in `docs/decisions.md`
+- Never implement silent overwrite for sync conflicts
+- Keep work scoped to the current task; do not review roadmap, checklist, or acceptance docs unless the task explicitly requires planning, review, or release validation
+- Before starting any task, explicitly categorize it as a Fix (Surgical) or Feature (Architectural). If it is a Feature requiring >50 lines of code or full file reads, stop and wait for my 'GO' to ensure I want to spend the tokens now
 
-## 3. Technical Constraints
-- **Platform:** Native Android (Kotlin + Jetpack Compose).
-- **Device:** 11-inch Tablet, Portrait Orientation ONLY.
-- **Architecture:** Offline-first. Local Room DB is the master source during performance.
-- **Song Model:** Markdown-based. Master version applies globally.
+## Session Guidance
+- Use fresh sessions for distinct work modes: build, plan, review, and handoff
+- Prefer targeted reads of specific sections or files over broad project re-reads
+- For milestone execution, rely on the active milestone context file (`M4_ACTIVE_CONTEXT.md`) instead of reloading project-wide governance docs
 
-## 4. Operational Protocol
-- **Plan First:** Always enter "Plan Mode" to outline technical steps before editing files.
-- **No Hallucinations:** If a technical detail isn't in @docs/03_Encore_Technical_Specification.md, use Android "Modern Best Practices" and document the choice in `docs/decisions.md`.
-- **Sync Safety:** Never implement "Silent Overwrite." Refer to the Conflict Rules in the Functional Spec.
+## Efficiency Rules (Credit Saving)
+- **Surgical Fixes:** Skip "Plan Mode" and "Subagents" for bug fixes or minor UI tweaks.
+- **Direct Access:** Use Grep/Read on known file paths directly; avoid launching Explore agents.
+- **Build Filtering:** Always pipe build output through grep to minimize context: 
+  `./gradlew assembleDebug | grep -E "FAILED|error:|BUILD SUCCESSFUL"`
+
+  ## Environment
+- **ADB Path:** Always use `~/Library/Android/sdk/platform-tools/adb` for all adb commands.
+- **Verification:** Run `~/Library/Android/sdk/platform-tools/adb devices` at the start of every session.

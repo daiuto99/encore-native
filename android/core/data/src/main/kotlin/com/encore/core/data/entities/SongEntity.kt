@@ -34,8 +34,11 @@ data class SongEntity(
     @ColumnInfo(name = "artist")
     val artist: String, // Searchable, indexed
 
-    @ColumnInfo(name = "current_key")
-    val currentKey: String?, // e.g., "G", "Dm", "C#m"
+    @ColumnInfo(name = "display_key")
+    val displayKey: String?, // Active key shown in UI (e.g., "G", "Dm", "C#m")
+
+    @ColumnInfo(name = "original_key")
+    val originalKey: String? = null, // Reference key from source/import — null until set
 
     @ColumnInfo(name = "markdown_body")
     val markdownBody: String, // Full editable chart content
@@ -43,11 +46,17 @@ data class SongEntity(
     @ColumnInfo(name = "original_import_body")
     val originalImportBody: String?, // Preserve initial import for reference
 
-    @ColumnInfo(name = "lead_marker")
-    val leadMarker: String? = null, // Custom markers for lead vocals (future)
+    @ColumnInfo(name = "is_lead_guitar")
+    val isLeadGuitar: Boolean = false, // True when this song uses lead guitar part
 
-    @ColumnInfo(name = "harmony_markup")
-    val harmonyMarkup: String? = null, // Future: harmony annotations
+    @ColumnInfo(name = "is_verified")
+    val isVerified: Boolean = false, // True when last audit found no errors
+
+    @ColumnInfo(name = "validation_errors")
+    val validationErrors: String? = null, // Null = clean or unscanned; non-null = issues found
+
+    @ColumnInfo(name = "last_verified_at")
+    val lastVerifiedAt: Long = 0L, // Unix timestamp (ms) of last audit run
 
     @ColumnInfo(name = "last_zoom_level")
     val lastZoomLevel: Float = 1.0f, // Performance mode zoom level (1.0 = 100%, range 0.5-3.0)
@@ -72,5 +81,11 @@ data class SongEntity(
     val localUpdatedAt: Long, // Last local modification timestamp
 
     @ColumnInfo(name = "last_synced_at")
-    val lastSyncedAt: Long? = null // Last successful sync timestamp
+    val lastSyncedAt: Long? = null, // Last successful sync timestamp
+
+    @ColumnInfo(name = "is_harmony_mode")
+    val isHarmonyMode: Boolean = false, // Harmony mode viewer toggle
+
+    @ColumnInfo(name = "highlight_style")
+    val highlightStyle: Int = 0 // 0 = None, 1 = Chords Bold, 2 = Lyrics Faded
 )

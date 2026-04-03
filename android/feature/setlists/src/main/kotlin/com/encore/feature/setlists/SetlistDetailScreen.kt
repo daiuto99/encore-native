@@ -1,5 +1,6 @@
 package com.encore.feature.setlists
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +20,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -127,6 +130,7 @@ fun SetlistDetailScreen(
                         showSongSelectionDialog = true
                     },
                     onSongClick = onSongClick,
+                    onReorderSong = { entryId, newPos -> viewModel.reorderSongInSet(entryId, newPos) },
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(paddingValues)
@@ -151,11 +155,13 @@ fun SetlistDetailScreen(
 /**
  * Setlist content with sets and songs.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SetlistContent(
     sets: List<SetWithEntries>,
     onAddToSet: (String) -> Unit,
     onSongClick: (String) -> Unit,
+    onReorderSong: (entryId: String, newPosition: Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -163,20 +169,22 @@ fun SetlistContent(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        items(sets) { setWithEntries ->
+        items(sets, key = { it.set.id }) { setWithEntries ->
             SetSection(
                 setNumber = setWithEntries.set.number,
                 setId = setWithEntries.set.id,
                 songs = setWithEntries.entries,
                 onAddToSet = onAddToSet,
-                onSongClick = onSongClick
+                onSongClick = onSongClick,
+                onReorderSong = onReorderSong,
+                modifier = Modifier.animateItemPlacement()
             )
         }
     }
 }
 
 /**
- * Individual set section with songs and color coding.
+ * Individual set section with songs, color coding, and drag-to-reorder.
  */
 @Composable
 fun SetSection(
@@ -185,11 +193,15 @@ fun SetSection(
     songs: List<SetEntryWithSong>,
     onAddToSet: (String) -> Unit,
     onSongClick: (String) -> Unit,
+    onReorderSong: (entryId: String, newPosition: Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colorScheme = MaterialTheme.colorScheme
     val containerColor = SetColor.getSetContainerColor(setNumber, colorScheme)
     val contentColor = SetColor.getSetContentColor(setNumber, colorScheme)
+
+
+    val sortedSongs = songs.sortedBy { it.entry.position }
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -197,10 +209,7 @@ fun SetSection(
         color = containerColor,
         shadowElevation = 2.dp
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            // Set header with Add button
+        Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -223,24 +232,41 @@ fun SetSection(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Songs in set
-            songs.sortedBy { it.entry.position }.forEach { entryWithSong ->
-                SetlistSongCard(
-                    position = entryWithSong.entry.position + 1, // Display as 1-indexed
-                    songId = entryWithSong.song.id,
-                    title = entryWithSong.song.title,
-                    artist = entryWithSong.song.artist,
-                    key = entryWithSong.song.currentKey,
-                    onClick = { onSongClick(entryWithSong.song.id) }
-                )
-                Spacer(modifier = Modifier.height(8.dp))
+            sortedSongs.forEachIndexed { index, entryWithSong ->
+                if (index > 0) Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SetlistSongCard(
+                        position = index + 1,
+                        songId = entryWithSong.song.id,
+                        title = entryWithSong.song.title,
+                        artist = entryWithSong.song.artist,
+                        key = entryWithSong.song.displayKey,
+                        onClick = { onSongClick(entryWithSong.song.id) },
+                        modifier = Modifier.weight(1f)
+                    )
+                    Column {
+                        IconButton(
+                            onClick = { if (index > 0) onReorderSong(entryWithSong.entry.id, index - 1) },
+                            enabled = index > 0
+                        ) {
+                            Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move up", tint = contentColor)
+                        }
+                        IconButton(
+                            onClick = { if (index < sortedSongs.lastIndex) onReorderSong(entryWithSong.entry.id, index + 1) },
+                            enabled = index < sortedSongs.lastIndex
+                        ) {
+                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move down", tint = contentColor)
+                        }
+                    }
+                }
             }
         }
     }
 }
 
 /**
- * Song card in setlist.
+ * Song card in setlist. Long-press anywhere on the card to drag-to-reorder.
+ * [isDragging] triggers a red border + scale lift to signal active drag.
  */
 @Composable
 fun SetlistSongCard(
@@ -272,13 +298,11 @@ fun SetlistSongCard(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.width(32.dp)
+                modifier = Modifier.width(28.dp)
             )
 
             // Song info
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleSmall,
@@ -460,7 +484,7 @@ fun SongSelectionItem(
             )
         }
 
-        song.currentKey?.let { key ->
+        song.displayKey?.let { key ->
             Spacer(modifier = Modifier.width(8.dp))
             Surface(
                 shape = MaterialTheme.shapes.small,

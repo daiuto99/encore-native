@@ -11,6 +11,8 @@ import androidx.lifecycle.viewModelScope
 import com.encore.core.data.entities.SetEntity
 import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.entities.SyncStatus
+import com.encore.core.data.preferences.AppPreferences
+import com.encore.core.data.preferences.AppPreferencesRepository
 import com.encore.core.data.preferences.UserPreferencesRepository
 import com.encore.core.data.repository.SetlistRepository
 import com.encore.core.data.repository.SongRepository
@@ -21,12 +23,19 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import com.encore.core.data.entities.SetlistEntity
+import com.encore.core.data.relations.SetEntryWithSong
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.UUID
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * ViewModel for Library Screen.
@@ -44,7 +53,8 @@ import java.util.UUID
 class LibraryViewModel(
     private val songRepository: SongRepository,
     private val setlistRepository: SetlistRepository,
-    private val userPrefs: UserPreferencesRepository
+    private val userPrefs: UserPreferencesRepository,
+    private val appPrefsRepository: AppPreferencesRepository? = null
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
@@ -72,8 +82,42 @@ class LibraryViewModel(
             initialValue = null
         )
 
+    /** Global display preferences — emits instantly when any setting changes. */
+    val appPreferences: StateFlow<AppPreferences> = (appPrefsRepository?.appPreferences
+        ?: kotlinx.coroutines.flow.flowOf(AppPreferences()))
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = AppPreferences()
+        )
+
     private val _sortOrder = MutableStateFlow(SortOrder.TITLE)
     val sortOrder: StateFlow<SortOrder> = _sortOrder.asStateFlow()
+
+    // ── Perform Set ───────────────────────────────────────────────────────────
+    // The perform set is Set 1 of the default setlist — the nightly working set.
+    private val _performSetId = MutableStateFlow<String?>(null)
+    private val _defaultSetlistId = MutableStateFlow<String?>(null)
+
+    /** Ordered entries (with song data) for the current perform set. */
+    val performSetEntries: StateFlow<List<SetEntryWithSong>> = _performSetId
+        .flatMapLatest { setId ->
+            if (setId == null) flowOf(emptyList())
+            else setlistRepository.getSongsInSet(setId)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** All sets in the default setlist, ordered by number. Drives the Sets section chips. */
+    val availableSets: StateFlow<List<SetEntity>> = _defaultSetlistId
+        .flatMapLatest { id ->
+            if (id == null) flowOf(emptyList())
+            else setlistRepository.getSetsForSetlist(id)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** All named setlists for the Load Set dialog. */
+    val setlists: StateFlow<List<SetlistEntity>> = setlistRepository.getSetlists()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // One-shot feedback messages (add to set, remove from set, etc.)
     private val _statusMessage = MutableStateFlow<String?>(null)
@@ -124,10 +168,54 @@ class LibraryViewModel(
 
     init {
         backfillMissingKeys()
+        initPerformSet()
+    }
+
+    private fun initPerformSet() {
+        viewModelScope.launch {
+            try {
+                val set1 = setlistRepository.getOrCreateSetByNumber(1)
+                _performSetId.value = set1.id
+                _defaultSetlistId.value = set1.setlistId
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to initialize perform set", e)
+            }
+        }
     }
 
     /**
-     * Scans all songs with null currentKey and re-parses their markdown body to extract the key.
+     * Delete a set and renumber subsequent sets (e.g., deleting Set 3 makes Set 4 → Set 3).
+     * Clears the active set filter if the deleted set was selected.
+     * Set 1 (the perform set) cannot be deleted.
+     */
+    fun deleteSet(set: SetEntity) {
+        if (set.id == _performSetId.value) return  // protect the working perform set
+        viewModelScope.launch {
+            try {
+                setlistRepository.deleteSetAndRenumber(set)
+                if (_setFilter.value == set.number) _setFilter.value = null
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to delete set ${set.number}", e)
+                _statusMessage.value = "Could not delete set"
+            }
+        }
+    }
+
+    /** Creates the next numbered set in the default setlist. */
+    fun createNewSet() {
+        val setlistId = _defaultSetlistId.value ?: return
+        viewModelScope.launch {
+            try {
+                setlistRepository.addSetToSetlist(setlistId)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to create new set", e)
+                _statusMessage.value = "Could not create set"
+            }
+        }
+    }
+
+    /**
+     * Scans all songs with null displayKey and re-parses their markdown body to extract the key.
      * Runs once on ViewModel creation to repair previously imported songs.
      */
     private fun backfillMissingKeys() {
@@ -139,7 +227,7 @@ class LibraryViewModel(
                     if (key != null) {
                         val now = System.currentTimeMillis()
                         songRepository.upsertSong(
-                            song.copy(currentKey = key, updatedAt = now, localUpdatedAt = now)
+                            song.copy(displayKey = key, updatedAt = now, localUpdatedAt = now)
                         )
                         Log.d(TAG, "Backfilled key for: ${song.title} → $key")
                     }
@@ -158,6 +246,68 @@ class LibraryViewModel(
     fun updateSetFilter(setNumber: Int?) { _setFilter.value = setNumber }
     fun toggleSort() {
         _sortOrder.value = if (_sortOrder.value == SortOrder.TITLE) SortOrder.ARTIST else SortOrder.TITLE
+    }
+
+    fun addToPerformSet(songId: String) {
+        val setId = _performSetId.value ?: return
+        viewModelScope.launch {
+            setlistRepository.addSongToSet(setId, songId)
+            val count = setlistRepository.getSongsInSet(setId).first().size
+            _statusMessage.value = "Staged ($count in set)"
+        }
+    }
+
+    fun removeFromPerformSet(entryId: String) {
+        viewModelScope.launch { setlistRepository.removeSongFromSet(entryId) }
+    }
+
+    fun reorderPerformSet(entryId: String, toIndex: Int) {
+        viewModelScope.launch { setlistRepository.reorderSongInSet(entryId, toIndex) }
+    }
+
+    /**
+     * Saves the current perform set as a new named setlist.
+     * Creates a copy — the working Set 1 is unaffected.
+     */
+    fun saveCurrentSetAs(name: String) {
+        val setId = _performSetId.value ?: return
+        viewModelScope.launch {
+            val result = setlistRepository.createSetlist(name)
+            val newSetlistId = result.getOrNull() ?: run {
+                _statusMessage.value = "Could not save set"
+                return@launch
+            }
+            val newSets = setlistRepository.getSetsForSetlist(newSetlistId).first()
+            val newSetId = newSets.firstOrNull()?.id ?: return@launch
+            val currentEntries = setlistRepository.getSongsInSet(setId).first()
+            currentEntries.forEach { entry ->
+                setlistRepository.addSongToSet(newSetId, entry.song.id)
+            }
+            _statusMessage.value = "Saved as \"$name\""
+        }
+    }
+
+    /**
+     * Replaces the current perform set's contents with songs from the chosen setlist.
+     * Destructively clears Set 1 then refills from the chosen setlist's first set.
+     */
+    fun loadSetlistAsCurrent(setlistId: String) {
+        val setId = _performSetId.value ?: return
+        viewModelScope.launch {
+            // Clear existing entries
+            val existingEntries = setlistRepository.getSongsInSet(setId).first()
+            existingEntries.forEach { entry ->
+                setlistRepository.removeSongFromSet(entry.entry.id)
+            }
+            // Copy songs from the chosen setlist's first set
+            val sets = setlistRepository.getSetsForSetlist(setlistId).first()
+            val sourceSetId = sets.minByOrNull { it.number }?.id ?: return@launch
+            val songs = setlistRepository.getSongsInSet(sourceSetId).first()
+            songs.forEach { entry ->
+                setlistRepository.addSongToSet(setId, entry.song.id)
+            }
+            _statusMessage.value = "Setlist loaded"
+        }
     }
     fun clearImportResult() { _importResult.value = null }
     fun clearStatusMessage() { _statusMessage.value = null }
@@ -199,7 +349,7 @@ class LibraryViewModel(
                                     title = title,
                                     artist = artist,
                                     markdownBody = content,
-                                    currentKey = key,
+                                    displayKey = key,
                                     updatedAt = now,
                                     localUpdatedAt = now,
                                     version = existing.version + 1,
@@ -215,7 +365,7 @@ class LibraryViewModel(
                             userId = "local-user",
                             title = title,
                             artist = artist,
-                            currentKey = key,
+                            displayKey = key,
                             markdownBody = content,
                             originalImportBody = content,
                             version = 1,
@@ -299,7 +449,7 @@ class LibraryViewModel(
                             userId = "local-user",
                             title = title,
                             artist = artist,
-                            currentKey = key,
+                            displayKey = key,
                             markdownBody = content,
                             originalImportBody = content,
                             version = 1,
@@ -395,7 +545,7 @@ class LibraryViewModel(
                             songRepository.upsertSong(
                                 existing.copy(
                                     markdownBody = content,
-                                    currentKey = key,
+                                    displayKey = key,
                                     updatedAt = now,
                                     localUpdatedAt = now,
                                     version = existing.version + 1,
@@ -410,7 +560,7 @@ class LibraryViewModel(
                                 userId = "local-user",
                                 title = title,
                                 artist = artist,
-                                currentKey = key,
+                                displayKey = key,
                                 markdownBody = content,
                                 originalImportBody = content,
                                 version = 1,
@@ -454,6 +604,49 @@ class LibraryViewModel(
      */
     fun deleteSong(song: SongEntity) {
         viewModelScope.launch { songRepository.deleteSong(song) }
+    }
+
+    fun updateSongMetadata(
+        songId: String,
+        title: String,
+        artist: String,
+        isLeadGuitar: Boolean = false,
+        isHarmonyMode: Boolean = false,
+        resetZoom: Boolean = false,
+        clearHarmonies: Boolean = false
+    ) {
+        viewModelScope.launch {
+            val existing = songRepository.getSongById(songId) ?: return@launch
+            val updatedBody = if (clearHarmonies)
+                existing.markdownBody.replace(Regex("""\[/?h\]"""), "")
+            else existing.markdownBody
+            songRepository.upsertSong(
+                existing.copy(
+                    title = title,
+                    artist = artist,
+                    isLeadGuitar = isLeadGuitar,
+                    isHarmonyMode = isHarmonyMode,
+                    lastZoomLevel = if (resetZoom) 1.0f else existing.lastZoomLevel,
+                    markdownBody = updatedBody
+                )
+            )
+        }
+    }
+
+    /** Single-shot flow for observing a song in the chart editor. */
+    fun getSongFlow(songId: String): Flow<SongEntity?> = flow {
+        emit(songRepository.getSongById(songId))
+    }
+
+    /** Persist edited markdown body to DB. */
+    fun updateMarkdownBody(songId: String, body: String) {
+        viewModelScope.launch {
+            val existing = songRepository.getSongById(songId) ?: return@launch
+            val now = System.currentTimeMillis()
+            songRepository.upsertSong(
+                existing.copy(markdownBody = body, updatedAt = now, localUpdatedAt = now)
+            )
+        }
     }
 
     /**
@@ -519,8 +712,15 @@ class LibraryViewModel(
     }
 
     /**
-     * Get all sets that contain a specific song.
-     * Used for displaying set membership badges in library.
+     * Observe all sets containing a song as a reactive Flow.
+     * Room emits updates whenever set_entries change — add, remove, or set deletion.
+     */
+    fun observeSetsContainingSong(songId: String): Flow<List<SetEntity>> {
+        return setlistRepository.observeSetsContainingSong(songId)
+    }
+
+    /**
+     * Get all sets that contain a specific song (one-shot).
      */
     suspend fun getSetsContainingSong(songId: String): List<SetEntity> {
         return setlistRepository.getSetsContainingSong(songId)
@@ -591,6 +791,125 @@ class LibraryViewModel(
             if (match != null) return match.groupValues[1].trim()
         }
         return null
+    }
+
+    /**
+     * Serialize a setlist to JSON and write it to [outputUri] via SAF.
+     *
+     * Format: { version: 1, name: "...", songs: [{ title, artist, displayKey?, markdownBody }] }
+     * File extension convention: .encore.json
+     */
+    fun exportSetlistToUri(context: Context, setlistId: String, outputUri: Uri) {
+        viewModelScope.launch {
+            try {
+                val setlistWithSets = setlistRepository.getSetlistWithSets(setlistId) ?: run {
+                    _statusMessage.value = "Setlist not found"
+                    return@launch
+                }
+                val sourceSetId = setlistWithSets.sets.minByOrNull { it.set.number }?.set?.id ?: return@launch
+                val entries = setlistRepository.getSongsInSet(sourceSetId).first()
+
+                val songsArray = JSONArray()
+                entries.forEach { e ->
+                    val obj = JSONObject()
+                    obj.put("title", e.song.title)
+                    obj.put("artist", e.song.artist)
+                    if (e.song.displayKey != null) obj.put("displayKey", e.song.displayKey)
+                    obj.put("markdownBody", e.song.markdownBody)
+                    songsArray.put(obj)
+                }
+
+                val root = JSONObject()
+                root.put("version", 1)
+                root.put("name", setlistWithSets.setlist.name)
+                root.put("songs", songsArray)
+
+                context.contentResolver.openOutputStream(outputUri)?.use { stream ->
+                    stream.bufferedWriter().use { writer -> writer.write(root.toString(2)) }
+                }
+                _statusMessage.value = "Exported \"${setlistWithSets.setlist.name}\""
+            } catch (e: Exception) {
+                Log.e(TAG, "Export failed", e)
+                _statusMessage.value = "Export failed"
+            }
+        }
+    }
+
+    /**
+     * Read an Encore set export JSON file and import it as a new named setlist.
+     *
+     * Songs that already exist (matched by title + artist) are reused without
+     * duplication. New songs are created and added to the library.
+     */
+    fun importSetFromJson(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val content = context.contentResolver.openInputStream(uri)?.use { stream ->
+                    stream.bufferedReader().use { it.readText() }
+                } ?: run {
+                    _statusMessage.value = "Could not read file"
+                    return@launch
+                }
+
+                val root = JSONObject(content)
+                val name = root.optString("name", "Imported Set").ifBlank { "Imported Set" }
+                val songsArray = root.optJSONArray("songs") ?: run {
+                    _statusMessage.value = "Invalid set file"
+                    return@launch
+                }
+
+                val newSetlistId = setlistRepository.createSetlist(name).getOrNull() ?: run {
+                    _statusMessage.value = "Could not create setlist"
+                    return@launch
+                }
+                val newSets = setlistRepository.getSetsForSetlist(newSetlistId).first()
+                val newSetId = newSets.firstOrNull()?.id ?: return@launch
+
+                val now = System.currentTimeMillis()
+                var addedCount = 0
+                var reusedCount = 0
+
+                for (i in 0 until songsArray.length()) {
+                    val obj = songsArray.getJSONObject(i)
+                    val title = obj.optString("title").trim()
+                    val artist = obj.optString("artist").trim()
+                    if (title.isEmpty()) continue
+                    val displayKey = obj.optString("displayKey").takeIf { it.isNotEmpty() }
+                    val markdownBody = obj.optString("markdownBody")
+
+                    val existing = songRepository.findDuplicate(title, artist, "local-user")
+                    val songId = if (existing != null) {
+                        reusedCount++
+                        existing.id
+                    } else {
+                        val song = SongEntity(
+                            id = UUID.randomUUID().toString(),
+                            userId = "local-user",
+                            title = title,
+                            artist = artist,
+                            displayKey = displayKey,
+                            markdownBody = markdownBody,
+                            originalImportBody = markdownBody,
+                            version = 1,
+                            createdAt = now,
+                            updatedAt = now,
+                            syncStatus = SyncStatus.PENDING_UPLOAD,
+                            localUpdatedAt = now,
+                            lastSyncedAt = null
+                        )
+                        songRepository.upsertSong(song)
+                        addedCount++
+                        song.id
+                    }
+                    setlistRepository.addSongToSet(newSetId, songId)
+                }
+
+                _statusMessage.value = "Imported \"$name\" ($addedCount new, $reusedCount matched)"
+            } catch (e: Exception) {
+                Log.e(TAG, "Set JSON import failed", e)
+                _statusMessage.value = "Import failed: ${e.message}"
+            }
+        }
     }
 
     companion object {

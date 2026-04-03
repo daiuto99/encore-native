@@ -136,8 +136,36 @@ interface SongDao {
      * Get all songs that have no key parsed yet.
      * Used for backfilling key on previously imported songs.
      */
-    @Query("SELECT * FROM songs WHERE current_key IS NULL")
+    @Query("SELECT * FROM songs WHERE display_key IS NULL")
     suspend fun getSongsWithoutKey(): List<SongEntity>
+
+    /**
+     * Get all songs as a one-shot list (not reactive).
+     * Used by LibraryAuditWorker to scan every song without holding a Flow collector.
+     */
+    @Query("SELECT * FROM songs ORDER BY title ASC")
+    suspend fun getAllSongsOnce(): List<SongEntity>
+
+    /**
+     * Write audit results for a single song.
+     * Called by LibraryAuditWorker after evaluating each chart.
+     */
+    @Query("""
+        UPDATE songs
+        SET is_verified = :isVerified,
+            validation_errors = :errors,
+            last_verified_at = :timestamp
+        WHERE id = :id
+    """)
+    suspend fun updateValidation(id: String, isVerified: Boolean, errors: String?, timestamp: Long)
+
+    /**
+     * Reactive stream of songs that failed their last audit.
+     * Only songs that have actually been scanned AND have errors are included
+     * (null validation_errors = unscanned or clean).
+     */
+    @Query("SELECT * FROM songs WHERE validation_errors IS NOT NULL ORDER BY title ASC")
+    fun getInvalidSongs(): Flow<List<SongEntity>>
 
     /**
      * Get songs in a specific set ordered by their position within the set.

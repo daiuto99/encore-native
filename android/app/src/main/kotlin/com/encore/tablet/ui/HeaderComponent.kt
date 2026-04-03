@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -16,7 +17,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material.icons.outlined.NightsStay
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.WbSunny
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -37,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.encore.core.data.auth.AuthState
+import com.encore.core.ui.theme.LocalEncoreColors
 import com.encore.tablet.R
 
 /**
@@ -45,7 +49,6 @@ import com.encore.tablet.R
  * Left  — Encore logo + version badge
  * Right — Import | SAVE SET | LOAD SET | PERFORM | Settings | UserAvatar
  *
- * PERFORM / SAVE SET / LOAD SET are no-op placeholders for Phase 4.3.5.
  * Import triggers the SAF file picker via [onImportClick].
  */
 @Composable
@@ -54,12 +57,18 @@ fun EncoreHeader(
     showAccountDropdown: Boolean,
     connectedFolderUri: String?,
     onImportClick: () -> Unit,
+    onPerformClick: () -> Unit,
+    onSaveSetClick: () -> Unit,
+    onLoadSetClick: () -> Unit,
     onRefreshClick: () -> Unit,
+    onToggleDarkMode: () -> Unit,
     onShowDropdown: () -> Unit,
     onDropdownDismiss: () -> Unit,
     onSignOut: () -> Unit,
-    onProfileSheetRequest: () -> Unit
+    onProfileSheetRequest: () -> Unit,
+    onSettingsClick: () -> Unit = {}
 ) {
+    val encoreColors = LocalEncoreColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -78,7 +87,7 @@ fun EncoreHeader(
             text = "v1.0.2",
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Light,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+            color = encoreColors.subtleText
         )
 
         Spacer(modifier = Modifier.weight(1f))
@@ -89,7 +98,7 @@ fun EncoreHeader(
                 Icon(
                     imageVector = Icons.Outlined.Refresh,
                     contentDescription = "Refresh library",
-                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    tint = encoreColors.iconTint
                 )
             }
         }
@@ -99,37 +108,37 @@ fun EncoreHeader(
             Icon(
                 imageVector = Icons.Default.Upload,
                 contentDescription = "Import songs",
-                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                tint = encoreColors.iconTint
             )
         }
 
         // ── SAVE SET ─────────────────────────────────────────────────────────
-        TextButton(onClick = {}) {
+        TextButton(onClick = onSaveSetClick) {
             Text(
                 text = "SAVE SET",
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Medium,
                 letterSpacing = 1.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                color = encoreColors.iconTint
             )
         }
 
         // ── LOAD SET ─────────────────────────────────────────────────────────
-        TextButton(onClick = {}) {
+        TextButton(onClick = onLoadSetClick) {
             Text(
                 text = "LOAD SET",
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Medium,
                 letterSpacing = 1.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                color = encoreColors.iconTint
             )
         }
 
-        Spacer(modifier = Modifier.width(4.dp))
+        Spacer(modifier = Modifier.width(8.dp))
 
         // ── PERFORM ──────────────────────────────────────────────────────────
         Button(
-            onClick = {},
+            onClick = onPerformClick,
             shape = RoundedCornerShape(50),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary,
@@ -144,14 +153,31 @@ fun EncoreHeader(
             )
         }
 
-        Spacer(modifier = Modifier.width(4.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+
+        // ── Dark Mode Toggle ─────────────────────────────────────────────────
+        IconButton(
+            onClick = onToggleDarkMode,
+            modifier = Modifier.size(60.dp)
+        ) {
+            Icon(
+                imageVector = if (encoreColors.isDark) Icons.Outlined.WbSunny else Icons.Outlined.NightsStay,
+                contentDescription = if (encoreColors.isDark) "Switch to light mode" else "Switch to dark mode",
+                tint = encoreColors.iconTint,
+                modifier = Modifier.size(24.dp)
+            )
+        }
 
         // ── Settings ─────────────────────────────────────────────────────────
-        IconButton(onClick = {}) {
+        IconButton(
+            onClick = onSettingsClick,
+            modifier = Modifier.size(60.dp)
+        ) {
             Icon(
                 imageVector = Icons.Default.Settings,
                 contentDescription = "Settings",
-                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                tint = encoreColors.iconTint,
+                modifier = Modifier.size(24.dp)
             )
         }
 
@@ -163,12 +189,13 @@ fun EncoreHeader(
                         is AuthState.Authenticated -> onShowDropdown()
                         else -> onProfileSheetRequest()
                     }
-                }
+                },
+                modifier = Modifier.size(60.dp)
             ) {
                 Box(
                     modifier = Modifier.border(
                         width = 1.dp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
+                        color = encoreColors.divider,
                         shape = CircleShape
                     ),
                     contentAlignment = Alignment.Center

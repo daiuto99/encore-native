@@ -87,5 +87,12 @@ data class SongEntity(
     val isHarmonyMode: Boolean = false, // Harmony mode viewer toggle
 
     @ColumnInfo(name = "highlight_style")
-    val highlightStyle: Int = 0 // 0 = None, 1 = Chords Bold, 2 = Lyrics Faded
+    val highlightStyle: Int = 0, // 0 = None, 1 = Chords Bold, 2 = Lyrics Faded
+
+    // ── Sync hash fields (Milestone 4 sync engine) ────────────────────────────
+    @ColumnInfo(name = "last_synced_hash")
+    val lastSyncedHash: String? = null, // MD5 of markdownBody at last successful sync; null = never synced
+
+    @ColumnInfo(name = "is_dirty")
+    val isDirty: Boolean = false // true when local edits haven't been pushed to server
 )

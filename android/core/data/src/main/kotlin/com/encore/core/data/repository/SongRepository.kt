@@ -2,6 +2,9 @@ package com.encore.core.data.repository
 
 import com.encore.core.data.dao.SongDao
 import com.encore.core.data.entities.SongEntity
+import com.encore.core.data.sync.ContentSyncStatus
+import com.encore.core.data.sync.EncoreApiService
+import com.encore.core.data.sync.FileHashUtils
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -131,6 +134,33 @@ interface SongRepository {
      * Only includes songs that have been scanned and failed.
      */
     fun getInvalidSongs(): Flow<List<SongEntity>>
+
+    /**
+     * Compare local markdownBody hash against the server-side hash to determine
+     * whether a sync action is needed.
+     *
+     * Decision table:
+     *  - lastSyncedHash == null                                   → [ContentSyncStatus.NeverSynced]
+     *  - remoteHash == null (server echo for SYNCED fake)         → [ContentSyncStatus.UpToDate]
+     *  - !isDirty && remoteHash != lastSyncedHash                 → [ContentSyncStatus.RemoteAhead]
+     *  - isDirty && remoteHash == lastSyncedHash                  → [ContentSyncStatus.LocalAhead]
+     *  - isDirty && remoteHash != lastSyncedHash                  → [ContentSyncStatus.Conflict]
+     *  - otherwise                                                → [ContentSyncStatus.UpToDate]
+     *
+     * Always runs on [kotlinx.coroutines.Dispatchers.IO] internally via [FileHashUtils].
+     *
+     * @param songId     UUID of the song to check
+     * @param apiService [EncoreApiService] implementation (real Ktor or [FakeSyncProvider])
+     */
+    suspend fun checkSyncStatus(songId: String, apiService: EncoreApiService): ContentSyncStatus
+
+    /**
+     * Mark a sync as successful by writing the current content hash into [lastSyncedHash]
+     * and clearing [isDirty].
+     *
+     * @param songId UUID of the song that was just synced
+     */
+    suspend fun markSynced(songId: String)
 }
 
 /**
@@ -234,4 +264,40 @@ class SongRepositoryImpl(
     ) = songDao.updateValidation(id, isVerified, errors, timestamp)
 
     override fun getInvalidSongs(): Flow<List<SongEntity>> = songDao.getInvalidSongs()
+
+    override suspend fun checkSyncStatus(songId: String, apiService: EncoreApiService): ContentSyncStatus {
+        val song = songDao.getById(songId) ?: return ContentSyncStatus.NeverSynced
+        if (song.lastSyncedHash == null) return ContentSyncStatus.NeverSynced
+
+        val remote = apiService.getRemoteHash(songId)
+        val remoteHash = remote.remoteHash
+            ?: return ContentSyncStatus.UpToDate // FakeSyncProvider.SYNCED path
+
+        return when {
+            !song.isDirty && remoteHash != song.lastSyncedHash ->
+                ContentSyncStatus.RemoteAhead(remoteHash)
+
+            song.isDirty && remoteHash == song.lastSyncedHash ->
+                ContentSyncStatus.LocalAhead
+
+            song.isDirty && remoteHash != song.lastSyncedHash -> {
+                val localHash = FileHashUtils.hashMarkdownBody(song.markdownBody)
+                ContentSyncStatus.Conflict(localHash, remoteHash)
+            }
+
+            else -> ContentSyncStatus.UpToDate
+        }
+    }
+
+    override suspend fun markSynced(songId: String) {
+        val song = songDao.getById(songId) ?: return
+        val hash = FileHashUtils.hashMarkdownBody(song.markdownBody)
+        songDao.update(
+            song.copy(
+                lastSyncedHash = hash,
+                isDirty = false,
+                lastSyncedAt = System.currentTimeMillis()
+            )
+        )
+    }
 }

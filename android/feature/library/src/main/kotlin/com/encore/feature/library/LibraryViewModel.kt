@@ -620,6 +620,7 @@ class LibraryViewModel(
             val updatedBody = if (clearHarmonies)
                 existing.markdownBody.replace(Regex("""\[/?h\]"""), "")
             else existing.markdownBody
+            val bodyChanged = updatedBody != existing.markdownBody
             songRepository.upsertSong(
                 existing.copy(
                     title = title,
@@ -627,7 +628,8 @@ class LibraryViewModel(
                     isLeadGuitar = isLeadGuitar,
                     isHarmonyMode = isHarmonyMode,
                     lastZoomLevel = if (resetZoom) 1.0f else existing.lastZoomLevel,
-                    markdownBody = updatedBody
+                    markdownBody = updatedBody,
+                    isDirty = existing.isDirty || bodyChanged
                 )
             )
         }
@@ -638,13 +640,13 @@ class LibraryViewModel(
         emit(songRepository.getSongById(songId))
     }
 
-    /** Persist edited markdown body to DB. */
+    /** Persist edited markdown body to DB. Always marks isDirty = true. */
     fun updateMarkdownBody(songId: String, body: String) {
         viewModelScope.launch {
             val existing = songRepository.getSongById(songId) ?: return@launch
             val now = System.currentTimeMillis()
             songRepository.upsertSong(
-                existing.copy(markdownBody = body, updatedAt = now, localUpdatedAt = now)
+                existing.copy(markdownBody = body, updatedAt = now, localUpdatedAt = now, isDirty = true)
             )
         }
     }

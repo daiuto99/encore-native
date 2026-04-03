@@ -38,7 +38,7 @@ import java.util.UUID
         SetEntity::class,
         SetEntryEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = true
 )
 @TypeConverters(EncoreTypeConverters::class)
@@ -172,6 +172,18 @@ abstract class EncoreDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration from version 6 to 7: Add sync hash fields for Milestone 4 sync engine.
+         * - last_synced_hash: MD5 of markdownBody at last successful sync (null = never synced)
+         * - is_dirty: 1 when local edits haven't been pushed to server (default 0)
+         */
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE songs ADD COLUMN last_synced_hash TEXT")
+                database.execSQL("ALTER TABLE songs ADD COLUMN is_dirty INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /**
          * Get singleton database instance.
          *
          * @param context Application context
@@ -184,7 +196,7 @@ abstract class EncoreDatabase : RoomDatabase() {
                     EncoreDatabase::class.java,
                     DATABASE_NAME
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                     .fallbackToDestructiveMigration()
                     .addCallback(DatabaseCallback(context.applicationContext))
                     .build()

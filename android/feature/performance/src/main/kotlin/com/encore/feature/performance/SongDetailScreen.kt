@@ -818,6 +818,7 @@ private fun PerformanceContextBar(
     saveSuccess: String?,
     onPrevClick: () -> Unit,
     onNextClick: () -> Unit,
+    syncHudState: com.encore.core.data.sync.SyncHudState? = null,
     modifier: Modifier = Modifier
 ) {
     val encoreColors = LocalEncoreColors.current
@@ -945,7 +946,7 @@ private fun PerformanceContextBar(
                     }
                 }
 
-                // ── Divider + Clock (aligns under Control Pill) ──────────────
+                // ── Divider + Clock / Sync HUD (aligns under Control Pill) ──
                 Spacer(modifier = Modifier.width(10.dp))
                 Box(
                     modifier = Modifier
@@ -954,15 +955,49 @@ private fun PerformanceContextBar(
                         .background(encoreColors.divider)
                 )
                 Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = currentTime,
-                    color = encoreColors.titleText.copy(alpha = 0.55f),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    fontFamily = FontFamily.Monospace,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.width(76.dp)
-                )
+                when (val hud = syncHudState) {
+                    is com.encore.core.data.sync.SyncHudState.InProgress -> {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.width(96.dp)
+                        ) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 2.dp,
+                                color = encoreColors.titleText.copy(alpha = 0.55f)
+                            )
+                            Text(
+                                text = "${hud.current}/${hud.total}",
+                                color = encoreColors.titleText.copy(alpha = 0.55f),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                    is com.encore.core.data.sync.SyncHudState.Complete -> {
+                        Text(
+                            text = "✓ Synced",
+                            color = Color(0xFF4CAF50),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.width(76.dp)
+                        )
+                    }
+                    null -> {
+                        Text(
+                            text = currentTime,
+                            color = encoreColors.titleText.copy(alpha = 0.55f),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontFamily = FontFamily.Monospace,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.width(76.dp)
+                        )
+                    }
+                }
             }
         }
     }

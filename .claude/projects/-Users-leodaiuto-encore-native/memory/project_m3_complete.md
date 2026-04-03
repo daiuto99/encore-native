@@ -1,47 +1,46 @@
 ---
-name: Project State — Setlist Engine & Performance Mode
-description: Current state after Phase 4 + Web Export/Import — setlist JSON bridge to web companion complete
+name: Project State — Setlist Engine, Performance Mode & Zen UI
+description: Current state after M4 UI polish — Zen UI refinement, harmony highlights, song edit actions all complete; next is M5 Ktor sync
 type: project
 ---
 
-Phase 4 Horizontal Setlist Engine is complete. Performance Dashboard and Performance Context Bar are both complete.
+All M4 UI work is complete. The app defaults to Light Mode. Performance screens are production-ready.
 
-**Performance Context Bar (floating card, below dashboard, SongDetailScreen.kt):**
-- `PerformanceContextBar` composable: 44dp height, `Surface(RoundedCornerShape(12dp))`, same border/card style as dashboard
-- Layout: ← prev pill | set name (SetColor) | next pill → | 1dp divider | HH:MM:SS live clock (76dp fixed width)
-- Pills show truncated title or "..." at first/last song; clicking animates pagerState
-- Hidden when `setName` is empty (single-song / no-set mode)
-- Song content scroll top padding: `144dp` (was 84dp)
+**Zen UI Refinements (this session):**
+- Light Mode is now the default (`MainScreen.kt` `isDarkMode = false`)
+- Section card interiors use `encoreColors.cardBackground` (white/dark) — only left accent bar + heading text carry section colour
+- Performance Context Bar: 52dp height, `"Set N — Name"` label, 12dp pill radii, 13sp fonts, equal `weight(1f)` on each nav pill for centred set name, `.copy(alpha=0.98f)` on both card surfaces
+- Control Pill: `RoundedCornerShape(12.dp)` (was 50)
+- Scroll top padding: 152dp
 
-**ViewModel additions for Context Bar (SongDetailViewModel.kt):**
-- `setName: StateFlow<String>` — from `setlistRepository.getSetlistWithSets()?.setlist?.name`, fallback `"Set $N"`
-- `prevSong: StateFlow<SongEntity?>` and `nextSong: StateFlow<SongEntity?>` — set in `loadSong()` and `onPageChanged()`
-- Set color: `SetColor.getSetColor(setNumber)` — no DB change; `SetlistEntity` has no color field
+**Harmony rendering:**
+- No underlines anywhere — `TextDecoration.Underline` fully removed
+- Harmony lines: `background = harmonyColor.copy(alpha = 0.18f)`
+- Inline `[h]text[/h]` spans: `background = harmonyColor.copy(alpha = 0.22f)`
+- Colour sourced from `AppPreferences` dark/light harmony color
 
-**Performance Dashboard (floating card, above context bar, SongDetailScreen.kt):**
-- `PerformanceDashboard` composable: `Surface(RoundedCornerShape(12dp))`, 68dp height, 8dp float inset, 1dp border
-- Layout: Key Anchor | Identity (weight 1f) | Status Pill (guitar pick + BPM) | 12dp spacer | 1dp divider | 12dp spacer | Control Pill (☀ ✏ ✕)
-- Guitar pick icon: `feature/performance/src/main/res/drawable/ic_guitar_pick.xml`
-- Private parsers: `parseBpm()`, `splitKey()`, `stripLeadingTitle()`
+**Song Edit Sheet additions (LibraryScreen.kt + LibraryViewModel.kt):**
+- Zoom Reset button (arms blue) → `lastZoomLevel = 1.0f` on Save
+- Clear Harmonies button (arms red) → strips `[h]`/`[/h]` tags from `markdownBody` on Save
+- `onSave` lambda: 6 params — title, artist, isLeadGuitar, isHarmonyMode, resetZoom, clearHarmonies
+- Both call sites updated: `LibraryScreen.kt` and `MainScreen.kt`
+
+**Performance Context Bar (SongDetailScreen.kt):**
+- `PerformanceContextBar` composable: 52dp, `"Set N — Name"` dynamic label in SetColor pastel
+- Prev/next pills: `RoundedCornerShape(12.dp)`, 13sp, 14dp horizontal padding, `weight(1f)` symmetry
+- Clock: `FontFamily.Monospace`, `Modifier.width(76.dp)` fixed — no layout jitter on second ticks
+
+**Performance Dashboard (SongDetailScreen.kt):**
+- 68dp floating card, `RoundedCornerShape(12.dp)`, 0.98f alpha
+- Control Pill: `RoundedCornerShape(12.dp)`, 60dp IconButtons
+
+**Section Cards (SongDetailScreen.kt — SongContent):**
+- `drawBehind` for background + 4dp accent bar (immune to zoom clipping)
+- Background: `encoreColors.cardBackground`; bar: `sectionColor.copy(alpha=0.38f)`
 
 **Phase 4 Setlist Engine:**
-- '+' button in library stages directly to Set 1 DB via `addToPerformSet(songId)`
-- SAVE SET / LOAD SET wired in header → dialogs in MainScreen.kt
-- HorizontalPager nav with "Page X of Y" fade indicator (2s auto-hide)
+- HorizontalPager, SAVE/LOAD SET, `pagerResetTrigger` on load, export/import `.encore.json`
 
-**Section Cards (SongDetailScreen.kt — SongContent composable):**
-- Each section (Intro/Verse/Chorus etc.) wrapped in a subtle card: 4dp left accent bar + 7% tinted background, `RoundedCornerShape(8dp)`
-- Grouping via `remember(sections)` pass before rendering; `SectionBodyLines` extracted as private `@Composable`
-- Tune: bar alpha `0.38f`, background alpha `0.07f`, gap `vp.sectionTopPaddingDp` (20dp default)
-- `IntrinsicSize.Min` on the card Row makes the accent bar stretch full card height
+**Why:** Aligning with Encore Desktop Manager aesthetic — maximum scannability for live performance.
 
-**Set Export/Import (Web Companion Bridge — LibraryViewModel + MainScreen):**
-- `exportSetlistToUri(context, setlistId, outputUri)` — serializes to `.encore.json` via SAF CreateDocument
-- `importSetFromJson(context, uri)` — parses JSON, deduplicates by LOWER(title+artist), creates new setlist
-- Export UI: share icon per row in Load Set dialog; Import UI: "Import Set (.json)" in Import modal
-- Dedup rule: existing songs reused as-is (markdownBody NOT overwritten); new songs created in library
-- Full spec: `docs/api/set-export-format.md`; decision: `docs/decisions/004-set-export-import-format.md`
-
-**Why:** Web companion needs to push setlists to Android without a backend. JSON file exchange via SAF bridges the gap until Ktor sync is built.
-
-**How to apply:** Both floating cards, section cards, and set export/import are done. Next session start from M4_ACTIVE_CONTEXT.md for remaining M4 sync work (Ktor, conflict resolution, etc.).
+**How to apply:** M4 UI phase is fully complete. Next milestone is M5 Ktor sync. Start from M4_ACTIVE_CONTEXT.md for remaining sync work.

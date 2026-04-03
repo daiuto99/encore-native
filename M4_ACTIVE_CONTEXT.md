@@ -207,20 +207,58 @@ All interactive icon buttons standardised to **60dp** hit targets across all thr
 
 ---
 
+## Zen UI Visual & Logic Refinement — COMPLETE
+
+### What was built
+- **Light Mode default:** `MainScreen.kt` — `isDarkMode` initialised to `false`.
+- **Section card interior:** `bgColor` changed from `sectionColor.copy(alpha=0.07f)` → `encoreColors.cardBackground` (white in light / dark in dark). Only the 4dp left accent bar and heading text carry the section colour.
+- **Performance Context Bar** rework:
+  - Height: 44dp → **52dp**
+  - Set identity label: `"Set $setNumber — $setName"` (dynamic, coloured via `SetColor.getSetColor`)
+  - Nav pill corner radius: `RoundedCornerShape(50)` → `RoundedCornerShape(12.dp)`
+  - Nav pill font: 11sp → 13sp; horizontal padding: 10dp → 14dp
+  - Pill symmetry: each pill wrapped in `Box(Modifier.weight(1f))` — set name stays perfectly centred regardless of title lengths
+  - Clock stays `FontFamily.Monospace` in a `Modifier.width(76.dp)` fixed container
+- **Control Pill corner radius:** `RoundedCornerShape(50)` → `RoundedCornerShape(12.dp)`
+- **Card translucency:** both `PerformanceDashboard` and `PerformanceContextBar` Surface colours use `.copy(alpha = 0.98f)` so content scrolls cleanly behind them
+- **Scroll top padding:** updated 144dp → **152dp** to clear the taller context bar
+
+### Harmony rendering
+- All `TextDecoration.Underline` removed from harmony lines and `[h]...[/h]` inline spans
+- Harmony lines (`isHarmonyLine=true`): `background = harmonyColor.copy(alpha = 0.18f)` applied to full line
+- Inline `[h]text[/h]` spans: `background = harmonyColor.copy(alpha = 0.22f)` on the span only
+- Both use `harmonyColor` from `AppPreferences` (dark/light display settings)
+
+---
+
+## Song Edit Sheet — Zoom Reset + Clear Harmonies — COMPLETE
+
+### What was built
+- **`SongEditBottomSheet`** (in `feature/library/LibraryScreen.kt`): two toggle buttons between the Harmony Mode switch and Save.
+  - **Zoom Reset** (blue arm colour) — when armed + Save: sets `lastZoomLevel = 1.0f` on the entity.
+  - **Clear Harmonies** (red arm colour) — when armed + Save: strips all `[h]`/`[/h]` tags from `markdownBody` via `Regex("""\[/?h\]""")`, keeping inner text.
+  - Both default unarmed; reset to unarmed when sheet opens for a different song.
+- **`LibraryViewModel.updateSongMetadata`** extended with `resetZoom: Boolean` and `clearHarmonies: Boolean`; both applied in a single `upsertSong` call (no race condition).
+- `onSave` lambda signature expanded at both call sites (`LibraryScreen.kt` and `MainScreen.kt`).
+
+---
+
 ## Known Facts for Next Session
 - **DataStore files:** `user_prefs` (auth), `app_prefs` (visual prefs). Do not mix.
 - **DB version:** 5
 - **`SetlistDetailScreen.kt`** — do not touch (user does not use it)
-- **`SongEditBottomSheet`** is in `feature/library`, imported by `app` module
+- **`SongEditBottomSheet`** is in `feature/library`, imported by `app` module. `onSave` now has 6 params: title, artist, isLeadGuitar, isHarmonyMode, resetZoom, clearHarmonies.
 - **`SongChartEditorScreen`** in `feature/library` → `Routes.SONG_CHART_EDITOR = "chart_editor/{songId}"`
 - **Build filter:** `./gradlew assembleDebug 2>&1 | grep -E "FAILED|error:|BUILD SUCCESSFUL"`
 - **ADB path:** `~/Library/Android/sdk/platform-tools/adb`
 - **Settings entry point:** Gear icon in `EncoreHeader` → `Routes.SETTINGS = "settings"` composable in `MainScreen.kt` NavHost
-- **Performance card scroll padding:** currently `144dp` in `SongDetailScreen.kt` (dashboard 84dp + context bar 52dp + gap 8dp)
+- **Performance card scroll padding:** currently `152dp` in `SongDetailScreen.kt` (8dp + 68dp dashboard + 8dp + 52dp context bar + 8dp gap)
+- **Light mode is now the default** — `MainScreen.kt:126` `mutableStateOf(false)`
 - **Icon sizes:** all `IconButton` = 60dp hit target, icon visual = 20-24dp
 - **Guitar pick icon:** `feature/performance/src/main/res/drawable/ic_guitar_pick.xml`
+- **Harmony highlight:** `SpanStyle(background = harmonyColor.copy(alpha))` — no underline anywhere
 
-## Remaining M4 Sync Work (after UI polish)
+## Remaining M4 Sync Work
 - Single active device session policy
 - Wire `SyncStatus` to real Ktor API calls
 - Manual **Sync Now** action

@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Menu
@@ -46,6 +47,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -550,8 +552,8 @@ fun SongListItem(
     if (showEditSheet) {
         SongEditBottomSheet(
             song = song,
-            onSave = { title, artist, isLeadGuitar, harmonyMode ->
-                viewModel.updateSongMetadata(song.id, title, artist, isLeadGuitar, harmonyMode)
+            onSave = { title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies ->
+                viewModel.updateSongMetadata(song.id, title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies)
                 showEditSheet = false
             },
             onDismiss = { showEditSheet = false },
@@ -819,7 +821,7 @@ fun EmptyLibraryMessage(
 @Composable
 fun SongEditBottomSheet(
     song: com.encore.core.data.entities.SongEntity,
-    onSave: (title: String, artist: String, isLeadGuitar: Boolean, isHarmonyMode: Boolean) -> Unit,
+    onSave: (title: String, artist: String, isLeadGuitar: Boolean, isHarmonyMode: Boolean, resetZoom: Boolean, clearHarmonies: Boolean) -> Unit,
     onDismiss: () -> Unit,
     onEditChart: (() -> Unit)? = null
 ) {
@@ -829,6 +831,8 @@ fun SongEditBottomSheet(
     var artist by remember(song.id) { mutableStateOf(if (song.artist == "Unknown Artist") "" else song.artist) }
     var leadGuitar by remember(song.id) { mutableStateOf(song.isLeadGuitar) }
     var harmonyMode by remember(song.id) { mutableStateOf(song.isHarmonyMode) }
+    var resetZoom by remember(song.id) { mutableStateOf(false) }
+    var clearHarmonies by remember(song.id) { mutableStateOf(false) }
 
     val fieldColors = OutlinedTextFieldDefaults.colors(
         focusedTextColor = encoreColors.titleText,
@@ -961,6 +965,42 @@ fun SongEditBottomSheet(
                     onCheckedChange = { harmonyMode = it }
                 )
             }
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // ── Action buttons: Zoom Reset + Clear Harmonies ──────────────────
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                val activeBlue = Color(0xFF007AFF)
+                val activeRed  = Color(0xFFFF3B30)
+                OutlinedButton(
+                    onClick = { resetZoom = !resetZoom },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (resetZoom) activeBlue.copy(alpha = 0.10f) else Color.Transparent,
+                        contentColor   = if (resetZoom) activeBlue else encoreColors.artistText
+                    ),
+                    border = BorderStroke(1.dp, if (resetZoom) activeBlue else encoreColors.divider)
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Zoom Reset")
+                }
+                OutlinedButton(
+                    onClick = { clearHarmonies = !clearHarmonies },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (clearHarmonies) activeRed.copy(alpha = 0.10f) else Color.Transparent,
+                        contentColor   = if (clearHarmonies) activeRed else encoreColors.artistText
+                    ),
+                    border = BorderStroke(1.dp, if (clearHarmonies) activeRed else encoreColors.divider)
+                ) {
+                    Icon(Icons.Default.Clear, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Clear Harmonies")
+                }
+            }
             Spacer(modifier = Modifier.height(24.dp))
 
             androidx.compose.material3.Button(
@@ -969,7 +1009,9 @@ fun SongEditBottomSheet(
                         title.trim().ifBlank { song.title },
                         artist.trim().ifBlank { "Unknown Artist" },
                         leadGuitar,
-                        harmonyMode
+                        harmonyMode,
+                        resetZoom,
+                        clearHarmonies
                     )
                 },
                 shape = RoundedCornerShape(50),

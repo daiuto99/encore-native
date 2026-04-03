@@ -611,16 +611,23 @@ class LibraryViewModel(
         title: String,
         artist: String,
         isLeadGuitar: Boolean = false,
-        isHarmonyMode: Boolean = false
+        isHarmonyMode: Boolean = false,
+        resetZoom: Boolean = false,
+        clearHarmonies: Boolean = false
     ) {
         viewModelScope.launch {
             val existing = songRepository.getSongById(songId) ?: return@launch
+            val updatedBody = if (clearHarmonies)
+                existing.markdownBody.replace(Regex("""\[/?h\]"""), "")
+            else existing.markdownBody
             songRepository.upsertSong(
                 existing.copy(
                     title = title,
                     artist = artist,
                     isLeadGuitar = isLeadGuitar,
-                    isHarmonyMode = isHarmonyMode
+                    isHarmonyMode = isHarmonyMode,
+                    lastZoomLevel = if (resetZoom) 1.0f else existing.lastZoomLevel,
+                    markdownBody = updatedBody
                 )
             )
         }

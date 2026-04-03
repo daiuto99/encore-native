@@ -123,7 +123,7 @@ fun MainScreen(
     val appPrefsViewModel: AppPreferencesViewModel = viewModel(factory = viewModelFactory)
     val auditViewModel: LibraryAuditViewModel = viewModel(factory = viewModelFactory)
     val appPreferences by appPrefsViewModel.preferences.collectAsState()
-    var isDarkMode by remember { mutableStateOf(true) }
+    var isDarkMode by remember { mutableStateOf(false) }
     var editSong by remember { mutableStateOf<SongEntity?>(null) }
     val encoreColors = if (isDarkMode) DarkEncoreColors else LightEncoreColors
 
@@ -131,8 +131,8 @@ fun MainScreen(
     editSong?.let { song ->
         SongEditBottomSheet(
             song = song,
-            onSave = { title, artist, isLeadGuitar, harmonyMode ->
-                libraryViewModel.updateSongMetadata(song.id, title, artist, isLeadGuitar, harmonyMode)
+            onSave = { title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies ->
+                libraryViewModel.updateSongMetadata(song.id, title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies)
                 editSong = null
             },
             onDismiss = { editSong = null },

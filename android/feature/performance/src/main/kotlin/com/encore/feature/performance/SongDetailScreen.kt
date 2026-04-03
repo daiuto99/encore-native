@@ -83,7 +83,6 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.TextUnit
@@ -397,6 +396,7 @@ fun SongDetailScreen(
                 if (setName.isNotEmpty()) {
                     PerformanceContextBar(
                         setName = setName,
+                        setNumber = setNumber,
                         setColor = SetColor.getSetColor(setNumber),
                         prevSong = prevSong,
                         nextSong = nextSong,
@@ -612,8 +612,8 @@ fun SongContent(
                 }
             }
             .verticalScroll(scrollState)
-            // top padding clears the floating card: 8dp inset + 68dp card + 8dp gap = 84dp
-            .padding(start = 24.dp, end = 24.dp, bottom = 24.dp, top = 144.dp)
+            // top padding clears the floating cards: 8dp + 68dp dashboard + 8dp + 52dp context bar + 8dp gap = 144dp → 152dp
+            .padding(start = 24.dp, end = 24.dp, bottom = 24.dp, top = 152.dp)
     ) {
         // Hoist per-song color lookups out of the render loop
         val lyricColor = parseColorSafe(
@@ -672,7 +672,7 @@ fun SongContent(
                         2    -> vp.h2FontSizeSp
                         else -> vp.hnFontSizeSp
                     }
-                val bgColor    = sectionColor.copy(alpha = 0.07f)
+                val bgColor    = encoreColors.cardBackground
                 val barColor   = sectionColor.copy(alpha = 0.38f)
                 val barWidthPx = 4f  // dp — converted in drawBehind via density
                 Column(
@@ -811,6 +811,7 @@ private fun SectionBodyLines(
 @Composable
 private fun PerformanceContextBar(
     setName: String,
+    setNumber: Int,
     setColor: Color,
     prevSong: SongEntity?,
     nextSong: SongEntity?,
@@ -837,61 +838,64 @@ private fun PerformanceContextBar(
     Box(modifier = modifier.padding(start = 8.dp, end = 8.dp, top = 0.dp, bottom = 8.dp)) {
         Surface(
             shape = RoundedCornerShape(12.dp),
-            color = encoreColors.cardBackground,
+            color = encoreColors.cardBackground.copy(alpha = 0.98f),
             shadowElevation = encoreColors.cardElevation,
             tonalElevation = 0.dp,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(44.dp)
+                .height(52.dp)
                 .border(1.dp, encoreColors.divider, RoundedCornerShape(12.dp))
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 10.dp),
+                    .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // ── Prev Song pill ───────────────────────────────────────────
-                if (prevSong != null) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(encoreColors.titleText.copy(alpha = 0.07f))
-                            .clickable(onClick = onPrevClick)
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ChevronLeft,
-                            contentDescription = "Previous song",
-                            tint = encoreColors.titleText.copy(alpha = 0.65f),
-                            modifier = Modifier.size(14.dp)
-                        )
+                // ── Prev Song pill (weight=1f for symmetry) ──────────────────
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    if (prevSong != null) {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(encoreColors.titleText.copy(alpha = 0.07f))
+                                .clickable(onClick = onPrevClick)
+                                .padding(horizontal = 14.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ChevronLeft,
+                                contentDescription = "Previous song",
+                                tint = encoreColors.titleText.copy(alpha = 0.65f),
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = prevSong.title,
+                                color = encoreColors.titleText.copy(alpha = 0.65f),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    } else {
                         Text(
-                            text = prevSong.title,
-                            color = encoreColors.titleText.copy(alpha = 0.65f),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 150.dp)
+                            text = "...",
+                            color = encoreColors.titleText.copy(alpha = 0.22f),
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(horizontal = 14.dp)
                         )
                     }
-                } else {
-                    Text(
-                        text = "...",
-                        color = encoreColors.titleText.copy(alpha = 0.22f),
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(horizontal = 10.dp)
-                    )
                 }
 
-                Spacer(modifier = Modifier.width(8.dp))
-
-                // ── Set Name / Save feedback (centre) ────────────────────────
+                // ── Set Name / Save feedback (centre, weight=1f) ─────────────
+                val setLabel = if (setNumber > 0) "Set $setNumber — $setName" else setName
                 Text(
-                    text = saveSuccess ?: setName,
+                    text = saveSuccess ?: setLabel,
                     color = if (saveSuccess != null) Color(0xFF4CAF50) else setColor,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
@@ -901,42 +905,44 @@ private fun PerformanceContextBar(
                     modifier = Modifier.weight(1f)
                 )
 
-                Spacer(modifier = Modifier.width(8.dp))
-
-                // ── Next Song pill ───────────────────────────────────────────
-                if (nextSong != null) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(encoreColors.titleText.copy(alpha = 0.07f))
-                            .clickable(onClick = onNextClick)
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
+                // ── Next Song pill (weight=1f for symmetry) ──────────────────
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
+                    if (nextSong != null) {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(encoreColors.titleText.copy(alpha = 0.07f))
+                                .clickable(onClick = onNextClick)
+                                .padding(horizontal = 14.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = nextSong.title,
+                                color = encoreColors.titleText.copy(alpha = 0.65f),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = "Next song",
+                                tint = encoreColors.titleText.copy(alpha = 0.65f),
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    } else {
                         Text(
-                            text = nextSong.title,
-                            color = encoreColors.titleText.copy(alpha = 0.65f),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 150.dp)
-                        )
-                        Icon(
-                            imageVector = Icons.Default.ChevronRight,
-                            contentDescription = "Next song",
-                            tint = encoreColors.titleText.copy(alpha = 0.65f),
-                            modifier = Modifier.size(14.dp)
+                            text = "...",
+                            color = encoreColors.titleText.copy(alpha = 0.22f),
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(horizontal = 14.dp)
                         )
                     }
-                } else {
-                    Text(
-                        text = "...",
-                        color = encoreColors.titleText.copy(alpha = 0.22f),
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(horizontal = 10.dp)
-                    )
                 }
 
                 // ── Divider + Clock (aligns under Control Pill) ──────────────
@@ -1002,7 +1008,7 @@ private fun PerformanceDashboard(
     ) {
         Surface(
             shape = RoundedCornerShape(12.dp),
-            color = encoreColors.cardBackground,
+            color = encoreColors.cardBackground.copy(alpha = 0.98f),
             shadowElevation = encoreColors.cardElevation,
             tonalElevation = 0.dp,
             modifier = Modifier
@@ -1143,7 +1149,7 @@ private fun PerformanceDashboard(
                 // ── Control Pill: ☀ ✎ ✕ ────────────────────────────────────
                 Spacer(modifier = Modifier.width(12.dp))
                 Surface(
-                    shape = RoundedCornerShape(50),
+                    shape = RoundedCornerShape(12.dp),
                     color = encoreColors.titleText.copy(alpha = 0.06f),
                     tonalElevation = 0.dp
                 ) {
@@ -1565,7 +1571,7 @@ private val DEFAULT_CHORD_COLOR = Color(0xFF3B82F6) // Blue
  * - Strips Markdown bold (`**`) markers.
  * - `` `[Chord]` `` segments → [chordColor] (brackets visible, backticks stripped).
  * - Legacy bare chord lines → entire line in [chordColor].
- * - `[h]Text[/h]` → Bold + [harmonyColor] + Underline (harmony annotation; always rendered).
+ * - `[h]Text[/h]` → Bold + [harmonyColor] text + background highlight (harmony annotation).
  * - `*(text)*` → subtle grey italic (technical/director note).
  * - Lyric text → [lyricColor].
  */
@@ -1578,6 +1584,7 @@ private fun buildChordLine(
 ): AnnotatedString {
     val effectiveChordColor = chordColor ?: DEFAULT_CHORD_COLOR
     val effectiveLyricColor = if (isHarmonyLine) harmonyColor else lyricColor
+    val harmonyBg = if (isHarmonyLine) harmonyColor.copy(alpha = 0.18f) else Color.Unspecified
 
     // Strip markdown bold markers so `**Key:**` lines don't show asterisks
     val line = rawLine.replace("**", "")
@@ -1601,14 +1608,14 @@ private fun buildChordLine(
         spans += BodySpan(it.range, SpanType.TECH_NOTE, it.groupValues[1])
     }
 
-    // If no special spans, plain lyric line (harmony style applied if in block)
+    // If no special spans, plain lyric line (harmony highlight applied if in block)
     if (spans.isEmpty()) {
         return buildAnnotatedString {
             withStyle(
                 SpanStyle(
                     color = effectiveLyricColor,
-                    fontWeight = if (isHarmonyLine) FontWeight.Bold else null,
-                    textDecoration = if (isHarmonyLine) TextDecoration.Underline else null
+                    background = harmonyBg,
+                    fontWeight = if (isHarmonyLine) FontWeight.Bold else null
                 )
             ) { append(line) }
         }
@@ -1624,8 +1631,8 @@ private fun buildChordLine(
                 withStyle(
                     SpanStyle(
                         color = effectiveLyricColor,
-                        fontWeight = if (isHarmonyLine) FontWeight.Bold else null,
-                        textDecoration = if (isHarmonyLine) TextDecoration.Underline else null
+                        background = harmonyBg,
+                        fontWeight = if (isHarmonyLine) FontWeight.Bold else null
                     )
                 ) {
                     append(line.substring(cursor, span.range.first))
@@ -1638,8 +1645,8 @@ private fun buildChordLine(
                 SpanType.HARMONY -> withStyle(
                     SpanStyle(
                         color = harmonyColor,
-                        fontWeight = FontWeight.Bold,
-                        textDecoration = TextDecoration.Underline
+                        background = harmonyColor.copy(alpha = 0.22f),
+                        fontWeight = FontWeight.Bold
                     )
                 ) { append(span.text) }
                 SpanType.TECH_NOTE -> withStyle(
@@ -1655,8 +1662,8 @@ private fun buildChordLine(
             withStyle(
                 SpanStyle(
                     color = effectiveLyricColor,
-                    fontWeight = if (isHarmonyLine) FontWeight.Bold else null,
-                    textDecoration = if (isHarmonyLine) TextDecoration.Underline else null
+                    background = harmonyBg,
+                    fontWeight = if (isHarmonyLine) FontWeight.Bold else null
                 )
             ) { append(line.substring(cursor)) }
         }

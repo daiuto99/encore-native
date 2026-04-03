@@ -132,8 +132,8 @@ fun MainScreen(
     editSong?.let { song ->
         SongEditBottomSheet(
             song = song,
-            onSave = { title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies ->
-                libraryViewModel.updateSongMetadata(song.id, title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies)
+            onSave = { title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies, capoEnabled, capoFret ->
+                libraryViewModel.updateSongMetadata(song.id, title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies, capoEnabled, capoFret)
                 editSong = null
             },
             onDismiss = { editSong = null },

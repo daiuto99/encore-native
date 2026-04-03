@@ -4,8 +4,11 @@ import com.encore.core.data.dao.SongDao
 import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.sync.ContentSyncStatus
 import com.encore.core.data.sync.EncoreApiService
+import com.encore.core.data.sync.FakeSyncProvider
 import com.encore.core.data.sync.FileHashUtils
+import com.encore.core.data.sync.LockResult
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Repository for Song data operations.
@@ -161,6 +164,23 @@ interface SongRepository {
      * @param songId UUID of the song that was just synced
      */
     suspend fun markSynced(songId: String)
+
+    /**
+     * Request an exclusive edit lock for [songId] from [FakeSyncProvider].
+     *
+     * - If the lock is granted: clears [SongEntity.isLockedByOther] and returns [LockResult.Acquired].
+     * - If another client holds it: sets [SongEntity.isLockedByOther] = true and returns [LockResult.LockedBy].
+     * - Offline escape hatch: if no response within 5 seconds, returns [LockResult.Acquired] silently
+     *   so performers are never blocked by a network outage.
+     *
+     * @param songId UUID of the song to lock
+     */
+    suspend fun requestEditLock(songId: String): LockResult
+
+    /**
+     * Release the edit lock for [songId] and clear [SongEntity.isLockedByOther].
+     */
+    suspend fun releaseEditLock(songId: String)
 }
 
 /**
@@ -299,5 +319,21 @@ class SongRepositoryImpl(
                 lastSyncedAt = System.currentTimeMillis()
             )
         )
+    }
+
+    override suspend fun requestEditLock(songId: String): LockResult {
+        val result = withTimeoutOrNull(5_000L) {
+            FakeSyncProvider.requestLock(songId)
+        } ?: LockResult.Acquired // offline: grant silently so performers aren't blocked
+
+        val song = songDao.getById(songId) ?: return result
+        songDao.update(song.copy(isLockedByOther = result is LockResult.LockedBy))
+        return result
+    }
+
+    override suspend fun releaseEditLock(songId: String) {
+        FakeSyncProvider.releaseLock(songId)
+        val song = songDao.getById(songId) ?: return
+        songDao.update(song.copy(isLockedByOther = false))
     }
 }

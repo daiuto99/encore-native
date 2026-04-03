@@ -26,10 +26,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -191,10 +194,20 @@ private fun ThemePanel(prefs: AppPreferences, viewModel: AppPreferencesViewModel
     val sections = (if (isDark) prefs.darkSectionStyles else prefs.lightSectionStyles)
         .entries.toList()
     val bgColor = if (isDark) prefs.darkBgColor else prefs.lightBgColor
+    val leadIconColor = if (isDark) prefs.darkLeadIconColor else prefs.lightLeadIconColor
+    val capoColor = if (isDark) prefs.darkCapoColor else prefs.lightCapoColor
     val onBgUpdate: (String) -> Unit = if (isDark)
         { hex -> viewModel.updateDarkBgColor(hex) }
     else
         { hex -> viewModel.updateLightBgColor(hex) }
+    val onLeadIconUpdate: (String) -> Unit = if (isDark)
+        { hex -> viewModel.updateDarkLeadIconColor(hex) }
+    else
+        { hex -> viewModel.updateLightLeadIconColor(hex) }
+    val onCapoUpdate: (String) -> Unit = if (isDark)
+        { hex -> viewModel.updateDarkCapoColor(hex) }
+    else
+        { hex -> viewModel.updateLightCapoColor(hex) }
     val onSectionUpdate: (String, SectionStyle) -> Unit = if (isDark)
         { name, style -> viewModel.updateDarkSectionStyle(name, style) }
     else
@@ -241,6 +254,23 @@ private fun ThemePanel(prefs: AppPreferences, viewModel: AppPreferencesViewModel
             item(key = "bg_$selectedTab") {
                 SettingsCard {
                     BgColorRow(label = "Background Color", hexColor = bgColor, onUpdate = onBgUpdate)
+                }
+            }
+            item(key = "icon_colors_$selectedTab") {
+                SettingsCard {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        BgColorRow(
+                            label = "Lead Guitar Icon",
+                            hexColor = leadIconColor,
+                            onUpdate = onLeadIconUpdate
+                        )
+                        HorizontalDivider(color = encoreColors.divider)
+                        BgColorRow(
+                            label = "Capo Badge",
+                            hexColor = capoColor,
+                            onUpdate = onCapoUpdate
+                        )
+                    }
                 }
             }
             items(sections, key = { "${selectedTab}_${it.key}" }) { (name, style) ->
@@ -533,6 +563,38 @@ private fun PerformanceHudPanel(prefs: AppPreferences, viewModel: AppPreferences
                 }
             }
         }
+
+        // ── Song Title / Artist Color Overrides ───────────────────────────────
+        item {
+            SettingsCard {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "Song Title & Artist Colors",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = encoreColors.titleText
+                    )
+                    Text(
+                        "Override the default set color used for song titles. Leave blank to use the set's color.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = encoreColors.subtleText
+                    )
+                    HorizontalDivider(color = encoreColors.divider)
+                    ColorOverrideRow(
+                        label = "Title Color",
+                        currentHex = prefs.titleColorOverride,
+                        onUpdate = { viewModel.updateTitleColorOverride(it) }
+                    )
+                    HorizontalDivider(color = encoreColors.divider)
+                    ColorOverrideRow(
+                        label = "Artist Color",
+                        currentHex = prefs.artistColorOverride,
+                        onUpdate = { viewModel.updateArtistColorOverride(it) }
+                    )
+                }
+            }
+        }
+
     }
 }
 
@@ -560,6 +622,65 @@ private fun HudToggleRow(
                 color = encoreColors.subtleText)
         }
         Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+private fun ColorOverrideRow(
+    label: String,
+    currentHex: String?,
+    onUpdate: (String?) -> Unit
+) {
+    val encoreColors = LocalEncoreColors.current
+    var hexInput by remember(currentHex) { mutableStateOf(currentHex ?: "") }
+    val previewColor = currentHex?.let {
+        runCatching { parseColorSafe(it) }.getOrNull()
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Color swatch — shows the override color, or a dash pattern if unset
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(previewColor ?: encoreColors.divider)
+                .border(1.dp, encoreColors.divider, RoundedCornerShape(6.dp))
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            color = encoreColors.titleText,
+            modifier = Modifier.weight(1f)
+        )
+        OutlinedTextField(
+            value = hexInput,
+            onValueChange = { v ->
+                hexInput = v
+                if (v.isBlank()) {
+                    onUpdate(null)
+                } else if (v.length == 7 && v.startsWith("#")) {
+                    try { AndroidColor.parseColor(v); onUpdate(v) }
+                    catch (_: Exception) {}
+                }
+            },
+            placeholder = { Text("Set color", style = MaterialTheme.typography.bodySmall, color = encoreColors.subtleText) },
+            singleLine = true,
+            modifier = Modifier.width(148.dp),
+            textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            trailingIcon = if (currentHex != null) {
+                {
+                    IconButton(onClick = { hexInput = ""; onUpdate(null) }) {
+                        Icon(Icons.Default.Clear, contentDescription = "Clear override", modifier = Modifier.size(16.dp))
+                    }
+                }
+            } else null
+        )
     }
 }
 

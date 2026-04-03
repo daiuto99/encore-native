@@ -50,8 +50,20 @@ data class AppPreferences(
     val darkHarmonyColor: String = "#FF9F0A",
     val lightHarmonyColor: String = "#A35200",
 
+    // ── Performance indicator icon colors ─────────────────────────────────────
+    val darkLeadIconColor: String = "#FF9F0A",    // defaults to harmony color
+    val lightLeadIconColor: String = "#A35200",
+    val darkCapoColor: String = "#FF9F0A",
+    val lightCapoColor: String = "#A35200",
+
     // ── Font family ───────────────────────────────────────────────────────────
-    val fontFamily: SongFontFamily = SongFontFamily.SANS_SERIF
+    val fontFamily: SongFontFamily = SongFontFamily.SANS_SERIF,
+
+    // ── Performance dashboard title/artist color overrides ────────────────────
+    // null = use the active set's color (default). Non-null hex string overrides it globally.
+    val titleColorOverride: String? = null,
+    val artistColorOverride: String? = null,
+
 ) {
     companion object {
         val DEFAULT_SECTION_STYLES = mapOf(

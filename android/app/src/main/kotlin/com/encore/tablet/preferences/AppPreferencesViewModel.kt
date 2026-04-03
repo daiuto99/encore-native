@@ -80,6 +80,28 @@ class AppPreferencesViewModel(
     fun updateLightHarmonyColor(hex: String) =
         viewModelScope.launch { repo.updateLightHarmonyColor(hex) }
 
+    // ── Performance indicator icon colors ────────────────────────────────────
+
+    fun updateDarkLeadIconColor(hex: String) =
+        viewModelScope.launch { repo.updateDarkLeadIconColor(hex) }
+
+    fun updateLightLeadIconColor(hex: String) =
+        viewModelScope.launch { repo.updateLightLeadIconColor(hex) }
+
+    fun updateDarkCapoColor(hex: String) =
+        viewModelScope.launch { repo.updateDarkCapoColor(hex) }
+
+    fun updateLightCapoColor(hex: String) =
+        viewModelScope.launch { repo.updateLightCapoColor(hex) }
+
+    // ── Title / artist color overrides ────────────────────────────────────────
+
+    fun updateTitleColorOverride(hex: String?) =
+        viewModelScope.launch { repo.updateTitleColorOverride(hex) }
+
+    fun updateArtistColorOverride(hex: String?) =
+        viewModelScope.launch { repo.updateArtistColorOverride(hex) }
+
     // ── Theme — section styles ────────────────────────────────────────────────
 
     fun updateDarkSectionStyle(section: String, style: SectionStyle) =

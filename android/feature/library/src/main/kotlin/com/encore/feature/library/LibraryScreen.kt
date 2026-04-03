@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Delete
@@ -104,6 +105,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.encore.core.data.entities.SetEntity
 import com.encore.core.data.entities.SongEntity
+import com.encore.core.data.entities.SyncStatus
 import com.encore.core.ui.theme.LocalEncoreColors
 import com.encore.core.ui.theme.SetColor
 import kotlin.math.roundToInt
@@ -461,10 +463,73 @@ fun SongListItem(
     val encoreColors = LocalEncoreColors.current
     val sets by remember(song.id) { viewModel.observeSetsContainingSong(song.id) }
         .collectAsState(initial = emptyList())
+    val availableSets by viewModel.availableSets.collectAsState()
     var showConfirmDialog by remember { mutableStateOf(false) }
+    var showConflictWarning by remember { mutableStateOf(false) }
+    var showSetPicker by remember { mutableStateOf(false) }
 
     val rowAccentColor = remember(sets) {
         sets.minByOrNull { it.number }?.number?.let { SetColor.getSetColor(it) }
+    }
+
+    // Set picker dialog — shown when user taps the + button
+    if (showSetPicker) {
+        AlertDialog(
+            onDismissRequest = { showSetPicker = false },
+            title = { Text("Add to Set") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    availableSets.forEach { set ->
+                        val setColor = SetColor.getSetColor(set.number)
+                        val alreadyInSet = sets.any { it.number == set.number }
+                        OutlinedButton(
+                            onClick = {
+                                showSetPicker = false
+                                viewModel.addSongToSetNumber(song.id, set.number)
+                            },
+                            enabled = !alreadyInSet,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, if (alreadyInSet) setColor.copy(alpha = 0.3f) else setColor)
+                        ) {
+                            Text(
+                                text = if (alreadyInSet) "Set ${set.number} — already added" else "Set ${set.number}",
+                                color = if (alreadyInSet) setColor.copy(alpha = 0.4f) else setColor,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showSetPicker = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Conflict warning dialog — shown when user taps a CONFLICT song
+    if (showConflictWarning) {
+        AlertDialog(
+            onDismissRequest = { showConflictWarning = false },
+            title = { Text("Sync Conflict") },
+            text = {
+                Text(
+                    "\"${song.title}\" has unresolved changes between this device and the server. " +
+                    "Opening it may overwrite server data. Resolve the conflict before editing.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showConflictWarning = false
+                    onClick()
+                }) { Text("Open Anyway") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConflictWarning = false }) { Text("Decide Later") }
+            }
+        )
     }
 
     // Two-action confirmation dialog triggered by left swipe
@@ -552,8 +617,8 @@ fun SongListItem(
     if (showEditSheet) {
         SongEditBottomSheet(
             song = song,
-            onSave = { title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies ->
-                viewModel.updateSongMetadata(song.id, title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies)
+            onSave = { title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies, capoEnabled, capoFret ->
+                viewModel.updateSongMetadata(song.id, title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies, capoEnabled, capoFret)
                 showEditSheet = false
             },
             onDismiss = { showEditSheet = false },
@@ -596,7 +661,13 @@ fun SongListItem(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(72.dp)
-                .clickable(onClick = onClick)
+                .clickable(onClick = {
+                    if (song.syncStatus == SyncStatus.CONFLICT) {
+                        showConflictWarning = true
+                    } else {
+                        onClick()
+                    }
+                })
         ) {
             Row(
                 modifier = Modifier.fillMaxSize(),
@@ -670,10 +741,27 @@ fun SongListItem(
                         )
                     }
 
-                    // Stage-for-perform pill — tap to add song to the perform set
+                    // Sync/lock status badges
+                    if (song.syncStatus == SyncStatus.CONFLICT) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "⚠",
+                            fontSize = 14.sp,
+                            color = Color(0xFFFF9500)
+                        )
+                    }
+                    if (song.isLockedByOther) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "🔒",
+                            fontSize = 14.sp
+                        )
+                    }
+
+                    // Stage-for-perform pill — tap to open set picker
                     Spacer(modifier = Modifier.width(4.dp))
                     OutlinedButton(
-                        onClick = { onAddToSet() },
+                        onClick = { showSetPicker = true },
                         shape = RoundedCornerShape(50.dp),
                         border = BorderStroke(1.dp, encoreColors.titleText.copy(alpha = 0.2f)),
                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
@@ -821,7 +909,7 @@ fun EmptyLibraryMessage(
 @Composable
 fun SongEditBottomSheet(
     song: com.encore.core.data.entities.SongEntity,
-    onSave: (title: String, artist: String, isLeadGuitar: Boolean, isHarmonyMode: Boolean, resetZoom: Boolean, clearHarmonies: Boolean) -> Unit,
+    onSave: (title: String, artist: String, isLeadGuitar: Boolean, isHarmonyMode: Boolean, resetZoom: Boolean, clearHarmonies: Boolean, capoEnabled: Boolean, capoFret: Int) -> Unit,
     onDismiss: () -> Unit,
     onEditChart: (() -> Unit)? = null
 ) {
@@ -833,6 +921,8 @@ fun SongEditBottomSheet(
     var harmonyMode by remember(song.id) { mutableStateOf(song.isHarmonyMode) }
     var resetZoom by remember(song.id) { mutableStateOf(false) }
     var clearHarmonies by remember(song.id) { mutableStateOf(false) }
+    var capoEnabled by remember(song.id) { mutableStateOf(song.capoEnabled) }
+    var capoFret by remember(song.id) { mutableStateOf(song.capoFret.coerceIn(1, 12)) }
 
     val fieldColors = OutlinedTextFieldDefaults.colors(
         focusedTextColor = encoreColors.titleText,
@@ -1001,6 +1091,75 @@ fun SongEditBottomSheet(
                     Text("Clear Harmonies")
                 }
             }
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // ── Capo ──────────────────────────────────────────────────────────
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Capo",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = encoreColors.titleText
+                    )
+                    Text(
+                        "Show capo fret badge in performance mode",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = encoreColors.artistText
+                    )
+                }
+                Switch(
+                    checked = capoEnabled,
+                    onCheckedChange = { capoEnabled = it }
+                )
+            }
+            if (capoEnabled) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "Fret",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = encoreColors.artistText,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = { if (capoFret > 1) capoFret-- },
+                        enabled = capoFret > 1
+                    ) {
+                        Icon(
+                            Icons.Default.Remove,
+                            contentDescription = "Decrease fret",
+                            tint = if (capoFret > 1) encoreColors.titleText else encoreColors.artistText.copy(alpha = 0.3f)
+                        )
+                    }
+                    Text(
+                        text = capoFret.toString(),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = encoreColors.titleText,
+                        modifier = Modifier.width(32.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                    IconButton(
+                        onClick = { if (capoFret < 12) capoFret++ },
+                        enabled = capoFret < 12
+                    ) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = "Increase fret",
+                            tint = if (capoFret < 12) encoreColors.titleText else encoreColors.artistText.copy(alpha = 0.3f)
+                        )
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
 
             androidx.compose.material3.Button(
@@ -1011,7 +1170,9 @@ fun SongEditBottomSheet(
                         leadGuitar,
                         harmonyMode,
                         resetZoom,
-                        clearHarmonies
+                        clearHarmonies,
+                        capoEnabled,
+                        capoFret
                     )
                 },
                 shape = RoundedCornerShape(50),

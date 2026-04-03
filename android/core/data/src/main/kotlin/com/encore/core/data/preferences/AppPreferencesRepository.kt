@@ -59,6 +59,17 @@ class AppPreferencesRepository(private val context: Context) {
 
         // Font family
         val FONT_FAMILY             = stringPreferencesKey("ap_font_family")
+
+        // Performance indicator icon colors
+        val DARK_LEAD_ICON_COLOR    = stringPreferencesKey("ap_dark_lead_icon_color")
+        val LIGHT_LEAD_ICON_COLOR   = stringPreferencesKey("ap_light_lead_icon_color")
+        val DARK_CAPO_COLOR         = stringPreferencesKey("ap_dark_capo_color")
+        val LIGHT_CAPO_COLOR        = stringPreferencesKey("ap_light_capo_color")
+
+        // Title/artist color overrides (null stored as absent key)
+        val TITLE_COLOR_OVERRIDE    = stringPreferencesKey("ap_title_color_override")
+        val ARTIST_COLOR_OVERRIDE   = stringPreferencesKey("ap_artist_color_override")
+
     }
 
     // ── Read ─────────────────────────────────────────────────────────────────
@@ -87,7 +98,13 @@ class AppPreferencesRepository(private val context: Context) {
             lightHarmonyColor       = prefs[Keys.LIGHT_HARMONY_COLOR]      ?: "#A35200",
             fontFamily              = prefs[Keys.FONT_FAMILY]
                                         ?.let { runCatching { SongFontFamily.valueOf(it) }.getOrNull() }
-                                        ?: SongFontFamily.SANS_SERIF
+                                        ?: SongFontFamily.SANS_SERIF,
+            darkLeadIconColor       = prefs[Keys.DARK_LEAD_ICON_COLOR]   ?: "#FF9F0A",
+            lightLeadIconColor      = prefs[Keys.LIGHT_LEAD_ICON_COLOR]  ?: "#A35200",
+            darkCapoColor           = prefs[Keys.DARK_CAPO_COLOR]        ?: "#FF9F0A",
+            lightCapoColor          = prefs[Keys.LIGHT_CAPO_COLOR]       ?: "#A35200",
+            titleColorOverride      = prefs[Keys.TITLE_COLOR_OVERRIDE],
+            artistColorOverride     = prefs[Keys.ARTIST_COLOR_OVERRIDE],
         )
     }
 
@@ -159,6 +176,36 @@ class AppPreferencesRepository(private val context: Context) {
 
     suspend fun updateLightHarmonyColor(hex: String) {
         context.appDataStore.edit { it[Keys.LIGHT_HARMONY_COLOR] = hex }
+    }
+
+    suspend fun updateDarkLeadIconColor(hex: String) {
+        context.appDataStore.edit { it[Keys.DARK_LEAD_ICON_COLOR] = hex }
+    }
+
+    suspend fun updateLightLeadIconColor(hex: String) {
+        context.appDataStore.edit { it[Keys.LIGHT_LEAD_ICON_COLOR] = hex }
+    }
+
+    suspend fun updateDarkCapoColor(hex: String) {
+        context.appDataStore.edit { it[Keys.DARK_CAPO_COLOR] = hex }
+    }
+
+    suspend fun updateLightCapoColor(hex: String) {
+        context.appDataStore.edit { it[Keys.LIGHT_CAPO_COLOR] = hex }
+    }
+
+    suspend fun updateTitleColorOverride(hex: String?) {
+        context.appDataStore.edit { prefs ->
+            if (hex == null) prefs.remove(Keys.TITLE_COLOR_OVERRIDE)
+            else prefs[Keys.TITLE_COLOR_OVERRIDE] = hex
+        }
+    }
+
+    suspend fun updateArtistColorOverride(hex: String?) {
+        context.appDataStore.edit { prefs ->
+            if (hex == null) prefs.remove(Keys.ARTIST_COLOR_OVERRIDE)
+            else prefs[Keys.ARTIST_COLOR_OVERRIDE] = hex
+        }
     }
 
     suspend fun updateDarkSectionStyle(section: String, style: SectionStyle) {

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -35,6 +36,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -60,6 +62,7 @@ import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.encore.core.data.sync.LockResult
 import com.encore.core.ui.theme.LocalEncoreColors
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -192,6 +195,17 @@ fun SongChartEditorScreen(
 
     val songFlow = remember(songId) { viewModel.getSongFlow(songId) }
     val song by songFlow.collectAsState(initial = null)
+    val lockState by viewModel.lockState.collectAsState()
+    val isReadOnly = lockState is LockResult.LockedBy
+    val lockOwner = (lockState as? LockResult.LockedBy)?.owner ?: ""
+
+    // Request lock when the editor opens; release when it leaves composition.
+    LaunchedEffect(songId) {
+        viewModel.requestEditLock(songId)
+    }
+    DisposableEffect(songId) {
+        onDispose { viewModel.releaseEditLock(songId) }
+    }
 
     var fieldValue by remember { mutableStateOf(TextFieldValue("")) }
     var initialized by remember { mutableStateOf(false) }
@@ -272,7 +286,7 @@ fun SongChartEditorScreen(
                             onClick = { inlineEditActive = true }
                         )
                     }
-                    if (isDirty) {
+                    if (isDirty && !isReadOnly) {
                         androidx.compose.material3.TextButton(
                             onClick = {
                                 song?.let { fieldValue = TextFieldValue(it.markdownBody) }
@@ -314,6 +328,25 @@ fun SongChartEditorScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
+            // Read-Only banner — shown when another client holds the session lock.
+            if (isReadOnly) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFFFF3CD))
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .align(Alignment.TopCenter),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "Read Only — locked by $lockOwner",
+                        color = Color(0xFF7D5A00),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
             // Scrollable editor
             Box(
                 modifier = Modifier
@@ -324,10 +357,12 @@ fun SongChartEditorScreen(
                 BasicTextField(
                     value = fieldValue,
                     onValueChange = {
+                        if (isReadOnly) return@BasicTextField
                         if (!it.selection.collapsed) lastNonCollapsedSelection = it.selection
                         fieldValue = it
                         isDirty = true
                     },
+                    readOnly = isReadOnly,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 16.dp),

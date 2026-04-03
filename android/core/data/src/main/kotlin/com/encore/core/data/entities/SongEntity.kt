@@ -94,5 +94,14 @@ data class SongEntity(
     val lastSyncedHash: String? = null, // MD5 of markdownBody at last successful sync; null = never synced
 
     @ColumnInfo(name = "is_dirty")
-    val isDirty: Boolean = false // true when local edits haven't been pushed to server
+    val isDirty: Boolean = false, // true when local edits haven't been pushed to server
+
+    @ColumnInfo(name = "is_locked_by_other")
+    val isLockedByOther: Boolean = false, // true when another client holds the edit lock
+
+    @ColumnInfo(name = "capo_enabled")
+    val capoEnabled: Boolean = false,
+
+    @ColumnInfo(name = "capo_fret")
+    val capoFret: Int = 2       // 1-12; only relevant when capoEnabled = true
 )

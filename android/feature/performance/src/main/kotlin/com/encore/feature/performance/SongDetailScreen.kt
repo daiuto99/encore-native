@@ -380,20 +380,6 @@ fun SongDetailScreen(
                     .fillMaxWidth()
                     .align(Alignment.TopStart)
             ) {
-                PerformanceDashboard(
-                    song = song!!,
-                    harmonyColor = parseColorSafe(
-                        if (encoreColors.isDark) appPreferences.darkHarmonyColor
-                        else appPreferences.lightHarmonyColor
-                    ),
-                    appPreferences = appPreferences,
-                    onToggleDarkMode = onToggleDarkMode,
-                    onEditClick = onEditClick,
-                    onNavigateBack = onNavigateBack,
-                    onSaveClick = if (setNumber > 0) ({ showSaveDialog = true }) else null,
-                    onLoadClick = if (setNumber > 0) ({ showLoadDialog = true }) else null,
-                    modifier = Modifier.fillMaxWidth()
-                )
                 if (setName.isNotEmpty()) {
                     PerformanceContextBar(
                         setName = setName,
@@ -411,6 +397,29 @@ fun SongDetailScreen(
                         }
                     )
                 }
+                PerformanceDashboard(
+                    song = song!!,
+                    harmonyColor = parseColorSafe(
+                        if (encoreColors.isDark) appPreferences.darkHarmonyColor
+                        else appPreferences.lightHarmonyColor
+                    ),
+                    setColor = SetColor.getSetColor(setNumber),
+                    leadIconColor = parseColorSafe(
+                        if (encoreColors.isDark) appPreferences.darkLeadIconColor
+                        else appPreferences.lightLeadIconColor
+                    ),
+                    capoColor = parseColorSafe(
+                        if (encoreColors.isDark) appPreferences.darkCapoColor
+                        else appPreferences.lightCapoColor
+                    ),
+                    appPreferences = appPreferences,
+                    onToggleDarkMode = onToggleDarkMode,
+                    onEditClick = onEditClick,
+                    onNavigateBack = onNavigateBack,
+                    onSaveClick = if (setNumber > 0) ({ showSaveDialog = true }) else null,
+                    onLoadClick = if (setNumber > 0) ({ showLoadDialog = true }) else null,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
 
             // ── Prev song arrow ──────────────────────────────────────────────
@@ -896,12 +905,13 @@ private fun PerformanceContextBar(
                 }
 
                 // ── Set Name / Save feedback (centre, weight=1f) ─────────────
-                val setLabel = if (setNumber > 0) "Set $setNumber — $setName" else setName
+                val setLabel = if (setNumber > 0) "SET $setNumber" else setName
                 Text(
                     text = saveSuccess ?: setLabel,
                     color = if (saveSuccess != null) Color(0xFF4CAF50) else setColor,
                     fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.2.sp,
                     textAlign = TextAlign.Center,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -1022,6 +1032,9 @@ private fun PerformanceContextBar(
 private fun PerformanceDashboard(
     song: SongEntity,
     harmonyColor: Color,
+    setColor: Color,
+    leadIconColor: Color,
+    capoColor: Color,
     appPreferences: AppPreferences,
     onToggleDarkMode: (() -> Unit)?,
     onEditClick: ((SongEntity) -> Unit)?,
@@ -1092,11 +1105,17 @@ private fun PerformanceDashboard(
                 Spacer(modifier = Modifier.width(14.dp))
 
                 // ── Identity: Title + Artist ─────────────────────────────────
+                val titleColor = appPreferences.titleColorOverride
+                    ?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() }
+                    ?: setColor
+                val artistColor = appPreferences.artistColorOverride
+                    ?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() }
+                    ?: encoreColors.artistText
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = song.title,
-                        color = encoreColors.titleText,
-                        fontSize = 16.sp,
+                        color = titleColor,
+                        fontSize = 19.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace,
                         maxLines = 1,
@@ -1105,7 +1124,7 @@ private fun PerformanceDashboard(
                     if (song.artist != "Unknown Artist") {
                         Text(
                             text = song.artist,
-                            color = encoreColors.artistText,
+                            color = artistColor,
                             style = MaterialTheme.typography.bodySmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -1115,8 +1134,10 @@ private fun PerformanceDashboard(
 
                 Spacer(modifier = Modifier.width(10.dp))
 
-                // ── Status Pill: Lead icon + BPM ─────────────────────────────
-                val showStatusPill = (appPreferences.showLeadIndicator && song.isLeadGuitar) || bpm != null
+                // ── Status Pill: Lead icon + Capo + BPM ──────────────────────
+                val showStatusPill = (appPreferences.showLeadIndicator && song.isLeadGuitar)
+                    || song.capoEnabled
+                    || bpm != null
                 if (showStatusPill) {
                     Surface(
                         shape = RoundedCornerShape(50),
@@ -1132,9 +1153,29 @@ private fun PerformanceDashboard(
                                 Icon(
                                     painter = painterResource(R.drawable.ic_guitar_pick),
                                     contentDescription = "Lead guitar",
-                                    tint = harmonyColor,
+                                    tint = leadIconColor,
                                     modifier = Modifier.size(20.dp)
                                 )
+                            }
+                            if (song.capoEnabled) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        text = "${song.capoFret}",
+                                        color = capoColor,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        lineHeight = 14.sp
+                                    )
+                                    Text(
+                                        text = "CAPO",
+                                        color = capoColor.copy(alpha = 0.65f),
+                                        fontSize = 7.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        letterSpacing = 0.4.sp,
+                                        lineHeight = 8.sp
+                                    )
+                                }
                             }
                             if (bpm != null) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {

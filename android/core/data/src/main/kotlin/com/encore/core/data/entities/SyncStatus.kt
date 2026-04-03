@@ -22,5 +22,11 @@ enum class SyncStatus {
      * Entity is marked for deletion.
      * Will be deleted from server on next sync.
      */
-    PENDING_DELETE
+    PENDING_DELETE,
+
+    /**
+     * Both local and remote content diverged since the last sync.
+     * ConflictResolutionDialog must be shown before this song can be opened.
+     */
+    CONFLICT
 }

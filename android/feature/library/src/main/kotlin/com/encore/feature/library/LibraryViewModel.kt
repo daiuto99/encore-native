@@ -13,6 +13,7 @@ import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.entities.SyncStatus
 import com.encore.core.data.preferences.AppPreferences
 import com.encore.core.data.sync.FakeSyncProvider
+import com.encore.core.data.sync.LockResult
 import com.encore.core.data.sync.SyncHudState
 import kotlinx.coroutines.delay
 import com.encore.core.data.preferences.AppPreferencesRepository
@@ -79,6 +80,9 @@ class LibraryViewModel(
 
     private val _syncHudState = MutableStateFlow<SyncHudState?>(null)
     val syncHudState: StateFlow<SyncHudState?> = _syncHudState.asStateFlow()
+
+    private val _lockState = MutableStateFlow<LockResult?>(null)
+    val lockState: StateFlow<LockResult?> = _lockState.asStateFlow()
 
     /** URI string of the last synced folder — null if no folder has been linked yet. */
     val connectedFolderUri: StateFlow<String?> = userPrefs.connectedFolderUri
@@ -175,6 +179,22 @@ class LibraryViewModel(
     init {
         backfillMissingKeys()
         initPerformSet()
+        autoSyncOnStart()
+    }
+
+    /**
+     * Throttled app-start sync. Skipped if fewer than 10 minutes have passed since the last sync.
+     * Uses [userPrefs] to read/write the timestamp so it persists across cold starts.
+     */
+    private fun autoSyncOnStart() {
+        viewModelScope.launch {
+            val lastSync = userPrefs.getLastSyncTimestamp()
+            val now = System.currentTimeMillis()
+            val tenMinutes = 10 * 60 * 1000L
+            if (now - lastSync < tenMinutes) return@launch
+            triggerGlobalSync()
+            userPrefs.saveLastSyncTimestamp(System.currentTimeMillis())
+        }
     }
 
     private fun initPerformSet() {
@@ -619,7 +639,9 @@ class LibraryViewModel(
         isLeadGuitar: Boolean = false,
         isHarmonyMode: Boolean = false,
         resetZoom: Boolean = false,
-        clearHarmonies: Boolean = false
+        clearHarmonies: Boolean = false,
+        capoEnabled: Boolean = false,
+        capoFret: Int = 2
     ) {
         viewModelScope.launch {
             val existing = songRepository.getSongById(songId) ?: return@launch
@@ -635,7 +657,9 @@ class LibraryViewModel(
                     isHarmonyMode = isHarmonyMode,
                     lastZoomLevel = if (resetZoom) 1.0f else existing.lastZoomLevel,
                     markdownBody = updatedBody,
-                    isDirty = existing.isDirty || bodyChanged
+                    isDirty = existing.isDirty || bodyChanged,
+                    capoEnabled = capoEnabled,
+                    capoFret = capoFret.coerceIn(1, 12)
                 )
             )
         }
@@ -683,6 +707,25 @@ class LibraryViewModel(
             _syncHudState.value = SyncHudState.Complete
             delay(3000)
             _syncHudState.value = null
+        }
+    }
+
+    /**
+     * Request an exclusive edit lock for [songId].
+     * Updates [lockState] so the editor can react (show Read-Only banner or open normally).
+     */
+    fun requestEditLock(songId: String) {
+        viewModelScope.launch {
+            val result = songRepository.requestEditLock(songId)
+            _lockState.value = result
+        }
+    }
+
+    /** Release the lock when the editor is closed. */
+    fun releaseEditLock(songId: String) {
+        viewModelScope.launch {
+            songRepository.releaseEditLock(songId)
+            _lockState.value = null
         }
     }
 

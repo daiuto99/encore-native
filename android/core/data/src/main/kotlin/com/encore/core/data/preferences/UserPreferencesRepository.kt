@@ -4,10 +4,12 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.encore.core.data.auth.GoogleUser
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 // Single DataStore instance per process — top-level delegate is the required pattern
@@ -38,6 +40,7 @@ class UserPreferencesRepository(private val context: Context) {
         val DISPLAY_NAME          = stringPreferencesKey("display_name")
         val PROFILE_PICTURE_URI   = stringPreferencesKey("profile_picture_uri")
         val CONNECTED_FOLDER_URI  = stringPreferencesKey("connected_folder_uri")
+        val LAST_SYNC_TIMESTAMP   = longPreferencesKey("last_sync_timestamp")
     }
 
     /**
@@ -82,6 +85,17 @@ class UserPreferencesRepository(private val context: Context) {
         context.userDataStore.edit { prefs ->
             prefs.remove(Keys.CONNECTED_FOLDER_URI)
         }
+    }
+
+    /**
+     * Unix timestamp (ms) of the last successful global sync.
+     * 0L = never synced. Used to enforce the 10-minute throttle on app-start auto-sync.
+     */
+    suspend fun getLastSyncTimestamp(): Long =
+        context.userDataStore.data.map { it[Keys.LAST_SYNC_TIMESTAMP] ?: 0L }.first()
+
+    suspend fun saveLastSyncTimestamp(timestamp: Long) {
+        context.userDataStore.edit { it[Keys.LAST_SYNC_TIMESTAMP] = timestamp }
     }
 
     /**

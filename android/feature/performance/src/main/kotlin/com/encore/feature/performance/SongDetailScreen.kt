@@ -216,6 +216,7 @@ fun SongDetailScreen(
     onPageChanged: (() -> Unit)? = null,
     onNavigateToSong: ((String) -> Unit)? = null,
     appPreferences: AppPreferences = AppPreferences(),
+    syncHudState: com.encore.core.data.sync.SyncHudState? = null,
     modifier: Modifier = Modifier
 ) {
     val song by viewModel.song.collectAsState()
@@ -398,6 +399,7 @@ fun SongDetailScreen(
                         setName = setName,
                         setNumber = setNumber,
                         setColor = SetColor.getSetColor(setNumber),
+                        syncHudState = syncHudState,
                         prevSong = prevSong,
                         nextSong = nextSong,
                         saveSuccess = saveSuccess,

@@ -12,6 +12,9 @@ import com.encore.core.data.entities.SetEntity
 import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.entities.SyncStatus
 import com.encore.core.data.preferences.AppPreferences
+import com.encore.core.data.sync.FakeSyncProvider
+import com.encore.core.data.sync.SyncHudState
+import kotlinx.coroutines.delay
 import com.encore.core.data.preferences.AppPreferencesRepository
 import com.encore.core.data.preferences.UserPreferencesRepository
 import com.encore.core.data.repository.SetlistRepository
@@ -73,6 +76,9 @@ class LibraryViewModel(
 
     private val _syncProgress = MutableStateFlow<SyncProgress?>(null)
     val syncProgress: StateFlow<SyncProgress?> = _syncProgress.asStateFlow()
+
+    private val _syncHudState = MutableStateFlow<SyncHudState?>(null)
+    val syncHudState: StateFlow<SyncHudState?> = _syncHudState.asStateFlow()
 
     /** URI string of the last synced folder — null if no folder has been linked yet. */
     val connectedFolderUri: StateFlow<String?> = userPrefs.connectedFolderUri
@@ -648,6 +654,35 @@ class LibraryViewModel(
             songRepository.upsertSong(
                 existing.copy(markdownBody = body, updatedAt = now, localUpdatedAt = now, isDirty = true)
             )
+        }
+    }
+
+    /**
+     * Run a full library sync pass against [FakeSyncProvider].
+     *
+     * Drives the Sync Progress HUD in [PerformanceContextBar]:
+     *  1. Sets [SyncHudState.InProgress] immediately and ticks the counter per song.
+     *  2. Adds a 100ms delay between songs to simulate network latency.
+     *  3. Switches to [SyncHudState.Complete] ("✓ Synced") for 3 seconds, then clears.
+     *
+     * Guard: if a sync is already running the call is ignored.
+     */
+    fun triggerGlobalSync() {
+        if (_syncHudState.value is SyncHudState.InProgress) return
+        viewModelScope.launch {
+            val songs = songRepository.getAllSongsOnce()
+            val total = songs.size
+            if (total == 0) return@launch
+
+            songs.forEachIndexed { index, song ->
+                _syncHudState.value = SyncHudState.InProgress(current = index + 1, total = total)
+                songRepository.checkSyncStatus(song.id, FakeSyncProvider)
+                delay(100)
+            }
+
+            _syncHudState.value = SyncHudState.Complete
+            delay(3000)
+            _syncHudState.value = null
         }
     }
 

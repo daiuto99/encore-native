@@ -123,6 +123,7 @@ fun MainScreen(
     val appPrefsViewModel: AppPreferencesViewModel = viewModel(factory = viewModelFactory)
     val auditViewModel: LibraryAuditViewModel = viewModel(factory = viewModelFactory)
     val appPreferences by appPrefsViewModel.preferences.collectAsState()
+    val syncHudState by libraryViewModel.syncHudState.collectAsState()
     var isDarkMode by remember { mutableStateOf(false) }
     var editSong by remember { mutableStateOf<SongEntity?>(null) }
     val encoreColors = if (isDarkMode) DarkEncoreColors else LightEncoreColors
@@ -167,7 +168,8 @@ fun MainScreen(
                 viewModel = appPrefsViewModel,
                 auditViewModel = auditViewModel,
                 onEditSong = { song -> editSong = song },
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.popBackStack() },
+                onSyncNow = { libraryViewModel.triggerGlobalSync() }
             )
         }
 
@@ -224,7 +226,8 @@ fun MainScreen(
                         popUpTo("command_center")
                         launchSingleTop = true
                     }
-                }
+                },
+                syncHudState = syncHudState
             )
         }
     }

@@ -92,7 +92,8 @@ fun SettingsScreen(
     viewModel: AppPreferencesViewModel,
     auditViewModel: LibraryAuditViewModel,
     onEditSong: (SongEntity) -> Unit,
-    onNavigateBack: () -> Unit
+    onNavigateBack: () -> Unit,
+    onSyncNow: () -> Unit = {}
 ) {
     val prefs by viewModel.preferences.collectAsState()
     val encoreColors = LocalEncoreColors.current
@@ -170,7 +171,7 @@ fun SettingsScreen(
                 SettingsCategory.THEME          -> ThemePanel(prefs, viewModel)
                 SettingsCategory.TYPOGRAPHY     -> TypographyPanel(prefs, viewModel)
                 SettingsCategory.PERFORMANCE_HUD -> PerformanceHudPanel(prefs, viewModel)
-                SettingsCategory.LIBRARY_TOOLS  -> LibraryHealthPanel(auditViewModel, onEditSong)
+                SettingsCategory.LIBRARY_TOOLS  -> LibraryHealthPanel(auditViewModel, onEditSong, onSyncNow)
             }
         }
     }
@@ -567,7 +568,8 @@ private fun HudToggleRow(
 @Composable
 private fun LibraryHealthPanel(
     auditViewModel: LibraryAuditViewModel,
-    onEditSong: (SongEntity) -> Unit
+    onEditSong: (SongEntity) -> Unit,
+    onSyncNow: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val encoreColors = LocalEncoreColors.current
@@ -580,6 +582,35 @@ private fun LibraryHealthPanel(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item { PanelHeader("Library Health", "Scan charts for metadata gaps and formatting issues") }
+
+        // ── Cloud Sync card ───────────────────────────────────────────────────
+        item {
+            SettingsCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Cloud Sync",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = encoreColors.titleText
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = "Check all songs against the server and resolve conflicts",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = encoreColors.subtleText
+                        )
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    OutlinedButton(onClick = onSyncNow) {
+                        Text("Sync Now")
+                    }
+                }
+            }
+        }
 
         // ── Summary card ─────────────────────────────────────────────────────
         item {

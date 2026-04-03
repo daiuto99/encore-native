@@ -193,8 +193,38 @@ resetZoom: Boolean, clearHarmonies: Boolean, capoEnabled: Boolean, capoFret: Int
 - **Set label:** `"SET $setNumber"` uppercase, set color, `letterSpacing = 1.2.sp`
 - **Capo icon colors:** `darkLeadIconColor` / `lightLeadIconColor` (guitar pick), `darkCapoColor` / `lightCapoColor` (capo badge) — in Theme settings alongside bg color
 
+---
+
+## GCP Cloud Sync — LIVE (Phase 3 Complete)
+
+### What was built
+- **`SyncProvider.kt`** — unified interface wrapping `EncoreApiService` + lock/manifest/upload/download ops + `authConsentEvents: SharedFlow<IntentSender>`.
+- **`GcpSyncProvider.kt`** — production implementation backed by Google Cloud Storage REST API.
+  - Auth: RSA-SHA256 JWT service account — no OAuth2, no Play Services, no user consent flow.
+  - Service account: `encore-tablet-sync@encore-cloud-leo-2026.iam.gserviceaccount.com`
+  - Credentials: `assets/gcp_service_account.json` (gitignored)
+  - Token cached 55 min, auto-refreshed on expiry.
+  - Bucket: `gs://encore-cloud-leo-2026-songs`
+  - Object layout: `{userId}/songs/{songId}.md`, `locks/{songId}.lock`, `system/library_health.json`
+- **`SongRepository.uploadSongToCloud(userId, songId)`** — uploads markdown body, calls `markSynced()`.
+- **`LibraryViewModel.triggerGlobalSync()`** — iterates all songs, uploads each, early-aborts on first failure, saves timestamp on completion.
+- **Sync HUD** — `InProgress(current, total)` counter → `Complete` (✓ Synced in green) → null.
+- **Last synced timestamp** — displayed in Settings → Library Tools using `SimpleDateFormat`.
+- **Consent launcher** — at `MainScreen` level (always active regardless of nav route).
+- **`AppContainer`** — `GcpSyncProvider(context)` — no Account lambda needed.
+
+### Confirmed working
+- Files land in `gs://encore-cloud-leo-2026-songs/{userId}/songs/{songId}.md` ✓
+- Manifest at `system/library_health.json` updated per upload ✓
+
+### Known facts
+- `FakeSyncProvider` still wired — swap in `AppContainer` for offline/debug testing.
+- `play-services-auth` dep still in `app/build.gradle.kts` — unused, can be removed.
+
+---
+
 ## Remaining M4 Sync Work
-- Wire `SyncStatus` to real Ktor API calls (replace FakeSyncProvider)
-- Full conflict resolution flow (write winner to DB, call `markSynced()`)
-- Single active device session enforcement on server side
+- **Download / pull** — fetch songs from GCS and merge into local DB (no pull flow yet)
+- **Full conflict resolution** — wire ConflictResolutionDialog "Keep Local" / "Keep Remote" to DB writes + `markSynced()`
+- **Session lock enforcement** — GCS lock objects written but not server-enforced
 - Setlist management screen

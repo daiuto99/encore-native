@@ -11,6 +11,7 @@ import com.encore.core.data.repository.SetlistRepository
 import com.encore.core.data.repository.SetlistRepositoryImpl
 import com.encore.core.data.repository.SongRepository
 import com.encore.core.data.repository.SongRepositoryImpl
+import com.encore.core.data.sync.GcpSyncProvider
 
 /**
  * Simple dependency injection container.
@@ -30,8 +31,12 @@ class AppContainer(private val context: Context) {
     }
 
     // Repositories
+    private val gcpSyncProvider by lazy {
+        GcpSyncProvider(context)
+    }
+
     val songRepository: SongRepository by lazy {
-        SongRepositoryImpl(database.songDao())
+        SongRepositoryImpl(database.songDao(), gcpSyncProvider)
     }
 
     val setlistRepository: SetlistRepository by lazy {

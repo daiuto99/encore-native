@@ -110,6 +110,9 @@ dependencies {
     implementation("androidx.credentials:credentials-play-services-auth:1.2.2")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.0")
 
+    // Google Play Services Auth — needed for GoogleAuthUtil OAuth2 token fetch (GcpSyncProvider)
+    implementation("com.google.android.gms:play-services-auth:21.0.0")
+
     // Testing
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

@@ -2,12 +2,15 @@ package com.encore.core.data.repository
 
 import com.encore.core.data.dao.SongDao
 import com.encore.core.data.entities.SongEntity
+import android.content.IntentSender
 import com.encore.core.data.sync.ContentSyncStatus
-import com.encore.core.data.sync.EncoreApiService
-import com.encore.core.data.sync.FakeSyncProvider
 import com.encore.core.data.sync.FileHashUtils
+import com.encore.core.data.sync.GcpManifest
 import com.encore.core.data.sync.LockResult
+import com.encore.core.data.sync.SyncProvider
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharedFlow
+
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -17,6 +20,12 @@ import kotlinx.coroutines.withTimeoutOrNull
  * Implements offline-first pattern with Flow-based reactive queries.
  */
 interface SongRepository {
+
+    /**
+     * Hot stream of OAuth2 consent Intents that must be launched by the UI.
+     * Delegates to [SyncProvider.authConsentEvents].
+     */
+    val syncAuthConsentEvents: SharedFlow<IntentSender>
 
     /**
      * Get all songs ordered by title.
@@ -152,10 +161,9 @@ interface SongRepository {
      *
      * Always runs on [kotlinx.coroutines.Dispatchers.IO] internally via [FileHashUtils].
      *
-     * @param songId     UUID of the song to check
-     * @param apiService [EncoreApiService] implementation (real Ktor or [FakeSyncProvider])
+     * @param songId UUID of the song to check
      */
-    suspend fun checkSyncStatus(songId: String, apiService: EncoreApiService): ContentSyncStatus
+    suspend fun checkSyncStatus(songId: String): ContentSyncStatus
 
     /**
      * Mark a sync as successful by writing the current content hash into [lastSyncedHash]
@@ -181,14 +189,27 @@ interface SongRepository {
      * Release the edit lock for [songId] and clear [SongEntity.isLockedByOther].
      */
     suspend fun releaseEditLock(songId: String)
+
+    /**
+     * Upload the current markdownBody of [songId] to the cloud sync backend
+     * and call [markSynced] on success.
+     *
+     * @param userId  The signed-in user's account ID (used for GCS path scoping).
+     * @param songId  UUID of the song to upload.
+     * @return true if the upload succeeded, false if offline or not found.
+     */
+    suspend fun uploadSongToCloud(userId: String, songId: String): Boolean
 }
 
 /**
  * Implementation of SongRepository using Room DAO.
  */
 class SongRepositoryImpl(
-    private val songDao: SongDao
+    private val songDao: SongDao,
+    private val syncProvider: SyncProvider
 ) : SongRepository {
+
+    override val syncAuthConsentEvents: SharedFlow<IntentSender> = syncProvider.authConsentEvents
 
     override fun getSongs(): Flow<List<SongEntity>> {
         return songDao.getAllSongs()
@@ -285,11 +306,11 @@ class SongRepositoryImpl(
 
     override fun getInvalidSongs(): Flow<List<SongEntity>> = songDao.getInvalidSongs()
 
-    override suspend fun checkSyncStatus(songId: String, apiService: EncoreApiService): ContentSyncStatus {
+    override suspend fun checkSyncStatus(songId: String): ContentSyncStatus {
         val song = songDao.getById(songId) ?: return ContentSyncStatus.NeverSynced
         if (song.lastSyncedHash == null) return ContentSyncStatus.NeverSynced
 
-        val remote = apiService.getRemoteHash(songId)
+        val remote = syncProvider.getRemoteHash(songId)
         val remoteHash = remote.remoteHash
             ?: return ContentSyncStatus.UpToDate // FakeSyncProvider.SYNCED path
 
@@ -323,7 +344,7 @@ class SongRepositoryImpl(
 
     override suspend fun requestEditLock(songId: String): LockResult {
         val result = withTimeoutOrNull(5_000L) {
-            FakeSyncProvider.requestLock(songId)
+            syncProvider.requestLock(songId)
         } ?: LockResult.Acquired // offline: grant silently so performers aren't blocked
 
         val song = songDao.getById(songId) ?: return result
@@ -332,8 +353,19 @@ class SongRepositoryImpl(
     }
 
     override suspend fun releaseEditLock(songId: String) {
-        FakeSyncProvider.releaseLock(songId)
+        syncProvider.releaseLock(songId)
         val song = songDao.getById(songId) ?: return
         songDao.update(song.copy(isLockedByOther = false))
+    }
+
+    override suspend fun uploadSongToCloud(userId: String, songId: String): Boolean {
+        val song = songDao.getById(songId) ?: return false
+        return try {
+            syncProvider.uploadSong(userId, songId, song.markdownBody)
+            markSynced(songId)
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 }

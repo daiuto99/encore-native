@@ -12,7 +12,6 @@ import com.encore.core.data.entities.SetEntity
 import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.entities.SyncStatus
 import com.encore.core.data.preferences.AppPreferences
-import com.encore.core.data.sync.FakeSyncProvider
 import com.encore.core.data.sync.LockResult
 import com.encore.core.data.sync.SyncHudState
 import kotlinx.coroutines.delay
@@ -78,11 +77,18 @@ class LibraryViewModel(
     private val _syncProgress = MutableStateFlow<SyncProgress?>(null)
     val syncProgress: StateFlow<SyncProgress?> = _syncProgress.asStateFlow()
 
+    /** Consent intents from GcpSyncProvider — UI must launch these to unblock OAuth2. */
+    val syncAuthConsentEvents = songRepository.syncAuthConsentEvents
+
     private val _syncHudState = MutableStateFlow<SyncHudState?>(null)
     val syncHudState: StateFlow<SyncHudState?> = _syncHudState.asStateFlow()
 
     private val _lockState = MutableStateFlow<LockResult?>(null)
     val lockState: StateFlow<LockResult?> = _lockState.asStateFlow()
+
+    /** Unix timestamp (ms) of the last completed global sync. 0L = never. */
+    private val _lastSyncTimestamp = MutableStateFlow(0L)
+    val lastSyncTimestamp: StateFlow<Long> = _lastSyncTimestamp.asStateFlow()
 
     /** URI string of the last synced folder — null if no folder has been linked yet. */
     val connectedFolderUri: StateFlow<String?> = userPrefs.connectedFolderUri
@@ -179,6 +185,9 @@ class LibraryViewModel(
     init {
         backfillMissingKeys()
         initPerformSet()
+        viewModelScope.launch {
+            _lastSyncTimestamp.value = userPrefs.getLastSyncTimestamp()
+        }
         autoSyncOnStart()
     }
 
@@ -682,7 +691,7 @@ class LibraryViewModel(
     }
 
     /**
-     * Run a full library sync pass against [FakeSyncProvider].
+     * Run a full library sync pass against the configured [SyncProvider].
      *
      * Drives the Sync Progress HUD in [PerformanceContextBar]:
      *  1. Sets [SyncHudState.InProgress] immediately and ticks the counter per song.
@@ -694,15 +703,31 @@ class LibraryViewModel(
     fun triggerGlobalSync() {
         if (_syncHudState.value is SyncHudState.InProgress) return
         viewModelScope.launch {
+            val userId = userPrefs.persistedUser.first()?.googleAccountId ?: return@launch
             val songs = songRepository.getAllSongsOnce()
             val total = songs.size
             if (total == 0) return@launch
 
-            songs.forEachIndexed { index, song ->
+            var authBlocked = false
+            for ((index, song) in songs.withIndex()) {
                 _syncHudState.value = SyncHudState.InProgress(current = index + 1, total = total)
-                songRepository.checkSyncStatus(song.id, FakeSyncProvider)
-                delay(100)
+                val uploaded = songRepository.uploadSongToCloud(userId, song.id)
+                if (!uploaded && index == 0) {
+                    // First song failed — likely an auth error; consent intent already emitted.
+                    // Abort the loop so we don't spam the same error for every song.
+                    authBlocked = true
+                    break
+                }
             }
+
+            if (authBlocked) {
+                _syncHudState.value = null
+                return@launch
+            }
+
+            val now = System.currentTimeMillis()
+            userPrefs.saveLastSyncTimestamp(now)
+            _lastSyncTimestamp.value = now
 
             _syncHudState.value = SyncHudState.Complete
             delay(3000)

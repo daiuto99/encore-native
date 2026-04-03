@@ -59,6 +59,7 @@ android/app/schemas/
 *.keystore
 google-services.json
 secrets.properties
+android/app/src/main/assets/gcp_service_account.json
 
 # Backend
 backend/build/

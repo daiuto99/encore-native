@@ -69,7 +69,11 @@ import com.encore.core.data.preferences.AppPreferences
 import com.encore.core.data.preferences.SectionStyle
 import com.encore.core.data.preferences.SongFontFamily
 import com.encore.core.data.preferences.ThemePreset
+import com.encore.core.data.sync.SyncHudState
 import com.encore.core.ui.theme.LocalEncoreColors
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import com.encore.tablet.audit.LibraryAuditViewModel
 import com.encore.tablet.preferences.AppPreferencesViewModel
 import kotlin.math.roundToInt
@@ -96,7 +100,9 @@ fun SettingsScreen(
     auditViewModel: LibraryAuditViewModel,
     onEditSong: (SongEntity) -> Unit,
     onNavigateBack: () -> Unit,
-    onSyncNow: () -> Unit = {}
+    onSyncNow: () -> Unit = {},
+    syncHudState: SyncHudState? = null,
+    lastSyncTimestamp: Long = 0L
 ) {
     val prefs by viewModel.preferences.collectAsState()
     val encoreColors = LocalEncoreColors.current
@@ -174,7 +180,7 @@ fun SettingsScreen(
                 SettingsCategory.THEME          -> ThemePanel(prefs, viewModel)
                 SettingsCategory.TYPOGRAPHY     -> TypographyPanel(prefs, viewModel)
                 SettingsCategory.PERFORMANCE_HUD -> PerformanceHudPanel(prefs, viewModel)
-                SettingsCategory.LIBRARY_TOOLS  -> LibraryHealthPanel(auditViewModel, onEditSong, onSyncNow)
+                SettingsCategory.LIBRARY_TOOLS  -> LibraryHealthPanel(auditViewModel, onEditSong, onSyncNow, syncHudState, lastSyncTimestamp)
             }
         }
     }
@@ -690,7 +696,9 @@ private fun ColorOverrideRow(
 private fun LibraryHealthPanel(
     auditViewModel: LibraryAuditViewModel,
     onEditSong: (SongEntity) -> Unit,
-    onSyncNow: () -> Unit = {}
+    onSyncNow: () -> Unit = {},
+    syncHudState: SyncHudState? = null,
+    lastSyncTimestamp: Long = 0L
 ) {
     val context = LocalContext.current
     val encoreColors = LocalEncoreColors.current
@@ -724,10 +732,32 @@ private fun LibraryHealthPanel(
                             style = MaterialTheme.typography.bodySmall,
                             color = encoreColors.subtleText
                         )
+                        if (lastSyncTimestamp > 0L) {
+                            val formatted = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
+                                .format(Date(lastSyncTimestamp))
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = "Last synced: $formatted",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = encoreColors.subtleText.copy(alpha = 0.6f)
+                            )
+                        }
                     }
                     Spacer(Modifier.width(16.dp))
-                    OutlinedButton(onClick = onSyncNow) {
-                        Text("Sync Now")
+                    when (syncHudState) {
+                        is SyncHudState.InProgress -> Text(
+                            text = "${syncHudState.current}/${syncHudState.total}…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = encoreColors.subtleText
+                        )
+                        is SyncHudState.Complete -> Text(
+                            text = "✓ Synced",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF34C759)
+                        )
+                        null -> OutlinedButton(onClick = onSyncNow) {
+                            Text("Sync Now")
+                        }
                     }
                 }
             }

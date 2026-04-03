@@ -1,5 +1,9 @@
 package com.encore.core.data.sync
 
+import android.content.IntentSender
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+
 /**
  * Result of a session-lock request against the fake server.
  *
@@ -28,7 +32,7 @@ sealed class LockResult {
  * ```
  * Clear all overrides between test runs with [clearOverrides].
  */
-object FakeSyncProvider : EncoreApiService {
+object FakeSyncProvider : SyncProvider {
 
     enum class SyncScenario {
         /** Remote hash matches last synced hash — no action needed. */
@@ -43,6 +47,8 @@ object FakeSyncProvider : EncoreApiService {
          */
         CONFLICT
     }
+
+    override val authConsentEvents: SharedFlow<IntentSender> = MutableSharedFlow()
 
     private val overrides = mutableMapOf<String, SyncScenario>()
 
@@ -82,7 +88,7 @@ object FakeSyncProvider : EncoreApiService {
      * - If this tablet already holds the lock (from a prior call), returns [LockResult.Acquired].
      * - Otherwise acquires the lock and returns [LockResult.Acquired].
      */
-    suspend fun requestLock(songId: String): LockResult {
+    override suspend fun requestLock(songId: String): LockResult {
         val existingOwner = lockOverrides[songId]
         if (existingOwner != null) return LockResult.LockedBy(existingOwner)
         activeLocks.add(songId)
@@ -93,9 +99,18 @@ object FakeSyncProvider : EncoreApiService {
      * Release the edit lock for [songId] (called when the editor is closed).
      * No-op if this device doesn't hold the lock.
      */
-    suspend fun releaseLock(songId: String) {
+    override suspend fun releaseLock(songId: String) {
         activeLocks.remove(songId)
     }
+
+    /** Returns an empty manifest — fake backend has no stored songs. */
+    override suspend fun fetchManifest(userId: String): GcpManifest? = null
+
+    /** No-op — fake backend doesn't persist uploads. */
+    override suspend fun uploadSong(userId: String, songId: String, markdownBody: String) = Unit
+
+    /** Always returns null — fake backend has no stored bodies. */
+    override suspend fun downloadSong(userId: String, songId: String): String? = null
 
     override suspend fun getRemoteHash(songId: String): RemoteHashResponse {
         val now = System.currentTimeMillis()

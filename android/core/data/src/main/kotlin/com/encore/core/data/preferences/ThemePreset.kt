@@ -20,5 +20,9 @@ data class ThemePreset(
     val lyricColor: String,
     val chordColor: String,
     val harmonyColor: String,
-    val sectionStyles: Map<String, SectionStyle>
+    val sectionStyles: Map<String, SectionStyle>,
+    /** Icon tint for the lead-guitar pick in the Performance Dashboard. Null = keep current. */
+    val leadIconColor: String? = null,
+    /** Tint for the capo fret badge in the Performance Dashboard. Null = keep current. */
+    val capoColor: String? = null,
 )

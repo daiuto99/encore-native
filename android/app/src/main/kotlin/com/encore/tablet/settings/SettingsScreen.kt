@@ -298,6 +298,16 @@ private fun BgColorRow(
 ) {
     val encoreColors = LocalEncoreColors.current
     var hexInput by remember(hexColor) { mutableStateOf(hexColor) }
+    var showPicker by remember { mutableStateOf(false) }
+
+    if (showPicker) {
+        ColorPickerDialog(
+            initialHex = hexColor,
+            onDismiss  = { showPicker = false },
+            onConfirm  = { hex -> onUpdate(hex); showPicker = false }
+        )
+    }
+
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -308,6 +318,7 @@ private fun BgColorRow(
                 .clip(RoundedCornerShape(6.dp))
                 .background(parseColorSafe(hexColor))
                 .border(1.dp, encoreColors.divider, RoundedCornerShape(6.dp))
+                .clickable { showPicker = true }
         )
         Text(
             text = label,
@@ -340,6 +351,15 @@ private fun SectionStyleRow(
 ) {
     val encoreColors = LocalEncoreColors.current
     var hexInput by remember(style.hexColor) { mutableStateOf(style.hexColor) }
+    var showPicker by remember { mutableStateOf(false) }
+
+    if (showPicker) {
+        ColorPickerDialog(
+            initialHex = style.hexColor,
+            onDismiss  = { showPicker = false },
+            onConfirm  = { hex -> onUpdate(style.copy(hexColor = hex)); showPicker = false }
+        )
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -348,13 +368,15 @@ private fun SectionStyleRow(
         shape = RoundedCornerShape(12.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // Row 1: color dot + section name + bold toggle
+            // Row 1: color dot (tap to open picker) + section name + bold toggle
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
-                        .size(14.dp)
+                        .size(22.dp)
                         .clip(CircleShape)
                         .background(parseColorSafe(style.hexColor))
+                        .border(1.dp, encoreColors.divider, CircleShape)
+                        .clickable { showPicker = true }
                 )
                 Spacer(Modifier.width(10.dp))
                 Text(

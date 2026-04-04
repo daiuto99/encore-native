@@ -8,6 +8,7 @@ import com.encore.core.data.preferences.AppPreferencesRepository
 import com.encore.core.data.preferences.SectionStyle
 import com.encore.core.data.preferences.SongFontFamily
 import com.encore.core.data.preferences.ThemePreset
+import com.encore.tablet.settings.BuiltInThemes
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -20,6 +21,16 @@ class AppPreferencesViewModel(
 
     val preferences: StateFlow<AppPreferences> = repo.appPreferences
         .stateIn(viewModelScope, SharingStarted.Eagerly, AppPreferences())
+
+    init {
+        // Write Zen Studio section styles on first-ever launch only
+        viewModelScope.launch {
+            repo.applyDefaultsIfNeeded(
+                darkSections  = BuiltInThemes.ZEN_STUDIO_DARK.sectionStyles,
+                lightSections = BuiltInThemes.ZEN_STUDIO_LIGHT.sectionStyles
+            )
+        }
+    }
 
     val darkUserPresets: StateFlow<List<ThemePreset>> = repo.darkUserPresets
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())

@@ -70,6 +70,27 @@ class AppPreferencesRepository(private val context: Context) {
         val TITLE_COLOR_OVERRIDE    = stringPreferencesKey("ap_title_color_override")
         val ARTIST_COLOR_OVERRIDE   = stringPreferencesKey("ap_artist_color_override")
 
+        // First-run sentinel — set after Zen Studio defaults are written once
+        val DEFAULTS_APPLIED        = booleanPreferencesKey("ap_defaults_applied")
+    }
+
+    // ── First-run defaults ───────────────────────────────────────────────────
+
+    /**
+     * Writes Zen Studio dark + light section styles on first launch.
+     * No-op if already applied (guarded by [Keys.DEFAULTS_APPLIED]).
+     * Safe to call from ViewModel init every session.
+     */
+    suspend fun applyDefaultsIfNeeded(
+        darkSections: Map<String, SectionStyle>,
+        lightSections: Map<String, SectionStyle>
+    ) {
+        context.appDataStore.edit { prefs ->
+            if (prefs[Keys.DEFAULTS_APPLIED] == true) return@edit
+            prefs[Keys.DARK_SECTION_STYLES_JSON]  = encodeSectionStyles(darkSections)
+            prefs[Keys.LIGHT_SECTION_STYLES_JSON] = encodeSectionStyles(lightSections)
+            prefs[Keys.DEFAULTS_APPLIED] = true
+        }
     }
 
     // ── Read ─────────────────────────────────────────────────────────────────
@@ -88,21 +109,21 @@ class AppPreferencesRepository(private val context: Context) {
             showTranspositionWarning= prefs[Keys.SHOW_TRANSPOSITION_WARNING] ?: true,
             showChords              = prefs[Keys.SHOW_CHORDS]              ?: true,
             showKeyInfo             = prefs[Keys.SHOW_KEY_INFO]            ?: true,
-            darkBgColor             = prefs[Keys.DARK_BG_COLOR]            ?: "#000000",
-            lightBgColor            = prefs[Keys.LIGHT_BG_COLOR]           ?: "#F2F2F7",
-            darkLyricColor          = prefs[Keys.DARK_LYRIC_COLOR]         ?: "#D1D1D6",
-            lightLyricColor         = prefs[Keys.LIGHT_LYRIC_COLOR]        ?: "#1C1C1E",
-            darkChordColor          = prefs[Keys.DARK_CHORD_COLOR]         ?: "#FFD60A",
-            lightChordColor         = prefs[Keys.LIGHT_CHORD_COLOR]        ?: "#007AFF",
-            darkHarmonyColor        = prefs[Keys.DARK_HARMONY_COLOR]       ?: "#FF9F0A",
-            lightHarmonyColor       = prefs[Keys.LIGHT_HARMONY_COLOR]      ?: "#A35200",
+            darkBgColor             = prefs[Keys.DARK_BG_COLOR]            ?: "#0F1115",
+            lightBgColor            = prefs[Keys.LIGHT_BG_COLOR]           ?: "#F6F7F4",
+            darkLyricColor          = prefs[Keys.DARK_LYRIC_COLOR]         ?: "#E5E7EB",
+            lightLyricColor         = prefs[Keys.LIGHT_LYRIC_COLOR]        ?: "#1E293B",
+            darkChordColor          = prefs[Keys.DARK_CHORD_COLOR]         ?: "#7DD3FC",
+            lightChordColor         = prefs[Keys.LIGHT_CHORD_COLOR]        ?: "#1D4ED8",
+            darkHarmonyColor        = prefs[Keys.DARK_HARMONY_COLOR]       ?: "#5B4A1A",
+            lightHarmonyColor       = prefs[Keys.LIGHT_HARMONY_COLOR]      ?: "#FFF3BF",
             fontFamily              = prefs[Keys.FONT_FAMILY]
                                         ?.let { runCatching { SongFontFamily.valueOf(it) }.getOrNull() }
                                         ?: SongFontFamily.SANS_SERIF,
-            darkLeadIconColor       = prefs[Keys.DARK_LEAD_ICON_COLOR]   ?: "#FF9F0A",
-            lightLeadIconColor      = prefs[Keys.LIGHT_LEAD_ICON_COLOR]  ?: "#A35200",
-            darkCapoColor           = prefs[Keys.DARK_CAPO_COLOR]        ?: "#FF9F0A",
-            lightCapoColor          = prefs[Keys.LIGHT_CAPO_COLOR]       ?: "#A35200",
+            darkLeadIconColor       = prefs[Keys.DARK_LEAD_ICON_COLOR]   ?: "#7DD3FC",
+            lightLeadIconColor      = prefs[Keys.LIGHT_LEAD_ICON_COLOR]  ?: "#2563EB",
+            darkCapoColor           = prefs[Keys.DARK_CAPO_COLOR]        ?: "#F59E0B",
+            lightCapoColor          = prefs[Keys.LIGHT_CAPO_COLOR]       ?: "#B45309",
             titleColorOverride      = prefs[Keys.TITLE_COLOR_OVERRIDE],
             artistColorOverride     = prefs[Keys.ARTIST_COLOR_OVERRIDE],
         )
@@ -244,12 +265,16 @@ class AppPreferencesRepository(private val context: Context) {
                 prefs[Keys.DARK_CHORD_COLOR]          = preset.chordColor
                 prefs[Keys.DARK_HARMONY_COLOR]        = preset.harmonyColor
                 prefs[Keys.DARK_SECTION_STYLES_JSON]  = encodeSectionStyles(preset.sectionStyles)
+                preset.leadIconColor?.let { prefs[Keys.DARK_LEAD_ICON_COLOR] = it }
+                preset.capoColor?.let    { prefs[Keys.DARK_CAPO_COLOR]       = it }
             } else {
                 prefs[Keys.LIGHT_BG_COLOR]            = preset.bgColor
                 prefs[Keys.LIGHT_LYRIC_COLOR]         = preset.lyricColor
                 prefs[Keys.LIGHT_CHORD_COLOR]          = preset.chordColor
                 prefs[Keys.LIGHT_HARMONY_COLOR]        = preset.harmonyColor
                 prefs[Keys.LIGHT_SECTION_STYLES_JSON]  = encodeSectionStyles(preset.sectionStyles)
+                preset.leadIconColor?.let { prefs[Keys.LIGHT_LEAD_ICON_COLOR] = it }
+                preset.capoColor?.let    { prefs[Keys.LIGHT_CAPO_COLOR]       = it }
             }
         }
     }
@@ -335,6 +360,8 @@ class AppPreferencesRepository(private val context: Context) {
                 put("chordColor",   preset.chordColor)
                 put("harmonyColor", preset.harmonyColor)
                 put("sectionStyles", JSONObject(encodeSectionStyles(preset.sectionStyles)))
+                preset.leadIconColor?.let { put("leadIconColor", it) }
+                preset.capoColor?.let    { put("capoColor",      it) }
             })
         }
         return arr.toString()
@@ -346,14 +373,16 @@ class AppPreferencesRepository(private val context: Context) {
             (0 until arr.length()).map { i ->
                 val obj = arr.getJSONObject(i)
                 ThemePreset(
-                    id           = obj.getString("id"),
-                    name         = obj.getString("name"),
-                    isBuiltIn    = false,
-                    bgColor      = obj.getString("bgColor"),
-                    lyricColor   = obj.getString("lyricColor"),
-                    chordColor   = obj.getString("chordColor"),
-                    harmonyColor = obj.getString("harmonyColor"),
-                    sectionStyles = decodeSectionStyles(obj.getJSONObject("sectionStyles").toString())
+                    id            = obj.getString("id"),
+                    name          = obj.getString("name"),
+                    isBuiltIn     = false,
+                    bgColor       = obj.getString("bgColor"),
+                    lyricColor    = obj.getString("lyricColor"),
+                    chordColor    = obj.getString("chordColor"),
+                    harmonyColor  = obj.getString("harmonyColor"),
+                    sectionStyles = decodeSectionStyles(obj.getJSONObject("sectionStyles").toString()),
+                    leadIconColor = obj.optString("leadIconColor").takeIf { it.isNotEmpty() },
+                    capoColor     = obj.optString("capoColor").takeIf { it.isNotEmpty() },
                 )
             }
         } catch (_: Exception) { emptyList() }

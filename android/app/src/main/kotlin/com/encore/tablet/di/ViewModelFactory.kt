@@ -2,6 +2,7 @@ package com.encore.tablet.di
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import com.encore.core.data.sync.SyncProvider
 import com.encore.feature.library.LibraryViewModel
 import com.encore.feature.performance.SongDetailViewModel
 import com.encore.feature.setlists.SetlistViewModel
@@ -26,7 +27,8 @@ class ViewModelFactory(
                     appContainer.songRepository,
                     appContainer.setlistRepository,
                     appContainer.userPreferencesRepository,
-                    appContainer.appPreferencesRepository
+                    appContainer.appPreferencesRepository,
+                    appContainer.syncProvider
                 ) as T
             }
             modelClass.isAssignableFrom(SetlistViewModel::class.java) -> {

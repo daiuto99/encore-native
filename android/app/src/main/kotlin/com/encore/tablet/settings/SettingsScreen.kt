@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -102,7 +103,8 @@ fun SettingsScreen(
     onNavigateBack: () -> Unit,
     onSyncNow: () -> Unit = {},
     syncHudState: SyncHudState? = null,
-    lastSyncTimestamp: Long = 0L
+    lastSyncTimestamp: Long = 0L,
+    onClearAllSets: () -> Unit = {}
 ) {
     val prefs by viewModel.preferences.collectAsState()
     val encoreColors = LocalEncoreColors.current
@@ -180,7 +182,7 @@ fun SettingsScreen(
                 SettingsCategory.THEME          -> ThemePanel(prefs, viewModel)
                 SettingsCategory.TYPOGRAPHY     -> TypographyPanel(prefs, viewModel)
                 SettingsCategory.PERFORMANCE_HUD -> PerformanceHudPanel(prefs, viewModel)
-                SettingsCategory.LIBRARY_TOOLS  -> LibraryHealthPanel(auditViewModel, onEditSong, onSyncNow, syncHudState, lastSyncTimestamp)
+                SettingsCategory.LIBRARY_TOOLS  -> LibraryHealthPanel(auditViewModel, onEditSong, onSyncNow, syncHudState, lastSyncTimestamp, onClearAllSets)
             }
         }
     }
@@ -720,7 +722,8 @@ private fun LibraryHealthPanel(
     onEditSong: (SongEntity) -> Unit,
     onSyncNow: () -> Unit = {},
     syncHudState: SyncHudState? = null,
-    lastSyncTimestamp: Long = 0L
+    lastSyncTimestamp: Long = 0L,
+    onClearAllSets: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val encoreColors = LocalEncoreColors.current
@@ -780,6 +783,61 @@ private fun LibraryHealthPanel(
                         null -> OutlinedButton(onClick = onSyncNow) {
                             Text("Sync Now")
                         }
+                    }
+                }
+            }
+        }
+
+        // ── Clear All Sets card ───────────────────────────────────────────────
+        item {
+            var showClearSetsDialog by remember { mutableStateOf(false) }
+            if (showClearSetsDialog) {
+                AlertDialog(
+                    onDismissRequest = { showClearSetsDialog = false },
+                    title = { Text("Clear All Sets?") },
+                    text = { Text("This will remove all songs from Set 1 and delete any additional sets. Your song library will not be affected.") },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                onClearAllSets()
+                                showClearSetsDialog = false
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                        ) { Text("Clear All Sets") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showClearSetsDialog = false }) { Text("Cancel") }
+                    }
+                )
+            }
+            SettingsCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Clear All Sets",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = encoreColors.titleText
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = "Remove all songs from sets and start fresh",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = encoreColors.subtleText
+                        )
+                    }
+                    Spacer(Modifier.width(16.dp))
+                    OutlinedButton(
+                        onClick = { showClearSetsDialog = true },
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        ),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("Clear Sets")
                     }
                 }
             }

@@ -12,8 +12,10 @@ import com.encore.core.data.entities.SetEntity
 import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.entities.SyncStatus
 import com.encore.core.data.preferences.AppPreferences
+import com.encore.core.data.sync.ContentSyncStatus
 import com.encore.core.data.sync.LockResult
 import com.encore.core.data.sync.SyncHudState
+import com.encore.core.data.sync.SyncProvider
 import kotlinx.coroutines.delay
 import com.encore.core.data.preferences.AppPreferencesRepository
 import com.encore.core.data.preferences.UserPreferencesRepository
@@ -57,7 +59,8 @@ class LibraryViewModel(
     private val songRepository: SongRepository,
     private val setlistRepository: SetlistRepository,
     private val userPrefs: UserPreferencesRepository,
-    private val appPrefsRepository: AppPreferencesRepository? = null
+    private val appPrefsRepository: AppPreferencesRepository? = null,
+    private val syncProvider: SyncProvider? = null
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
@@ -189,21 +192,49 @@ class LibraryViewModel(
             _lastSyncTimestamp.value = userPrefs.getLastSyncTimestamp()
         }
         autoSyncOnStart()
+        startRemoteChangePoller()
     }
 
     /**
-     * Throttled app-start sync. Skipped if fewer than 10 minutes have passed since the last sync.
-     * Uses [userPrefs] to read/write the timestamp so it persists across cold starts.
+     * Startup sync. Skipped if fewer than 60 seconds have passed since the last sync
+     * (prevents re-entrancy on rapid restarts). Uploads dirty songs and pulls remote changes.
      */
     private fun autoSyncOnStart() {
         viewModelScope.launch {
             val lastSync = userPrefs.getLastSyncTimestamp()
             val now = System.currentTimeMillis()
-            val tenMinutes = 10 * 60 * 1000L
-            if (now - lastSync < tenMinutes) return@launch
+            if (now - lastSync < 60_000L) return@launch
             triggerGlobalSync()
-            userPrefs.saveLastSyncTimestamp(System.currentTimeMillis())
         }
+    }
+
+    /**
+     * Polls GCS every 2 minutes while the app is open.
+     * For each clean local song that has a newer version on the server, pulls silently.
+     * Skipped entirely if a manual sync is already running to avoid collisions.
+     * Cancelled automatically when the ViewModel is cleared (app backgrounded/closed).
+     */
+    private fun startRemoteChangePoller() {
+        viewModelScope.launch {
+            while (true) {
+                delay(2 * 60 * 1000L)
+                if (_syncHudState.value is SyncHudState.InProgress) continue
+                pullRemoteChanges()
+            }
+        }
+    }
+
+    private suspend fun pullRemoteChanges() {
+        val userId = userPrefs.persistedUser.first()?.googleAccountId ?: return
+        val songs = songRepository.getAllSongsOnce()
+        for (song in songs) {
+            if (song.isDirty || song.lastSyncedHash == null) continue
+            val status = songRepository.checkSyncStatus(song.id)
+            if (status is ContentSyncStatus.RemoteAhead) {
+                songRepository.pullSongFromCloud(userId, song.id)
+            }
+        }
+        checkAndApplyWebSetChanges(userId)
     }
 
     private fun initPerformSet() {
@@ -215,6 +246,19 @@ class LibraryViewModel(
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to initialize perform set", e)
             }
+        }
+    }
+
+    /**
+     * Clear all sets back to a blank slate: empties Set 1 and deletes Sets 2+.
+     * Resets the active set filter. Songs in the library are unaffected.
+     */
+    fun clearAllSets() {
+        val setlistId = _defaultSetlistId.value ?: return
+        viewModelScope.launch {
+            setlistRepository.clearAllSets(setlistId)
+            _setFilter.value = null
+            uploadSetToCloud(1) // Set 1 is now empty; sets 2+ were deleted
         }
     }
 
@@ -234,6 +278,7 @@ class LibraryViewModel(
                 _statusMessage.value = "Could not delete set"
             }
         }
+        uploadAllSetsInBackground()
     }
 
     /** Creates the next numbered set in the default setlist. */
@@ -290,14 +335,17 @@ class LibraryViewModel(
             val count = setlistRepository.getSongsInSet(setId).first().size
             _statusMessage.value = "Staged ($count in set)"
         }
+        uploadAllSetsInBackground()
     }
 
     fun removeFromPerformSet(entryId: String) {
         viewModelScope.launch { setlistRepository.removeSongFromSet(entryId) }
+        uploadAllSetsInBackground()
     }
 
     fun reorderPerformSet(entryId: String, toIndex: Int) {
         viewModelScope.launch { setlistRepository.reorderSongInSet(entryId, toIndex) }
+        uploadAllSetsInBackground()
     }
 
     /**
@@ -672,6 +720,8 @@ class LibraryViewModel(
                 )
             )
         }
+        // Push metadata changes (title, artist, key, etc.) to cloud immediately
+        uploadSongInBackground(songId)
     }
 
     /** Single-shot flow for observing a song in the chart editor. */
@@ -679,7 +729,68 @@ class LibraryViewModel(
         emit(songRepository.getSongById(songId))
     }
 
-    /** Persist edited markdown body to DB. Always marks isDirty = true. */
+    // ── Set cloud sync ────────────────────────────────────────────────────────
+
+    /** Tracks the `updatedAt` we last processed per set — prevents re-applying stale web data. */
+    private val lastSeenSetUpdatedAt = mutableMapOf<Int, Long>()
+
+    private suspend fun uploadSetToCloud(setNumber: Int) {
+        val provider = syncProvider ?: return
+        val userId = userPrefs.persistedUser.first()?.googleAccountId ?: return
+        try {
+            val set = setlistRepository.getOrCreateSetByNumber(setNumber)
+            val entries = setlistRepository.getSongsInSet(set.id).first()
+            val songIds = entries.map { it.song.id }
+            val now = System.currentTimeMillis()
+            val songIdsJson = songIds.joinToString(",") { "\"$it\"" }
+            val json = """{"version":1,"updatedAt":$now,"source":"tablet","songIds":[$songIdsJson]}"""
+            provider.uploadSetData(userId, setNumber, json)
+            lastSeenSetUpdatedAt[setNumber] = now
+            Log.d(TAG, "uploadSetToCloud(set=$setNumber, ${songIds.size} songs)")
+        } catch (e: Exception) {
+            Log.w(TAG, "uploadSetToCloud($setNumber) failed: ${e.message}")
+        }
+    }
+
+    /** Uploads all currently known sets to cloud in the background. */
+    private fun uploadAllSetsInBackground() {
+        viewModelScope.launch {
+            availableSets.value.forEach { set -> uploadSetToCloud(set.number) }
+        }
+    }
+
+    private suspend fun checkAndApplyWebSetChanges(userId: String) {
+        for (set in availableSets.value) {
+            try {
+                val json = syncProvider?.downloadSetData(userId, set.number) ?: continue
+                val obj = JSONObject(json)
+                if (obj.optString("source") != "web") continue
+                val updatedAt = obj.optLong("updatedAt", 0L)
+                if (updatedAt <= (lastSeenSetUpdatedAt[set.number] ?: 0L)) continue
+                val arr = obj.getJSONArray("songIds")
+                val songIds = (0 until arr.length()).map { arr.getString(it) }
+                setlistRepository.replaceSetContents(set.id, songIds)
+                lastSeenSetUpdatedAt[set.number] = updatedAt
+                Log.d(TAG, "Applied web set changes for Set ${set.number}: ${songIds.size} songs")
+            } catch (e: Exception) {
+                Log.w(TAG, "checkAndApplyWebSetChanges(set=${set.number}) failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Fire-and-forget cloud upload for a single song.
+     * Called immediately after any local save so the tablet never needs a manual sync.
+     * Silently skipped if the user isn't signed in or has no network.
+     */
+    private fun uploadSongInBackground(songId: String) {
+        viewModelScope.launch {
+            val userId = userPrefs.persistedUser.first()?.googleAccountId ?: return@launch
+            songRepository.uploadSongToCloud(userId, songId)
+        }
+    }
+
+    /** Persist edited markdown body to DB and immediately push to cloud. */
     fun updateMarkdownBody(songId: String, body: String) {
         viewModelScope.launch {
             val existing = songRepository.getSongById(songId) ?: return@launch
@@ -688,6 +799,7 @@ class LibraryViewModel(
                 existing.copy(markdownBody = body, updatedAt = now, localUpdatedAt = now, isDirty = true)
             )
         }
+        uploadSongInBackground(songId)
     }
 
     /**
@@ -699,6 +811,11 @@ class LibraryViewModel(
      *  3. Switches to [SyncHudState.Complete] ("✓ Synced") for 3 seconds, then clears.
      *
      * Guard: if a sync is already running the call is ignored.
+     *
+     * Strategy (bidirectional):
+     *  - isDirty or never synced → upload to GCS (tablet changes win)
+     *  - clean local + remote is ahead → pull from GCS (web changes applied to Room)
+     *  - conflict (both dirty) → upload tablet version (tablet wins for now)
      */
     fun triggerGlobalSync() {
         if (_syncHudState.value is SyncHudState.InProgress) return
@@ -708,19 +825,29 @@ class LibraryViewModel(
             val total = songs.size
             if (total == 0) return@launch
 
-            var authBlocked = false
+            var firstUploadFailed = false
             for ((index, song) in songs.withIndex()) {
                 _syncHudState.value = SyncHudState.InProgress(current = index + 1, total = total)
-                val uploaded = songRepository.uploadSongToCloud(userId, song.id)
-                if (!uploaded && index == 0) {
-                    // First song failed — likely an auth error; consent intent already emitted.
-                    // Abort the loop so we don't spam the same error for every song.
-                    authBlocked = true
-                    break
+
+                if (song.isDirty || song.lastSyncedHash == null) {
+                    // Tablet has local changes or song has never been synced → upload
+                    val uploaded = songRepository.uploadSongToCloud(userId, song.id)
+                    if (!uploaded && index == 0) {
+                        // First upload failed — likely an auth/network issue. Abort to avoid
+                        // spamming the same error for every song.
+                        firstUploadFailed = true
+                        break
+                    }
+                } else {
+                    // Local is clean — check if the web app pushed a newer version
+                    val status = songRepository.checkSyncStatus(song.id)
+                    if (status is ContentSyncStatus.RemoteAhead) {
+                        songRepository.pullSongFromCloud(userId, song.id)
+                    }
                 }
             }
 
-            if (authBlocked) {
+            if (firstUploadFailed) {
                 _syncHudState.value = null
                 return@launch
             }
@@ -769,6 +896,7 @@ class LibraryViewModel(
                 _statusMessage.value = "Could not add to Set $setNumber"
             }
         }
+        uploadAllSetsInBackground()
     }
 
     /**
@@ -793,6 +921,7 @@ class LibraryViewModel(
                 Log.e(TAG, "Failed to remove song from set $setNumber", e)
             }
         }
+        uploadAllSetsInBackground()
     }
 
     /**
@@ -814,6 +943,7 @@ class LibraryViewModel(
                 Log.e(TAG, "Reorder failed", e)
             }
         }
+        uploadAllSetsInBackground()
     }
 
     /**

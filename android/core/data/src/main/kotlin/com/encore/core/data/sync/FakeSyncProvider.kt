@@ -112,6 +112,12 @@ object FakeSyncProvider : SyncProvider {
     /** Always returns null — fake backend has no stored bodies. */
     override suspend fun downloadSong(userId: String, songId: String): String? = null
 
+    /** No-op — fake backend has no set storage. */
+    override suspend fun uploadSetData(userId: String, setNumber: Int, content: String) = Unit
+
+    /** Always returns null — fake backend has no set storage. */
+    override suspend fun downloadSetData(userId: String, setNumber: Int): String? = null
+
     override suspend fun getRemoteHash(songId: String): RemoteHashResponse {
         val now = System.currentTimeMillis()
         return when (overrides[songId] ?: SyncScenario.SYNCED) {

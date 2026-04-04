@@ -99,6 +99,11 @@ class GcpSyncProvider(
     @Volatile private var cachedToken: String? = null
     @Volatile private var tokenExpiresAt: Long = 0L
 
+    // Manifest cache — valid for 60 s so a full sync pass (~96 songs) reads GCS only once.
+    @Volatile private var manifestCache: GcpManifest? = null
+    @Volatile private var manifestCachedAt: Long = 0L
+    private val MANIFEST_CACHE_TTL_MS = 60_000L
+
     private suspend fun token(): String = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         cachedToken?.takeIf { now < tokenExpiresAt }?.let {
@@ -233,6 +238,11 @@ class GcpSyncProvider(
     }
 
     private fun readManifestWithToken(token: String): GcpManifest? {
+        val now = System.currentTimeMillis()
+        manifestCache?.takeIf { now - manifestCachedAt < MANIFEST_CACHE_TTL_MS }?.let {
+            Log.d(TAG, "readManifestWithToken — cache hit (${it.songs.size} entries)")
+            return it
+        }
         val body = readObject(token, MANIFEST_OBJECT) ?: return null
         return try {
             val root = JSONObject(body)
@@ -246,12 +256,21 @@ class GcpSyncProvider(
                     updatedAt = obj.getLong("updatedAt")
                 )
             }
-            Log.d(TAG, "readManifestWithToken — parsed ${songs.size} entries")
-            GcpManifest(songs)
+            Log.d(TAG, "readManifestWithToken — fetched ${songs.size} entries from GCS")
+            val manifest = GcpManifest(songs)
+            manifestCache = manifest
+            manifestCachedAt = now
+            manifest
         } catch (e: Exception) {
             Log.e(TAG, "readManifestWithToken — JSON parse failed: ${e.message}")
             null
         }
+    }
+
+    /** Invalidate the manifest cache so the next read fetches fresh data from GCS. */
+    private fun invalidateManifestCache() {
+        manifestCache = null
+        manifestCachedAt = 0L
     }
 
     // ── Song body upload / download ──────────────────────────────────────────
@@ -265,7 +284,13 @@ class GcpSyncProvider(
                 Log.d(TAG, "uploadSong — uploading to path: $path")
                 uploadObject(tok, path, markdownBody, "text/markdown")
                 Log.d(TAG, "uploadSong — body uploaded; updating manifest")
-                updateManifest(tok, songId, markdownBody)
+                try {
+                    updateManifest(tok, songId, markdownBody)
+                } catch (e: Exception) {
+                    // Manifest is a secondary index — 429 rate limit during bulk sync is expected.
+                    // Song body is already uploaded; log and continue so markSynced is called.
+                    Log.w(TAG, "uploadSong($songId) — manifest update failed (non-fatal): ${e.message}")
+                }
                 Log.d(TAG, "uploadSong($songId) — complete")
             } catch (e: Exception) {
                 Log.e(TAG, "uploadSong($songId) failed — ${e::class.simpleName}: ${e.message}")
@@ -367,6 +392,7 @@ class GcpSyncProvider(
             put("updatedAt", System.currentTimeMillis())
         })
         uploadObject(token, MANIFEST_OBJECT, root.toString(), "application/json")
+        invalidateManifestCache() // force fresh read after writing
     }
 
     // ── Path helpers ─────────────────────────────────────────────────────────
@@ -376,4 +402,30 @@ class GcpSyncProvider(
 
     private fun songObjectPath(userId: String, songId: String) = "$userId/songs/$songId.md"
     private fun lockObjectPath(songId: String) = "locks/$songId.lock"
+    private fun setObjectPath(userId: String, setNumber: Int) = "$userId/sets/set_$setNumber.json"
+
+    override suspend fun uploadSetData(userId: String, setNumber: Int, content: String) {
+        withContext(Dispatchers.IO) {
+            Log.d(TAG, "uploadSetData(set=$setNumber, len=${content.length})")
+            try {
+                val tok = token()
+                uploadObject(tok, setObjectPath(userId, setNumber), content, "application/json")
+                Log.d(TAG, "uploadSetData(set=$setNumber) — done")
+            } catch (e: Exception) {
+                Log.e(TAG, "uploadSetData(set=$setNumber) failed: ${e.message}")
+                throw e
+            }
+        }
+    }
+
+    override suspend fun downloadSetData(userId: String, setNumber: Int): String? =
+        withContext(Dispatchers.IO) {
+            try {
+                val tok = token()
+                readObject(tok, setObjectPath(userId, setNumber))
+            } catch (e: Exception) {
+                Log.e(TAG, "downloadSetData(set=$setNumber) failed: ${e.message}")
+                null
+            }
+        }
 }

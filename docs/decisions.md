@@ -26,6 +26,36 @@
 
 ---
 
+## Bidirectional Sync — Timestamp vs Hash comparison (2026-04-04)
+
+**Decision:** Use `remote.serverUpdatedAt > song.lastSyncedAt` (both epoch-ms longs) as the RemoteAhead guard, rather than comparing hash strings.
+
+**Why:** Web app writes `hash = Date.now().toString()` (epoch-ms string) into `library_health.json`; Android writes MD5 hex strings. Direct hash comparison would always disagree. Comparing timestamps is format-agnostic and semantically correct: if the remote file is newer than our last sync, pull it.
+
+**Files:** `SongRepository.kt` — `checkSyncStatus()` block.
+
+---
+
+## Set Sync Protocol — source field + in-memory timestamp guard (2026-04-04)
+
+**Decision:** Set sync files at `{userId}/sets/set_N.json` include a `source` field (`"tablet"` or `"web"`). Android only applies set changes when `source == "web"` AND `updatedAt > lastSeenSetUpdatedAt[N]`.
+
+**Why:** Prevents tablets from re-applying their own uploads. `lastSeenSetUpdatedAt` is in-memory (not persisted) — on restart the `source` field is the first-line guard; the timestamp check prevents double-apply within a session. Web similarly only displays, never silently overwrites, what it loaded from GCS.
+
+**Files:** `LibraryViewModel.kt` (`checkAndApplyWebSetChanges`), `CloudLibraryService.js` (`saveSetFile`).
+
+---
+
+## GCS Manifest Cache — 60s TTL (2026-04-04)
+
+**Decision:** `GcpSyncProvider` caches the parsed `library_health.json` manifest for 60 seconds (`MANIFEST_CACHE_TTL_MS = 60_000`). `invalidateManifestCache()` is called after any local write to the manifest.
+
+**Why:** A startup sync iterating all 96 songs would make 96 separate GCS reads without the cache. One read per 60s window (or per write) is the correct trade-off for an offline-first app.
+
+**Files:** `GcpSyncProvider.kt` — `readManifestWithToken`, `invalidateManifestCache`.
+
+---
+
 ## SyncProvider Interface Layering (2026-04-03)
 
 **Decision:** `SyncProvider` extends `EncoreApiService` and adds lock/manifest/upload/download + `authConsentEvents`.

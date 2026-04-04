@@ -199,6 +199,21 @@ interface SongRepository {
      * @return true if the upload succeeded, false if offline or not found.
      */
     suspend fun uploadSongToCloud(userId: String, songId: String): Boolean
+
+    /**
+     * Download the cloud version of [songId] and apply it to the local Room record.
+     *
+     * Parses the YAML front matter prepended by [uploadSongToCloud] to update
+     * title, artist, displayKey, originalKey, isLeadGuitar, and markdownBody.
+     * Marks the song as synced (clears [SongEntity.isDirty], sets [SongEntity.lastSyncedHash]).
+     *
+     * Used when the web app has edited a song and the remote version is ahead of local.
+     *
+     * @param userId  Owner's account ID (GCS path scope).
+     * @param songId  UUID of the song to pull.
+     * @return true if the pull succeeded, false if not found or network unavailable.
+     */
+    suspend fun pullSongFromCloud(userId: String, songId: String): Boolean
 }
 
 /**
@@ -314,6 +329,15 @@ class SongRepositoryImpl(
         val remoteHash = remote.remoteHash
             ?: return ContentSyncStatus.UpToDate // FakeSyncProvider.SYNCED path
 
+        // Timestamp-based RemoteAhead: web app writes a timestamp hash to the manifest
+        // after each save. If that timestamp is newer than our last sync, the remote is ahead
+        // regardless of whether the hash strings match (they won't — web uses epoch ms, not MD5).
+        val remoteUpdatedAt = remote.serverUpdatedAt
+        if (!song.isDirty && remoteUpdatedAt != null && song.lastSyncedAt != null
+            && remoteUpdatedAt > song.lastSyncedAt) {
+            return ContentSyncStatus.RemoteAhead(remoteHash)
+        }
+
         return when {
             !song.isDirty && remoteHash != song.lastSyncedHash ->
                 ContentSyncStatus.RemoteAhead(remoteHash)
@@ -361,11 +385,78 @@ class SongRepositoryImpl(
     override suspend fun uploadSongToCloud(userId: String, songId: String): Boolean {
         val song = songDao.getById(songId) ?: return false
         return try {
-            syncProvider.uploadSong(userId, songId, song.markdownBody)
+            // Prepend YAML front matter so the web app can read title/artist/key.
+            // The web app strips this block before editing and re-attaches on save.
+            val yaml = buildString {
+                appendLine("---")
+                appendLine("title: ${song.title}")
+                appendLine("artist: ${song.artist}")
+                appendLine("display_key: ${song.displayKey ?: ""}")
+                appendLine("original_key: ${song.originalKey ?: ""}")
+                appendLine("is_lead_guitar: ${song.isLeadGuitar}")
+                append("---")
+            }
+            val content = "$yaml\n${song.markdownBody}"
+            syncProvider.uploadSong(userId, songId, content)
             markSynced(songId)
             true
         } catch (_: Exception) {
             false
         }
+    }
+
+    override suspend fun pullSongFromCloud(userId: String, songId: String): Boolean {
+        val rawContent = syncProvider.downloadSong(userId, songId) ?: return false
+        val existing = songDao.getById(songId) ?: return false
+        val (yaml, markdownBody) = parseYamlFrontMatter(rawContent)
+        val trimmedBody = markdownBody.trim()
+        val hash = FileHashUtils.hashMarkdownBody(trimmedBody)
+        val now = System.currentTimeMillis()
+        songDao.update(
+            existing.copy(
+                title          = yaml["title"]?.takeIf { it.isNotBlank() }        ?: existing.title,
+                artist         = yaml["artist"]?.takeIf { it.isNotBlank() }       ?: existing.artist,
+                displayKey     = yaml["display_key"]?.takeIf { it.isNotBlank() }  ?: existing.displayKey,
+                originalKey    = yaml["original_key"]?.takeIf { it.isNotBlank() } ?: existing.originalKey,
+                isLeadGuitar   = yaml["is_lead_guitar"]?.lowercase() == "true",
+                markdownBody   = trimmedBody,
+                isDirty        = false,
+                lastSyncedHash = hash,
+                lastSyncedAt   = now,
+                localUpdatedAt = now,
+            )
+        )
+        return true
+    }
+
+    /**
+     * Parse YAML front matter from a raw cloud document.
+     *
+     * Expected format:
+     * ```
+     * ---
+     * key: value
+     * ---
+     * body content
+     * ```
+     *
+     * @return Pair of (frontMatterMap, bodyContent). If no valid front matter is found,
+     *         returns an empty map and the full raw string as body.
+     */
+    private fun parseYamlFrontMatter(raw: String): Pair<Map<String, String>, String> {
+        val normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
+        if (!normalized.startsWith("---\n")) return emptyMap<String, String>() to normalized
+        val end = normalized.indexOf("\n---\n", 4)
+        if (end == -1) return emptyMap<String, String>() to normalized
+        val yamlText = normalized.substring(4, end)
+        val body     = normalized.substring(end + 5)
+        val map = yamlText.lines().mapNotNull { line ->
+            val colonIdx = line.indexOf(':')
+            if (colonIdx < 1) return@mapNotNull null
+            val key   = line.substring(0, colonIdx).trim()
+            val value = line.substring(colonIdx + 1).trim().trim('"', '\'')
+            key to value
+        }.toMap()
+        return map to body
     }
 }

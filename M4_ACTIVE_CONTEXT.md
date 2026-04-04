@@ -223,8 +223,54 @@ resetZoom: Boolean, clearHarmonies: Boolean, capoEnabled: Boolean, capoFret: Int
 
 ---
 
+---
+
+## Bidirectional Sync — COMPLETE (2026-04-04)
+
+### What was built
+- **Web → Android path**: Web app calls `CloudLibraryService.updateLibraryManifest(songPath)` after every save — writes epoch-ms timestamp as `hash` in `system/library_health.json`. Android `checkSyncStatus` compares `remote.serverUpdatedAt > song.lastSyncedAt` (timestamp-based RemoteAhead) so mismatched hash formats (web=epoch string, Android=MD5) are handled correctly.
+- **Immediate saves**: Both apps save to GCS on every edit — no manual sync required.
+- **Startup check**: `autoSyncOnStart()` throttle reduced from 10 min to 60 seconds.
+- **Background poller**: `startRemoteChangePoller()` runs every 2 minutes in `LibraryViewModel.init`; calls `pullRemoteChanges()` which checks all songs for RemoteAhead and pulls, then applies web set changes.
+- **60s manifest cache**: `GcpSyncProvider` caches the manifest JSON with a 60s TTL so a 96-song startup check costs 1 GCS read, not 96.
+- **Fire-and-forget uploads**: `uploadSongInBackground(songId)` — `viewModelScope.launch` so UI is never blocked.
+
+### Key files changed
+- `GcpSyncProvider.kt` — manifest cache (`manifestCache`, `manifestCachedAt`, 60s TTL); `uploadSetData`/`downloadSetData` for `{userId}/sets/set_N.json`; `setObjectPath` helper; `invalidateManifestCache()` after write.
+- `SyncProvider.kt` — added `uploadSetData`/`downloadSetData` to interface.
+- `FakeSyncProvider.kt` — no-op stubs for the new interface methods.
+- `SongRepository.kt` — `checkSyncStatus` gains timestamp-based RemoteAhead guard.
+- `LibraryViewModel.kt` — poller, fire-and-forget uploads, `lastSeenSetUpdatedAt` map, set sync helpers; `updateMarkdownBody`/`updateSongMetadata` call `uploadSongInBackground`.
+- `CloudLibraryService.js` — `updateLibraryManifest`, `loadSetFile`, `saveSetFile`.
+- `App.tsx` — `handleSaveSong` calls manifest update; set state replaced with `liveSets`/`activeLiveSet`; `refreshCloudLibrary` loads set files; "Live Sets" right column.
+
+---
+
+## Set Sync — COMPLETE (2026-04-04)
+
+### Protocol
+- Set files live at `{userId}/sets/set_{N}.json`: `{"version":1,"updatedAt":epoch,"source":"tablet"|"web","songIds":["uuid1",...]}`
+- Tablet writes `source:"tablet"` on every mutation; web writes `source:"web"`.
+- Android poller applies only changes where `source=="web"` and `updatedAt > lastSeenSetUpdatedAt[N]` (in-memory, not persisted; `source` field guards direction on restart).
+- `SetlistRepository.replaceSetContents(setId, songIds)` — clears all entries, re-inserts in order.
+- `LibraryViewModel.uploadAllSetsInBackground()` — called by every set-mutation function.
+- All set-mutation functions in `LibraryViewModel` now upload: `addToPerformSet`, `removeFromPerformSet`, `reorderPerformSet`, `addSongToSetNumber`, `removeSongFromSetNumber`, `reorderSong`, `deleteSet`, `clearAllSets`.
+
+### Web Live Sets
+- Replaced "Setlist Architect" export panel with **Live Sets** section.
+- Shows tabs per set (1–N), songs in order with ✕ remove, library picker to add.
+- Changes call `CloudLibraryService.saveSetFile` immediately.
+
+---
+
+## Clear All Sets — COMPLETE (2026-04-04)
+- `SetlistRepository.clearAllSets(setlistId)` — deletes sets 2+, clears Set 1 entries.
+- `LibraryViewModel.clearAllSets()` — calls repo method, resets active set filter.
+- Settings screen: "Clear All Sets" card in Library Tools, red outlined button, `AlertDialog` confirmation, red confirm button.
+
+---
+
 ## Remaining M4 Sync Work
-- **Download / pull** — fetch songs from GCS and merge into local DB (no pull flow yet)
 - **Full conflict resolution** — wire ConflictResolutionDialog "Keep Local" / "Keep Remote" to DB writes + `markSynced()`
 - **Session lock enforcement** — GCS lock objects written but not server-enforced
 - Setlist management screen

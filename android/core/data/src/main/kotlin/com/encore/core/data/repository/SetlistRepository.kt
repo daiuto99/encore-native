@@ -12,6 +12,7 @@ import com.encore.core.data.entities.SyncStatus
 import com.encore.core.data.relations.SetEntryWithSong
 import com.encore.core.data.relations.SetlistWithSets
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import java.util.UUID
 
 /**
@@ -107,6 +108,29 @@ interface SetlistRepository {
      * @return Result indicating success or error
      */
     suspend fun deleteSetAndRenumber(set: SetEntity): Result<Unit>
+
+    /**
+     * Replace all entries in a set with the given ordered song IDs.
+     * Existing entries are removed first, then new ones inserted in order.
+     * Unknown songIds (not in the local library) are silently skipped.
+     *
+     * Used to apply web-side set changes to Room.
+     *
+     * @param setId   Room ID of the set to overwrite.
+     * @param songIds Ordered list of song UUIDs.
+     */
+    suspend fun replaceSetContents(setId: String, songIds: List<String>): Result<Unit>
+
+    /**
+     * Clear all sets back to a blank slate:
+     *  - Removes all song entries from Set 1 (keeps the set itself so it's always the working set).
+     *  - Deletes Sets 2+ entirely (cascade removes their entries).
+     *
+     * Songs in the library are not affected.
+     *
+     * @param setlistId The setlist whose sets should be cleared.
+     */
+    suspend fun clearAllSets(setlistId: String): Result<Unit>
 
     // ========== Set Entry Operations (Songs in Sets) ==========
 
@@ -318,6 +342,44 @@ class SetlistRepositoryImpl(
                 setDao.update(updatedSet)
             }
 
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun replaceSetContents(setId: String, songIds: List<String>): Result<Unit> {
+        return try {
+            setEntryDao.deleteAllEntriesForSet(setId)
+            val now = System.currentTimeMillis()
+            songIds.forEachIndexed { index, songId ->
+                songDao.getById(songId) ?: return@forEachIndexed // skip songs not in library
+                setEntryDao.insert(
+                    SetEntryEntity(
+                        id = UUID.randomUUID().toString(),
+                        setId = setId,
+                        songId = songId,
+                        position = index + 1,
+                        createdAt = now
+                    )
+                )
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun clearAllSets(setlistId: String): Result<Unit> {
+        return try {
+            val allSets = setDao.getSetsForSetlist(setlistId).first()
+            for (set in allSets) {
+                if (set.number == 1) {
+                    setEntryDao.deleteAllEntriesForSet(set.id)
+                } else {
+                    setDao.delete(set) // cascade deletes its entries
+                }
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

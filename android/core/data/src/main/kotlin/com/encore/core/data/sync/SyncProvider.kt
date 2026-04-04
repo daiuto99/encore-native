@@ -68,6 +68,18 @@ interface SyncProvider : EncoreApiService {
      * @return Markdown content string on success; null if not found or unreachable.
      */
     suspend fun downloadSong(userId: String, songId: String): String?
+
+    /**
+     * Upload set data for [setNumber] to `{userId}/sets/set_{N}.json`.
+     * Content is a JSON string with version, updatedAt, source, and songIds fields.
+     */
+    suspend fun uploadSetData(userId: String, setNumber: Int, content: String)
+
+    /**
+     * Download set data for [setNumber] from `{userId}/sets/set_{N}.json`.
+     * Returns null if the file doesn't exist or network is unavailable.
+     */
+    suspend fun downloadSetData(userId: String, setNumber: Int): String?
 }
 
 /**

@@ -113,6 +113,10 @@ class LibraryViewModel(
     private val _sortOrder = MutableStateFlow(SortOrder.TITLE)
     val sortOrder: StateFlow<SortOrder> = _sortOrder.asStateFlow()
 
+    /** Non-null while the ConflictResolutionDialog is open. Cleared on resolution or dismiss. */
+    private val _conflictToResolve = MutableStateFlow<ConflictResolutionState?>(null)
+    val conflictToResolve: StateFlow<ConflictResolutionState?> = _conflictToResolve.asStateFlow()
+
     // ── Perform Set ───────────────────────────────────────────────────────────
     // The perform set is Set 1 of the default setlist — the nightly working set.
     private val _performSetId = MutableStateFlow<String?>(null)
@@ -228,10 +232,12 @@ class LibraryViewModel(
         val userId = userPrefs.persistedUser.first()?.googleAccountId ?: return
         val songs = songRepository.getAllSongsOnce()
         for (song in songs) {
-            if (song.isDirty || song.lastSyncedHash == null) continue
+            if (song.lastSyncedHash == null) continue
             val status = songRepository.checkSyncStatus(song.id)
-            if (status is ContentSyncStatus.RemoteAhead) {
-                songRepository.pullSongFromCloud(userId, song.id)
+            when (status) {
+                is ContentSyncStatus.RemoteAhead -> songRepository.pullSongFromCloud(userId, song.id)
+                is ContentSyncStatus.Conflict    -> songRepository.markConflict(song.id)
+                else -> Unit
             }
         }
         checkAndApplyWebSetChanges(userId)
@@ -719,9 +725,9 @@ class LibraryViewModel(
                     capoFret = capoFret.coerceIn(1, 12)
                 )
             )
+            // DB committed — check for conflict before pushing to cloud
+            uploadSongInBackground(songId)
         }
-        // Push metadata changes (title, artist, key, etc.) to cloud immediately
-        uploadSongInBackground(songId)
     }
 
     /** Single-shot flow for observing a song in the chart editor. */
@@ -782,11 +788,19 @@ class LibraryViewModel(
      * Fire-and-forget cloud upload for a single song.
      * Called immediately after any local save so the tablet never needs a manual sync.
      * Silently skipped if the user isn't signed in or has no network.
+     *
+     * Checks remote status before uploading — if the remote has been independently edited
+     * since the last sync, marks the song as CONFLICT instead of silently overwriting.
      */
     private fun uploadSongInBackground(songId: String) {
         viewModelScope.launch {
             val userId = userPrefs.persistedUser.first()?.googleAccountId ?: return@launch
-            songRepository.uploadSongToCloud(userId, songId)
+            val status = songRepository.checkSyncStatus(songId)
+            if (status is ContentSyncStatus.Conflict) {
+                songRepository.markConflict(songId)
+            } else {
+                songRepository.uploadSongToCloud(userId, songId)
+            }
         }
     }
 
@@ -798,8 +812,9 @@ class LibraryViewModel(
             songRepository.upsertSong(
                 existing.copy(markdownBody = body, updatedAt = now, localUpdatedAt = now, isDirty = true)
             )
+            // DB committed — check for conflict before pushing to cloud
+            uploadSongInBackground(songId)
         }
-        uploadSongInBackground(songId)
     }
 
     /**
@@ -829,7 +844,7 @@ class LibraryViewModel(
             for ((index, song) in songs.withIndex()) {
                 _syncHudState.value = SyncHudState.InProgress(current = index + 1, total = total)
 
-                if (song.isDirty || song.lastSyncedHash == null) {
+                if (song.lastSyncedHash == null || (song.isDirty && song.syncStatus != SyncStatus.CONFLICT)) {
                     // Tablet has local changes or song has never been synced → upload
                     val uploaded = songRepository.uploadSongToCloud(userId, song.id)
                     if (!uploaded && index == 0) {
@@ -838,11 +853,13 @@ class LibraryViewModel(
                         firstUploadFailed = true
                         break
                     }
-                } else {
+                } else if (song.syncStatus != SyncStatus.CONFLICT) {
                     // Local is clean — check if the web app pushed a newer version
                     val status = songRepository.checkSyncStatus(song.id)
-                    if (status is ContentSyncStatus.RemoteAhead) {
-                        songRepository.pullSongFromCloud(userId, song.id)
+                    when (status) {
+                        is ContentSyncStatus.RemoteAhead -> songRepository.pullSongFromCloud(userId, song.id)
+                        is ContentSyncStatus.Conflict    -> songRepository.markConflict(song.id)
+                        else -> Unit
                     }
                 }
             }
@@ -1147,6 +1164,49 @@ class LibraryViewModel(
         }
     }
 
+    // ── Conflict Resolution ───────────────────────────────────────────────────
+
+    /**
+     * Fetch the remote markdown body for [songId] and open [ConflictResolutionDialog].
+     * No-ops if the song is not found or the remote download fails (bad network, etc.).
+     */
+    fun prepareConflictResolution(songId: String) {
+        viewModelScope.launch {
+            val userId = userPrefs.persistedUser.first()?.googleAccountId ?: return@launch
+            val song = songRepository.getAllSongsOnce().find { it.id == songId } ?: return@launch
+            val remoteBody = songRepository.fetchRemoteMarkdownBody(userId, songId) ?: return@launch
+            _conflictToResolve.value = ConflictResolutionState(
+                songId = songId,
+                songTitle = song.title,
+                localBody = song.markdownBody,
+                remoteBody = remoteBody
+            )
+        }
+    }
+
+    /** Keep local — re-upload local content to cloud and clear conflict status. */
+    fun resolveConflictKeepLocal(songId: String) {
+        _conflictToResolve.value = null
+        viewModelScope.launch {
+            val userId = userPrefs.persistedUser.first()?.googleAccountId ?: return@launch
+            songRepository.uploadSongToCloud(userId, songId)
+        }
+    }
+
+    /** Keep remote — overwrite local DB with cloud content and clear conflict status. */
+    fun resolveConflictKeepRemote(songId: String) {
+        _conflictToResolve.value = null
+        viewModelScope.launch {
+            val userId = userPrefs.persistedUser.first()?.googleAccountId ?: return@launch
+            songRepository.pullSongFromCloud(userId, songId)
+        }
+    }
+
+    /** Dismiss the conflict dialog without resolving (Decide Later). */
+    fun dismissConflictResolution() {
+        _conflictToResolve.value = null
+    }
+
     companion object {
         private const val TAG = "LibraryViewModel"
     }
@@ -1160,3 +1220,10 @@ data class SyncProgress(val current: Int, val total: Int) {
     val message: String get() = "Syncing $current of $total…"
     val fraction: Float get() = if (total > 0) current.toFloat() / total else 0f
 }
+
+data class ConflictResolutionState(
+    val songId: String,
+    val songTitle: String,
+    val localBody: String,
+    val remoteBody: String
+)

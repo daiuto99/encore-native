@@ -106,3 +106,21 @@ yarn-error.log*
 *.orig
 .vscode/
 .DS_Store
+
+# Firebase CLI cache
+.firebase/
+.firebaserc
+firebase.json
+
+# Stale / duplicate web app copies — canonical app is Encore-Firebase/Encore-Firebase/
+encore-desktop-manager/
+encore-firebase-hosted/
+edm/
+Encore-Firebase.zip
+dist/
+
+# Scratch / temp files
+test.txt
+cors.json
+Claude_old.md
+definition-of-done.md

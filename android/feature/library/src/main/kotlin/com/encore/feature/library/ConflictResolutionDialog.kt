@@ -1,4 +1,4 @@
-package com.encore.feature.performance
+package com.encore.feature.library
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -35,27 +35,17 @@ import com.encore.core.ui.theme.LocalEncoreColors
 
 /**
  * Decision Gate dialog — shown when both local and remote markdownBody diverged
- * since the last sync ([ContentSyncStatus.Conflict]).
+ * since the last sync.
  *
  * Dimensions: 400dp width, centred, RoundedCornerShape(12dp) — per Zen UI spec.
  * Hit targets: "Keep Local" / "Keep Remote" buttons are 60dp height.
- *
- * Layout:
- *  - Header: song title + conflict explanation
- *  - Two-column diff preview: Local (green tint) | Remote (red tint)
- *  - Action row: Keep Local | Keep Remote (60dp)
- *  - Cancel link
- *
- * The diff preview shows raw markdown bodies for now. A line-level diff renderer
- * will replace this in a future sprint once the Ktor client is live and we have
- * real remote content to diff against.
  *
  * @param songTitle      Display title for the conflicted song
  * @param localBody      Current local markdownBody
  * @param remoteBody     Server's markdownBody (fetched during sync)
  * @param onKeepLocal    Called when user chooses to keep the local version
  * @param onKeepRemote   Called when user chooses to accept the remote version
- * @param onDismiss      Called when user taps Cancel (no change committed)
+ * @param onDismiss      Called when user taps "Decide Later" (no change committed)
  */
 @Composable
 fun ConflictResolutionDialog(
@@ -68,9 +58,8 @@ fun ConflictResolutionDialog(
 ) {
     val encoreColors = LocalEncoreColors.current
 
-    // SetColor pastels repurposed: green tint for local (additions), red tint for remote (changes)
-    val localTint  = Color(0xFF4CAF50).copy(alpha = 0.08f)
-    val remoteTint = Color(0xFFFF3B30).copy(alpha = 0.08f)
+    val localTint    = Color(0xFF4CAF50).copy(alpha = 0.08f)
+    val remoteTint   = Color(0xFFFF3B30).copy(alpha = 0.08f)
     val localBorder  = Color(0xFF4CAF50).copy(alpha = 0.30f)
     val remoteBorder = Color(0xFFFF3B30).copy(alpha = 0.30f)
 
@@ -87,10 +76,8 @@ fun ConflictResolutionDialog(
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(24.dp)
-            ) {
-                // ── Header ───────────────────────────────────────────────────
+            Column(modifier = Modifier.padding(24.dp)) {
+                // ── Header ────────────────────────────────────────────────────
                 Text(
                     text = "Sync Conflict",
                     color = Color(0xFFFF3B30),
@@ -114,7 +101,7 @@ fun ConflictResolutionDialog(
 
                 Spacer(Modifier.height(20.dp))
 
-                // ── Diff preview: two columns ─────────────────────────────
+                // ── Diff preview: two columns ─────────────────────────────────
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -180,7 +167,7 @@ fun ConflictResolutionDialog(
 
                 Spacer(Modifier.height(20.dp))
 
-                // ── Action row: 60dp hit targets ──────────────────────────
+                // ── Action row: 60dp hit targets ──────────────────────────────
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -218,7 +205,7 @@ fun ConflictResolutionDialog(
 
                 Spacer(Modifier.height(8.dp))
 
-                // ── Cancel ────────────────────────────────────────────────
+                // ── Decide Later ──────────────────────────────────────────────
                 androidx.compose.material3.TextButton(
                     onClick = onDismiss,
                     modifier = Modifier.align(Alignment.CenterHorizontally)

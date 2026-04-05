@@ -2,6 +2,7 @@ package com.encore.core.data.repository
 
 import com.encore.core.data.dao.SongDao
 import com.encore.core.data.entities.SongEntity
+import com.encore.core.data.entities.SyncStatus
 import android.content.IntentSender
 import com.encore.core.data.sync.ContentSyncStatus
 import com.encore.core.data.sync.FileHashUtils
@@ -214,6 +215,24 @@ interface SongRepository {
      * @return true if the pull succeeded, false if not found or network unavailable.
      */
     suspend fun pullSongFromCloud(userId: String, songId: String): Boolean
+
+    /** Reactive single-song stream — emits whenever the DB row changes. */
+    fun observeSong(songId: String): Flow<SongEntity?>
+
+    /**
+     * Mark a song's [SyncStatus] as [SyncStatus.CONFLICT] in the DB so the
+     * ⚠ badge appears in the library and [ConflictResolutionDialog] is triggered on tap.
+     */
+    suspend fun markConflict(songId: String)
+
+    /**
+     * Download the cloud version of [songId] and return only the markdown body,
+     * without writing anything to the local DB. Used to populate the remote diff pane
+     * in [ConflictResolutionDialog] before the user decides which version to keep.
+     *
+     * @return The remote markdown body, or null if the download failed.
+     */
+    suspend fun fetchRemoteMarkdownBody(userId: String, songId: String): String?
 }
 
 /**
@@ -247,6 +266,8 @@ class SongRepositoryImpl(
     override suspend fun getSongById(id: String): SongEntity? {
         return songDao.getById(id)
     }
+
+    override fun observeSong(songId: String): Flow<SongEntity?> = songDao.observeById(songId)
 
     override suspend fun upsertSong(song: SongEntity): Result<String> {
         return try {
@@ -361,7 +382,8 @@ class SongRepositoryImpl(
             song.copy(
                 lastSyncedHash = hash,
                 isDirty = false,
-                lastSyncedAt = System.currentTimeMillis()
+                lastSyncedAt = System.currentTimeMillis(),
+                syncStatus = SyncStatus.SYNCED
             )
         )
     }
@@ -424,9 +446,21 @@ class SongRepositoryImpl(
                 lastSyncedHash = hash,
                 lastSyncedAt   = now,
                 localUpdatedAt = now,
+                syncStatus     = SyncStatus.SYNCED,
             )
         )
         return true
+    }
+
+    override suspend fun markConflict(songId: String) {
+        val song = songDao.getById(songId) ?: return
+        songDao.update(song.copy(syncStatus = SyncStatus.CONFLICT))
+    }
+
+    override suspend fun fetchRemoteMarkdownBody(userId: String, songId: String): String? {
+        val rawContent = syncProvider.downloadSong(userId, songId) ?: return null
+        val (_, markdownBody) = parseYamlFrontMatter(rawContent)
+        return markdownBody.trim()
     }
 
     /**

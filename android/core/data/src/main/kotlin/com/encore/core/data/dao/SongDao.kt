@@ -69,6 +69,10 @@ interface SongDao {
     @Query("SELECT * FROM songs WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): SongEntity?
 
+    /** Reactive single-song query — emits a new value whenever the row changes. */
+    @Query("SELECT * FROM songs WHERE id = :id LIMIT 1")
+    fun observeById(id: String): Flow<SongEntity?>
+
     /**
      * Find a duplicate song by title and artist.
      * Used during import to detect existing songs.

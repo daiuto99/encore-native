@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -92,18 +93,18 @@ class SongDetailViewModel(
     val performSongIds: StateFlow<List<String>> = _performSongIds.asStateFlow()
 
     /**
-     * Returns a Flow for a specific song page — loads and caches on first call.
-     * Adjacent pages collect independently, enabling smooth pager previews.
+     * Returns a reactive Flow for a specific song page.
+     * Uses Room's observeById so the UI re-renders automatically when the DB row
+     * changes (e.g. after a background pull from GCS).
+     * Also keeps _songCache in sync so onPageChanged sees fresh data.
      */
     fun getSongForPage(songId: String): Flow<SongEntity?> {
-        if (!_songCache.value.containsKey(songId)) {
-            viewModelScope.launch {
-                songRepository.getSongById(songId)?.let { s ->
-                    _songCache.value = _songCache.value + (songId to s)
+        return songRepository.observeSong(songId)
+            .onEach { song ->
+                if (song != null) {
+                    _songCache.value = _songCache.value + (songId to song)
                 }
             }
-        }
-        return _songCache.map { it[songId] }
     }
 
     /** Called by pager when the visible page changes — updates main song state + zoom. */

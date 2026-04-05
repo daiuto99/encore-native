@@ -130,6 +130,7 @@ fun LibraryScreen(
     val statusMessage by viewModel.statusMessage.collectAsState()
     val activeSetFilter by viewModel.setFilter.collectAsState()
     val sortOrder by viewModel.sortOrder.collectAsState()
+    val conflictToResolve by viewModel.conflictToResolve.collectAsState()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -161,6 +162,17 @@ fun LibraryScreen(
             snackbarHostState.showSnackbar(it)
             viewModel.clearStatusMessage()
         }
+    }
+
+    conflictToResolve?.let { state ->
+        ConflictResolutionDialog(
+            songTitle = state.songTitle,
+            localBody = state.localBody,
+            remoteBody = state.remoteBody,
+            onKeepLocal = { viewModel.resolveConflictKeepLocal(state.songId) },
+            onKeepRemote = { viewModel.resolveConflictKeepRemote(state.songId) },
+            onDismiss = { viewModel.dismissConflictResolution() }
+        )
     }
 
     Scaffold(
@@ -244,6 +256,7 @@ fun LibraryListContent(
     val statusMessage by viewModel.statusMessage.collectAsState()
     val activeSetFilter by viewModel.setFilter.collectAsState()
     val sortOrder by viewModel.sortOrder.collectAsState()
+    val conflictToResolve by viewModel.conflictToResolve.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(importResult) {
@@ -265,6 +278,17 @@ fun LibraryListContent(
             snackbarHostState.showSnackbar(it)
             viewModel.clearStatusMessage()
         }
+    }
+
+    conflictToResolve?.let { state ->
+        ConflictResolutionDialog(
+            songTitle = state.songTitle,
+            localBody = state.localBody,
+            remoteBody = state.remoteBody,
+            onKeepLocal = { viewModel.resolveConflictKeepLocal(state.songId) },
+            onKeepRemote = { viewModel.resolveConflictKeepRemote(state.songId) },
+            onDismiss = { viewModel.dismissConflictResolution() }
+        )
     }
 
     Box(modifier = modifier.fillMaxWidth()) {
@@ -465,7 +489,6 @@ fun SongListItem(
         .collectAsState(initial = emptyList())
     val availableSets by viewModel.availableSets.collectAsState()
     var showConfirmDialog by remember { mutableStateOf(false) }
-    var showConflictWarning by remember { mutableStateOf(false) }
     var showSetPicker by remember { mutableStateOf(false) }
 
     val rowAccentColor = remember(sets) {
@@ -504,30 +527,6 @@ fun SongListItem(
             confirmButton = {},
             dismissButton = {
                 TextButton(onClick = { showSetPicker = false }) { Text("Cancel") }
-            }
-        )
-    }
-
-    // Conflict warning dialog — shown when user taps a CONFLICT song
-    if (showConflictWarning) {
-        AlertDialog(
-            onDismissRequest = { showConflictWarning = false },
-            title = { Text("Sync Conflict") },
-            text = {
-                Text(
-                    "\"${song.title}\" has unresolved changes between this device and the server. " +
-                    "Opening it may overwrite server data. Resolve the conflict before editing.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showConflictWarning = false
-                    onClick()
-                }) { Text("Open Anyway") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showConflictWarning = false }) { Text("Decide Later") }
             }
         )
     }
@@ -663,7 +662,7 @@ fun SongListItem(
                 .height(72.dp)
                 .clickable(onClick = {
                     if (song.syncStatus == SyncStatus.CONFLICT) {
-                        showConflictWarning = true
+                        viewModel.prepareConflictResolution(song.id)
                     } else {
                         onClick()
                     }

@@ -270,7 +270,48 @@ resetZoom: Boolean, clearHarmonies: Boolean, capoEnabled: Boolean, capoFret: Int
 
 ---
 
+## Conflict Resolution — WIRED (2026-04-04)
+
+### What was built
+- `SongRepository.markConflict(songId)` — sets `syncStatus = CONFLICT` on DB entity (shows ⚠ badge)
+- `SongRepository.fetchRemoteMarkdownBody(userId, songId)` — downloads + strips YAML, returns body for diff display only (no DB write)
+- `SongRepository.markSynced()` + `pullSongFromCloud()` — both now reset `syncStatus = SYNCED` on resolution
+- `SongDao.observeById(id)` — new reactive `Flow<SongEntity?>` for single-song observation
+- `SongRepository.observeSong(songId)` — exposes reactive flow to VMs
+- `ConflictResolutionDialog` moved from `feature/performance` → `feature/library` (only used there)
+- `LibraryViewModel`: `ConflictResolutionState`, `conflictToResolve: StateFlow`, `prepareConflictResolution`, `resolveConflictKeepLocal`, `resolveConflictKeepRemote`, `dismissConflictResolution`
+- `uploadSongInBackground` now runs `checkSyncStatus` AFTER DB write (inside coroutine) — fixes race condition where `isDirty=true` wasn't visible before upload check
+- `pullRemoteChanges` + `triggerGlobalSync` both call `markConflict()` on `ContentSyncStatus.Conflict`
+- Screen-level `ConflictResolutionDialog` in both `LibraryScreen` and `LibraryListContent`
+- `SongDetailViewModel.getSongForPage` replaced one-shot cache with `observeSong` Flow — performance view now live-updates when DB changes
+
+### Known issue
+- Conflict is hard to trigger in real usage because `uploadSongInBackground` is nearly instant. Web must edit from a stale snapshot (before tablet upload lands) to create a true conflict. Still under investigation.
+
+---
+
+## Firebase Web App — DEPLOYED (2026-04-04)
+
+### Location
+- **Canonical source:** `Encore-Firebase/Encore-Firebase/` (the inner directory — this is the one that runs on localhost:5174)
+- **Live URL:** https://encore-cloud-leo-2026-8a467.web.app
+- **Firebase project:** `encore-cloud-leo-2026-8a467`
+- **Firebase config files** (`firebase.json`, `.firebaserc`) live inside `Encore-Firebase/Encore-Firebase/`
+
+### Deploy command (run from `Encore-Firebase/Encore-Firebase/`)
+```bash
+npm run build
+firebase deploy --only hosting
+```
+
+### Notes
+- `.env` file holds Firebase API keys — gitignored, must be present locally to build
+- `node_modules/` and `dist/` are gitignored
+- Old copies (`encore-desktop-manager/`, `encore-firebase-hosted/`, `edm/`) are gitignored at root
+
+---
+
 ## Remaining M4 Sync Work
-- **Full conflict resolution** — wire ConflictResolutionDialog "Keep Local" / "Keep Remote" to DB writes + `markSynced()`
+- **Conflict detection reliability** — race condition still being investigated; may need 60s manifest cache invalidation on upload
 - **Session lock enforcement** — GCS lock objects written but not server-enforced
 - Setlist management screen

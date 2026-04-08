@@ -279,12 +279,12 @@ class LibraryViewModel(
             try {
                 setlistRepository.deleteSetAndRenumber(set)
                 if (_setFilter.value == set.number) _setFilter.value = null
+                uploadAllSetsInBackground()
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to delete set ${set.number}", e)
                 _statusMessage.value = "Could not delete set"
             }
         }
-        uploadAllSetsInBackground()
     }
 
     /** Creates the next numbered set in the default setlist. */

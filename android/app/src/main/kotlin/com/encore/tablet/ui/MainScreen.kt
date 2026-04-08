@@ -563,7 +563,10 @@ fun CommandCenterScreen(
                 },
                 onClearFilter = { selectedSetFilter = null },
                 onCreateSet = { libraryViewModel.createNewSet() },
-                onDeleteSet = { set -> libraryViewModel.deleteSet(set) }
+                onDeleteSet = { set ->
+                    if (selectedSetFilter == set.number) selectedSetFilter = null
+                    libraryViewModel.deleteSet(set)
+                }
             )
         }
     }

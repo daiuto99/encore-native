@@ -183,7 +183,8 @@ interface SongDao {
         INNER JOIN set_entries ON songs.id = set_entries.song_id
         INNER JOIN sets ON set_entries.set_id = sets.id
         WHERE sets.number = :setNumber
-        ORDER BY set_entries.position ASC
+        GROUP BY songs.id
+        ORDER BY MIN(set_entries.position) ASC
     """)
     fun getSongsInSetOrdered(setNumber: Int): Flow<List<SongEntity>>
 }

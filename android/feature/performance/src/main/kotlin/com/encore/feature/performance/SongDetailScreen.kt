@@ -42,8 +42,8 @@ import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.BookmarkAdd
-import androidx.compose.material.icons.filled.Bookmarks
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.ui.res.painterResource
 import androidx.compose.material.icons.filled.Remove
@@ -1284,7 +1284,7 @@ private fun PerformanceDashboard(
                         onSaveClick?.let { save ->
                             IconButton(onClick = save, modifier = Modifier.size(60.dp)) {
                                 Icon(
-                                    imageVector = Icons.Default.BookmarkAdd,
+                                    imageVector = Icons.Default.Save,
                                     contentDescription = "Save set",
                                     tint = encoreColors.iconTint,
                                     modifier = Modifier.size(20.dp)
@@ -1294,7 +1294,7 @@ private fun PerformanceDashboard(
                         onLoadClick?.let { load ->
                             IconButton(onClick = load, modifier = Modifier.size(60.dp)) {
                                 Icon(
-                                    imageVector = Icons.Default.Bookmarks,
+                                    imageVector = Icons.Default.FolderOpen,
                                     contentDescription = "Load setlist",
                                     tint = encoreColors.iconTint,
                                     modifier = Modifier.size(20.dp)

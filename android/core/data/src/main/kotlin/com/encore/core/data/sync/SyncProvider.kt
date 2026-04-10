@@ -80,6 +80,15 @@ interface SyncProvider : EncoreApiService {
      * Returns null if the file doesn't exist or network is unavailable.
      */
     suspend fun downloadSetData(userId: String, setNumber: Int): String?
+
+    /**
+     * Invalidate any in-memory manifest cache so the next [getRemoteHash] call
+     * fetches fresh data from the server.
+     *
+     * Called by [SongRepositoryImpl] before checking sync status prior to an upload,
+     * ensuring a web edit that landed within the cache TTL is not missed.
+     */
+    fun invalidateCache()
 }
 
 /**

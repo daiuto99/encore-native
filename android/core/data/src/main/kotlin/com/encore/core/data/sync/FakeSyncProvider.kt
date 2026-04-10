@@ -118,6 +118,9 @@ object FakeSyncProvider : SyncProvider {
     /** Always returns null — fake backend has no set storage. */
     override suspend fun downloadSetData(userId: String, setNumber: Int): String? = null
 
+    /** No-op — fake backend has no manifest cache to invalidate. */
+    override fun invalidateCache() = Unit
+
     override suspend fun getRemoteHash(songId: String): RemoteHashResponse {
         val now = System.currentTimeMillis()
         return when (overrides[songId] ?: SyncScenario.SYNCED) {

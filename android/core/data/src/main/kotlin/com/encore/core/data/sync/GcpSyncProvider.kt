@@ -268,10 +268,12 @@ class GcpSyncProvider(
     }
 
     /** Invalidate the manifest cache so the next read fetches fresh data from GCS. */
-    private fun invalidateManifestCache() {
+    override fun invalidateCache() {
         manifestCache = null
         manifestCachedAt = 0L
     }
+
+    private fun invalidateManifestCache() = invalidateCache()
 
     // ── Song body upload / download ──────────────────────────────────────────
 

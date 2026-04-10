@@ -285,8 +285,9 @@ resetZoom: Boolean, clearHarmonies: Boolean, capoEnabled: Boolean, capoFret: Int
 - Screen-level `ConflictResolutionDialog` in both `LibraryScreen` and `LibraryListContent`
 - `SongDetailViewModel.getSongForPage` replaced one-shot cache with `observeSong` Flow — performance view now live-updates when DB changes
 
-### Known issue
-- Conflict is hard to trigger in real usage because `uploadSongInBackground` is nearly instant. Web must edit from a stale snapshot (before tablet upload lands) to create a true conflict. Still under investigation.
+### Manifest cache race condition — FIXED (2026-04-10)
+- **Root cause:** `uploadSongInBackground` called `checkSyncStatus` which served the 60s cached manifest. If the web app edited within the cache window the tablet saw a stale hash, resolved to `LocalAhead`, and silently overwrote the web version.
+- **Fix:** `SyncProvider.invalidateCache()` added to the interface; `GcpSyncProvider` exposes existing private method; `SongRepository.invalidateRemoteCache()` delegates to it. `uploadSongInBackground` calls `invalidateRemoteCache()` before `checkSyncStatus` to force a fresh GCS read. Background poller and global sync retain the 60s cache.
 
 ---
 
@@ -312,6 +313,5 @@ firebase deploy --only hosting
 ---
 
 ## Remaining M4 Sync Work
-- **Conflict detection reliability** — race condition still being investigated; may need 60s manifest cache invalidation on upload
 - **Session lock enforcement** — GCS lock objects written but not server-enforced
 - Setlist management screen

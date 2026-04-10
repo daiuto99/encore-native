@@ -795,6 +795,9 @@ class LibraryViewModel(
     private fun uploadSongInBackground(songId: String) {
         viewModelScope.launch {
             val userId = userPrefs.persistedUser.first()?.googleAccountId ?: return@launch
+            // Force a fresh manifest read before the conflict check — prevents the 60s cache
+            // from masking a web edit that landed since the last manifest fetch.
+            songRepository.invalidateRemoteCache()
             val status = songRepository.checkSyncStatus(songId)
             if (status is ContentSyncStatus.Conflict) {
                 songRepository.markConflict(songId)

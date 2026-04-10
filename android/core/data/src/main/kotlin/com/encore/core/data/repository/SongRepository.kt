@@ -226,6 +226,15 @@ interface SongRepository {
     suspend fun markConflict(songId: String)
 
     /**
+     * Invalidate the sync provider's manifest cache so the next [checkSyncStatus] call
+     * fetches a fresh manifest from GCS.
+     *
+     * Called before the pre-upload conflict check in [LibraryViewModel.uploadSongInBackground]
+     * so a web edit that landed within the 60s cache TTL is not silently overwritten.
+     */
+    fun invalidateRemoteCache()
+
+    /**
      * Download the cloud version of [songId] and return only the markdown body,
      * without writing anything to the local DB. Used to populate the remote diff pane
      * in [ConflictResolutionDialog] before the user decides which version to keep.
@@ -456,6 +465,8 @@ class SongRepositoryImpl(
         val song = songDao.getById(songId) ?: return
         songDao.update(song.copy(syncStatus = SyncStatus.CONFLICT))
     }
+
+    override fun invalidateRemoteCache() = syncProvider.invalidateCache()
 
     override suspend fun fetchRemoteMarkdownBody(userId: String, songId: String): String? {
         val rawContent = syncProvider.downloadSong(userId, songId) ?: return null

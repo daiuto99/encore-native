@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
@@ -52,6 +53,17 @@ class SongDetailViewModel(
     // Scroll speed in pixels per second (retained for Post-v1)
     private val _scrollSpeedPxPerSecond = MutableStateFlow(0f)
     val scrollSpeedPxPerSecond: StateFlow<Float> = _scrollSpeedPxPerSecond.asStateFlow()
+
+    // Quick search (performance-mode song lookup)
+    private val _quickSearchQuery = MutableStateFlow("")
+    val quickSearchQuery: StateFlow<String> = _quickSearchQuery.asStateFlow()
+
+    val quickSearchResults: StateFlow<List<SongEntity>> = _quickSearchQuery
+        .flatMapLatest { query -> songRepository.searchSongs(query) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun updateQuickSearchQuery(query: String) { _quickSearchQuery.value = query }
+    fun clearQuickSearch() { _quickSearchQuery.value = "" }
 
     // Set navigation context
     private val _currentSetNumber = MutableStateFlow(-1)

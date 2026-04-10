@@ -44,22 +44,28 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.SaveAlt
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.ui.res.painterResource
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.outlined.NightsStay
 import androidx.compose.material.icons.outlined.WbSunny
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -215,6 +221,7 @@ fun SongDetailScreen(
     onEditClick: ((com.encore.core.data.entities.SongEntity) -> Unit)? = null,
     onPageChanged: (() -> Unit)? = null,
     onNavigateToSong: ((String) -> Unit)? = null,
+    onQuickSearchSong: ((String) -> Unit)? = null,
     appPreferences: AppPreferences = AppPreferences(),
     syncHudState: com.encore.core.data.sync.SyncHudState? = null,
     modifier: Modifier = Modifier
@@ -235,6 +242,7 @@ fun SongDetailScreen(
     var showPageIndicator by remember { mutableStateOf(false) }
     var showSaveDialog by remember { mutableStateOf(false) }
     var showLoadDialog by remember { mutableStateOf(false) }
+    var showQuickSearch by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     // Per-song in-session zoom map. Populated on first zoom gesture; falls back to DB value.
     val zoomPerSong = remember { mutableStateMapOf<String, Float>() }
@@ -418,6 +426,7 @@ fun SongDetailScreen(
                     onNavigateBack = onNavigateBack,
                     onSaveClick = if (setNumber > 0) ({ showSaveDialog = true }) else null,
                     onLoadClick = if (setNumber > 0) ({ showLoadDialog = true }) else null,
+                    onSearchClick = if (onQuickSearchSong != null) ({ showQuickSearch = true }) else null,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -535,6 +544,22 @@ fun SongDetailScreen(
             onLoad = { id ->
                 viewModel.loadSetlist(id)
                 showLoadDialog = false
+            }
+        )
+    }
+
+    // ── Quick search sheet ────────────────────────────────────────────────────
+    if (showQuickSearch && onQuickSearchSong != null) {
+        QuickSearchSheet(
+            viewModel = viewModel,
+            onSongSelected = { songId ->
+                showQuickSearch = false
+                viewModel.clearQuickSearch()
+                onQuickSearchSong(songId)
+            },
+            onDismiss = {
+                showQuickSearch = false
+                viewModel.clearQuickSearch()
             }
         )
     }
@@ -1041,6 +1066,7 @@ private fun PerformanceDashboard(
     onNavigateBack: () -> Unit,
     onSaveClick: (() -> Unit)? = null,
     onLoadClick: (() -> Unit)? = null,
+    onSearchClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val encoreColors = LocalEncoreColors.current
@@ -1275,6 +1301,16 @@ private fun PerformanceDashboard(
                                 )
                             }
                         }
+                        onSearchClick?.let { search ->
+                            IconButton(onClick = search, modifier = Modifier.size(60.dp)) {
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = "Quick search",
+                                    tint = encoreColors.iconTint,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
                         IconButton(onClick = onNavigateBack, modifier = Modifier.size(60.dp)) {
                             Icon(
                                 imageVector = Icons.Default.Close,
@@ -1284,6 +1320,96 @@ private fun PerformanceDashboard(
                             )
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Quick Search Sheet
+// ─────────────────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun QuickSearchSheet(
+    viewModel: SongDetailViewModel,
+    onSongSelected: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val encoreColors = LocalEncoreColors.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val query by viewModel.quickSearchQuery.collectAsState()
+    val results by viewModel.quickSearchResults.collectAsState()
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = encoreColors.cardBackground
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { viewModel.updateQuickSearchQuery(it) },
+                placeholder = { Text("Search songs…", color = encoreColors.artistText) },
+                leadingIcon = {
+                    Icon(Icons.Default.Search, contentDescription = null, tint = encoreColors.iconTint)
+                },
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.updateQuickSearchQuery("") }) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear", tint = encoreColors.iconTint)
+                        }
+                    }
+                },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = encoreColors.titleText,
+                    unfocusedTextColor = encoreColors.titleText,
+                    focusedBorderColor = encoreColors.iconTint,
+                    unfocusedBorderColor = encoreColors.divider
+                )
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            LazyColumn {
+                items(results, key = { it.id }) { song ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSongSelected(song.id) }
+                            .padding(horizontal = 4.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = song.title,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                                color = encoreColors.titleText
+                            )
+                            if (song.artist != "Unknown Artist") {
+                                Text(
+                                    text = song.artist,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = encoreColors.artistText
+                                )
+                            }
+                        }
+                        song.displayKey?.let { key ->
+                            Text(
+                                text = key,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = encoreColors.artistText,
+                                modifier = Modifier.padding(start = 12.dp)
+                            )
+                        }
+                    }
+                    HorizontalDivider(thickness = 0.5.dp, color = encoreColors.divider)
                 }
             }
         }

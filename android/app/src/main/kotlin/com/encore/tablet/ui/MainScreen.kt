@@ -231,6 +231,10 @@ fun MainScreen(
                         launchSingleTop = true
                     }
                 },
+                onQuickSearchSong = { songId ->
+                    // Simple push — no popUpTo so Back returns to the current song in the set.
+                    navController.navigate(Routes.songDetail(songId, -1))
+                },
                 syncHudState = syncHudState
             )
         }

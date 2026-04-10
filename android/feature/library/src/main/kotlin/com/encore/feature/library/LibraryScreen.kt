@@ -488,11 +488,16 @@ fun SongListItem(
     val sets by remember(song.id) { viewModel.observeSetsContainingSong(song.id) }
         .collectAsState(initial = emptyList())
     val availableSets by viewModel.availableSets.collectAsState()
+    // Only show membership for the active setlist — sets across other setlists are irrelevant
+    val activeSets = remember(sets, availableSets) {
+        val availableIds = availableSets.map { it.id }.toSet()
+        sets.filter { it.id in availableIds }
+    }
     var showConfirmDialog by remember { mutableStateOf(false) }
     var showSetPicker by remember { mutableStateOf(false) }
 
-    val rowAccentColor = remember(sets) {
-        sets.minByOrNull { it.number }?.number?.let { SetColor.getSetColor(it) }
+    val rowAccentColor = remember(activeSets) {
+        activeSets.minByOrNull { it.number }?.number?.let { SetColor.getSetColor(it) }
     }
 
     // Set picker dialog — shown when user taps the + button
@@ -504,7 +509,7 @@ fun SongListItem(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     availableSets.forEach { set ->
                         val setColor = SetColor.getSetColor(set.number)
-                        val alreadyInSet = sets.any { it.number == set.number }
+                        val alreadyInSet = activeSets.any { it.id == set.id }
                         OutlinedButton(
                             onClick = {
                                 showSetPicker = false
@@ -733,7 +738,7 @@ fun SongListItem(
 
                     // Set membership circles
                     Spacer(modifier = Modifier.width(6.dp))
-                    sets.forEach { set ->
+                    activeSets.forEach { set ->
                         SetNumberCircle(
                             setNumber = set.number,
                             modifier = Modifier.padding(end = 4.dp)

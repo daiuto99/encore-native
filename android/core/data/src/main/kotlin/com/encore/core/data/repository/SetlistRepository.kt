@@ -216,6 +216,17 @@ interface SetlistRepository {
      * @return The found or newly created SetEntity
      */
     suspend fun getOrCreateSetByNumber(setNumber: Int): SetEntity
+
+    /**
+     * Upload the contents of a set to cloud storage.
+     *
+     * Builds a JSON payload with the current song IDs and writes it via the SyncProvider.
+     * No-ops silently if no SyncProvider is configured (offline / test environments).
+     *
+     * @param userId Google account ID of the authenticated user
+     * @param setNumber Set number (1–4)
+     */
+    suspend fun uploadSet(userId: String, setNumber: Int)
 }
 
 /**
@@ -225,7 +236,8 @@ class SetlistRepositoryImpl(
     private val setlistDao: SetlistDao,
     private val setDao: SetDao,
     private val setEntryDao: SetEntryDao,
-    private val songDao: SongDao
+    private val songDao: SongDao,
+    private val syncProvider: com.encore.core.data.sync.SyncProvider? = null
 ) : SetlistRepository {
 
     // ========== Setlist Operations ==========
@@ -583,5 +595,21 @@ class SetlistRepositoryImpl(
             colorToken = null,
             createdAt = now
         )
+    }
+
+    override suspend fun uploadSet(userId: String, setNumber: Int) {
+        val provider = syncProvider ?: return
+        try {
+            val set = getOrCreateSetByNumber(setNumber)
+            val entries = setEntryDao.getEntriesForSetList(set.id)
+            val songIds = entries.map { it.songId }
+            val now = System.currentTimeMillis()
+            val songIdsJson = songIds.joinToString(",") { "\"$it\"" }
+            val json = """{"version":1,"updatedAt":$now,"source":"tablet","songIds":[$songIdsJson]}"""
+            provider.uploadSetData(userId, setNumber, json)
+            android.util.Log.d("SetlistRepository", "uploadSet(set=$setNumber, ${songIds.size} songs)")
+        } catch (e: Exception) {
+            android.util.Log.w("SetlistRepository", "uploadSet($setNumber) failed: ${e.message}")
+        }
     }
 }

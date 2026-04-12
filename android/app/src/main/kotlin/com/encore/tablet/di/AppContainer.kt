@@ -45,7 +45,8 @@ class AppContainer(private val context: Context) {
             setlistDao = database.setlistDao(),
             setDao = database.setDao(),
             setEntryDao = database.setEntryDao(),
-            songDao = database.songDao()
+            songDao = database.songDao(),
+            syncProvider = syncProvider
         )
     }
 

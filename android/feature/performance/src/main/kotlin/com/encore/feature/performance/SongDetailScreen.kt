@@ -38,6 +38,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
@@ -227,6 +228,7 @@ fun SongDetailScreen(
     modifier: Modifier = Modifier
 ) {
     val song by viewModel.song.collectAsState()
+    val tapBpm by viewModel.tapBpm.collectAsState()
     val textSizeMultiplier by viewModel.textSizeMultiplier.collectAsState()
     val prevSongId by viewModel.prevSongId.collectAsState()
     val nextSongId by viewModel.nextSongId.collectAsState()
@@ -325,7 +327,8 @@ fun SongDetailScreen(
             .fillMaxSize()
             .background(encoreColors.screenBackground)
     ) {
-        if (song == null) {
+        val currentSong = song
+        if (currentSong == null) {
             // ── Initial load spinner ─────────────────────────────────────────
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = Color.White)
@@ -338,7 +341,7 @@ fun SongDetailScreen(
                 modifier = Modifier.fillMaxSize()
             ) { page ->
                 val pageSongId = effectiveSongIds.getOrNull(page) ?: songId
-                val pageSong by viewModel.getSongForPage(pageSongId).collectAsState(initial = null)
+                val pageSong by remember(pageSongId) { viewModel.getSongForPage(pageSongId) }.collectAsState(initial = null)
                 val pageScrollState = rememberScrollState()
                 val isActivePage = page == pagerState.currentPage
 
@@ -406,7 +409,7 @@ fun SongDetailScreen(
                     )
                 }
                 PerformanceDashboard(
-                    song = song!!,
+                    song = currentSong,
                     harmonyColor = parseColorSafe(
                         if (encoreColors.isDark) appPreferences.darkHarmonyColor
                         else appPreferences.lightHarmonyColor
@@ -427,6 +430,9 @@ fun SongDetailScreen(
                     onSaveClick = if (setNumber > 0) ({ showSaveDialog = true }) else null,
                     onLoadClick = if (setNumber > 0) ({ showLoadDialog = true }) else null,
                     onSearchClick = if (onQuickSearchSong != null) ({ showQuickSearch = true }) else null,
+                    tapBpm = tapBpm,
+                    onTap = { viewModel.recordTap() },
+                    onSaveTapBpm = { bpm -> viewModel.saveTapBpm(bpm) },
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -592,14 +598,18 @@ fun SongContent(
     val encoreColors = LocalEncoreColors.current
     var currentZoom by remember { mutableFloatStateOf(textSizeMultiplier) }
     val isDark = encoreColors.isDark
-    val sections = remember(song.markdownBody, song.title, appPreferences.showChords, appPreferences.showKeyInfo, isDark) {
-        val body = stripLeadingTitle(song.markdownBody, song.title)
+    val sections = remember(song.markdownBody, song.title, song.displayKey, song.originalKey, appPreferences.showChords, appPreferences.showKeyInfo, isDark) {
+        val rawBody = stripLeadingTitle(song.markdownBody, song.title)
+        val semitones = TranspositionUtils.semitoneShift(song.originalKey, song.displayKey)
+        val body = if (semitones != 0) TranspositionUtils.transposeBody(rawBody, semitones, song.displayKey) else rawBody
         parseSongSections(body, appPreferences, isDark)
     }
     val vp = remember { ViewerPreferences() }
 
-    // Reset local zoom only when the song itself changes, not on every zoom tick.
-    LaunchedEffect(song.id) { currentZoom = textSizeMultiplier }
+    // Sync local zoom baseline when the song changes or when the parent resets zoom
+    // (e.g. double-tap reset). During an active pinch gesture awaitEachGesture holds
+    // the Main thread so this effect cannot race with the gesture loop.
+    LaunchedEffect(song.id, textSizeMultiplier) { currentZoom = textSizeMultiplier }
 
     Column(
         modifier = modifier
@@ -1067,6 +1077,9 @@ private fun PerformanceDashboard(
     onSaveClick: (() -> Unit)? = null,
     onLoadClick: (() -> Unit)? = null,
     onSearchClick: (() -> Unit)? = null,
+    tapBpm: Int? = null,
+    onTap: () -> Unit = {},
+    onSaveTapBpm: ((Int) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val encoreColors = LocalEncoreColors.current
@@ -1164,6 +1177,7 @@ private fun PerformanceDashboard(
                 val showStatusPill = (appPreferences.showLeadIndicator && song.isLeadGuitar)
                     || song.capoEnabled
                     || bpm != null
+                    || tapBpm != null
                 if (showStatusPill) {
                     Surface(
                         shape = RoundedCornerShape(50),
@@ -1203,24 +1217,44 @@ private fun PerformanceDashboard(
                                     )
                                 }
                             }
-                            if (bpm != null) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            val displayBpm = tapBpm ?: bpm
+                            if (displayBpm != null) {
+                                val isTapping = tapBpm != null
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.clickable { onTap() }
+                                ) {
                                     Text(
-                                        text = "$bpm",
-                                        color = encoreColors.titleText.copy(alpha = 0.88f),
+                                        text = "$displayBpm",
+                                        color = if (isTapping) MaterialTheme.colorScheme.primary
+                                                else encoreColors.titleText.copy(alpha = 0.88f),
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold,
                                         fontFamily = FontFamily.Monospace,
                                         lineHeight = 14.sp
                                     )
                                     Text(
-                                        text = "BPM",
-                                        color = encoreColors.artistText.copy(alpha = 0.55f),
+                                        text = if (isTapping) "TAP" else "BPM",
+                                        color = if (isTapping) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                                                else encoreColors.artistText.copy(alpha = 0.55f),
                                         fontSize = 7.sp,
                                         fontWeight = FontWeight.Medium,
                                         letterSpacing = 0.4.sp,
                                         lineHeight = 8.sp
                                     )
+                                }
+                                if (isTapping && onSaveTapBpm != null) {
+                                    IconButton(
+                                        onClick = { onSaveTapBpm(displayBpm) },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = "Save BPM",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1759,6 +1793,9 @@ private val TECH_NOTE_PATTERN = Regex("""\*([^*]+)\*""")
 private enum class SpanType { CHORD, HARMONY, TECH_NOTE }
 private data class BodySpan(val range: IntRange, val type: SpanType, val text: String)
 
+// Legacy bare chord line detector — pre-compiled once at class-load time
+private val BARE_CHORD_PATTERN = Regex("""^[\s|]*([A-G][#b]?(m|maj|min|aug|dim|sus|add)?[0-9]?[/\s|]*)+$""")
+
 // Fallback accent when no set context
 /** Parses a hex color string (e.g. "#FF9F0A") into a [Color], falling back to [Color.Gray]. */
 private fun parseColorSafe(hex: String): Color = try {
@@ -1878,10 +1915,8 @@ private fun buildChordLine(
  * Returns true for a legacy bare chord line: only chord names and whitespace.
  * Example: `G  Em  C  D`
  */
-private fun isBareChordLine(line: String): Boolean {
-    val pattern = Regex("""^[\s|]*([A-G][#b]?(m|maj|min|aug|dim|sus|add)?[0-9]?[/\s|]*)+$""")
-    return line.isNotBlank() && pattern.matches(line.trim())
-}
+private fun isBareChordLine(line: String): Boolean =
+    line.isNotBlank() && BARE_CHORD_PATTERN.matches(line.trim())
 
 /**
  * Returns true when a line contains only backtick chords and whitespace —

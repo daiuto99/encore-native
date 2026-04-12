@@ -87,9 +87,12 @@ import com.encore.core.data.preferences.AppPreferences
 import com.encore.core.ui.theme.SetColor
 import com.encore.tablet.audit.LibraryAuditViewModel
 import com.encore.tablet.preferences.AppPreferencesViewModel
+import com.encore.feature.library.ImportViewModel
 import com.encore.feature.library.LibraryListContent
 import com.encore.feature.library.LibraryViewModel
+import com.encore.feature.library.SetViewModel
 import com.encore.feature.library.SongChartEditorScreen
+import com.encore.feature.library.SyncViewModel
 import com.encore.feature.library.SongEditBottomSheet
 import com.encore.tablet.settings.SettingsScreen
 import com.encore.feature.performance.SongDetailScreen
@@ -119,12 +122,15 @@ fun MainScreen(
 ) {
     val navController = rememberNavController()
     val libraryViewModel: LibraryViewModel = viewModel(factory = viewModelFactory)
+    val syncViewModel: SyncViewModel = viewModel(factory = viewModelFactory)
+    val importViewModel: ImportViewModel = viewModel(factory = viewModelFactory)
+    val setViewModel: SetViewModel = viewModel(factory = viewModelFactory)
     val authViewModel: AuthViewModel = viewModel(factory = viewModelFactory)
     val appPrefsViewModel: AppPreferencesViewModel = viewModel(factory = viewModelFactory)
     val auditViewModel: LibraryAuditViewModel = viewModel(factory = viewModelFactory)
     val appPreferences by appPrefsViewModel.preferences.collectAsState()
-    val syncHudState by libraryViewModel.syncHudState.collectAsState()
-    val lastSyncTimestamp by libraryViewModel.lastSyncTimestamp.collectAsState()
+    val syncHudState by syncViewModel.syncHudState.collectAsState()
+    val lastSyncTimestamp by syncViewModel.lastSyncTimestamp.collectAsState()
     var isDarkMode by remember { mutableStateOf(false) }
     var editSong by remember { mutableStateOf<SongEntity?>(null) }
     val encoreColors = if (isDarkMode) DarkEncoreColors else LightEncoreColors
@@ -133,8 +139,8 @@ fun MainScreen(
     editSong?.let { song ->
         SongEditBottomSheet(
             song = song,
-            onSave = { title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies, capoEnabled, capoFret ->
-                libraryViewModel.updateSongMetadata(song.id, title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies, capoEnabled, capoFret)
+            onSave = { title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies, capoEnabled, capoFret, displayKey, bpm ->
+                libraryViewModel.updateSongMetadata(song.id, title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies, capoEnabled, capoFret, displayKey, bpm)
                 editSong = null
             },
             onDismiss = { editSong = null },
@@ -152,6 +158,9 @@ fun MainScreen(
         composable("command_center") {
             CommandCenterScreen(
                 libraryViewModel = libraryViewModel,
+                syncViewModel = syncViewModel,
+                importViewModel = importViewModel,
+                setViewModel = setViewModel,
                 authViewModel = authViewModel,
                 onToggleDarkMode = { isDarkMode = !isDarkMode },
                 onSongClick = { songId, setNumber ->
@@ -170,10 +179,10 @@ fun MainScreen(
                 auditViewModel = auditViewModel,
                 onEditSong = { song -> editSong = song },
                 onNavigateBack = { navController.popBackStack() },
-                onSyncNow = { libraryViewModel.triggerGlobalSync() },
+                onSyncNow = { syncViewModel.triggerGlobalSync() },
                 syncHudState = syncHudState,
                 lastSyncTimestamp = lastSyncTimestamp,
-                onClearAllSets = { libraryViewModel.clearAllSets() }
+                onClearAllSets = { setViewModel.clearAllSets() }
             )
         }
 
@@ -255,6 +264,9 @@ fun MainScreen(
 @Composable
 fun CommandCenterScreen(
     libraryViewModel: LibraryViewModel,
+    syncViewModel: SyncViewModel,
+    importViewModel: ImportViewModel,
+    setViewModel: SetViewModel,
     authViewModel: AuthViewModel,
     onToggleDarkMode: () -> Unit,
     onSongClick: (songId: String, setNumber: Int?) -> Unit,
@@ -264,8 +276,8 @@ fun CommandCenterScreen(
     var selectedSetFilter by remember { mutableStateOf<Int?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
-    val importResult by libraryViewModel.importResult.collectAsState()
-    val isImporting by libraryViewModel.isImporting.collectAsState()
+    val importResult by importViewModel.importResult.collectAsState()
+    val isImporting by importViewModel.isImporting.collectAsState()
     val authState by authViewModel.authState.collectAsState()
     var showProfileSheet by remember { mutableStateOf(false) }
     var showImportSheet by remember { mutableStateOf(false) }
@@ -281,19 +293,19 @@ fun CommandCenterScreen(
         libraryViewModel.updateSetFilter(selectedSetFilter)
     }
 
-    val syncProgress by libraryViewModel.syncProgress.collectAsState()
-    val connectedFolderUri by libraryViewModel.connectedFolderUri.collectAsState()
-    val availableSets by libraryViewModel.availableSets.collectAsState()
+    val syncProgress by importViewModel.syncProgress.collectAsState()
+    val connectedFolderUri by importViewModel.connectedFolderUri.collectAsState()
+    val availableSets by setViewModel.availableSets.collectAsState()
     val songs by libraryViewModel.songs.collectAsState()
-    val performSetEntries by libraryViewModel.performSetEntries.collectAsState()
-    val setlists by libraryViewModel.setlists.collectAsState()
+    val performSetEntries by setViewModel.performSetEntries.collectAsState()
+    val setlists by setViewModel.setlists.collectAsState()
 
     // Folder Sync — OpenDocumentTree gives a persistent tree URI
     val folderPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
         showImportSheet = false
-        uri?.let { libraryViewModel.syncFolder(context, it) }
+        uri?.let { importViewModel.syncFolder(context, it) }
     }
 
     // Individual file import — GetMultipleContents uses ACTION_GET_CONTENT
@@ -302,7 +314,7 @@ fun CommandCenterScreen(
         contract = ActivityResultContracts.GetMultipleContents()
     ) { uris ->
         showImportSheet = false
-        if (uris.isNotEmpty()) libraryViewModel.importSongs(context, uris)
+        if (uris.isNotEmpty()) importViewModel.importSongs(context, uris)
     }
 
     // Set export — CreateDocument lets the user choose where to save the .encore.json file
@@ -313,7 +325,7 @@ fun CommandCenterScreen(
     ) { uri ->
         val setlistId = pendingExportSetlistId
         if (uri != null && setlistId != null) {
-            libraryViewModel.exportSetlistToUri(context, setlistId, uri)
+            importViewModel.exportSetlistToUri(context, setlistId, uri)
         }
         pendingExportSetlistId = null
         pendingExportSetlistName = null
@@ -324,7 +336,7 @@ fun CommandCenterScreen(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         showImportSheet = false
-        uri?.let { libraryViewModel.importSetFromJson(context, it) }
+        uri?.let { importViewModel.importSetFromJson(context, it) }
     }
 
     // "Importing…" Snackbar with Cancel — dismissed automatically when import finishes
@@ -336,7 +348,7 @@ fun CommandCenterScreen(
                 duration = androidx.compose.material3.SnackbarDuration.Indefinite
             )
             if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
-                libraryViewModel.cancelImport()
+                importViewModel.cancelImport()
             }
         } else {
             snackbarHostState.currentSnackbarData?.dismiss()
@@ -369,7 +381,7 @@ fun CommandCenterScreen(
                 }
             }.ifEmpty { "No changes" }
             snackbarHostState.showSnackbar(msg)
-            libraryViewModel.clearImportResult()
+            importViewModel.clearImportResult()
         }
     }
 
@@ -392,7 +404,7 @@ fun CommandCenterScreen(
                     onClick = {
                         val name = saveSetName.trim()
                         if (name.isNotEmpty()) {
-                            libraryViewModel.saveCurrentSetAs(name)
+                            setViewModel.saveCurrentSetAs(name)
                             showSaveSetDialog = false
                             saveSetName = ""
                         }
@@ -427,7 +439,7 @@ fun CommandCenterScreen(
                             ) {
                                 TextButton(
                                     onClick = {
-                                        libraryViewModel.loadSetlistAsCurrent(setlist.id)
+                                        setViewModel.loadSetlistAsCurrent(setlist.id)
                                         showLoadSetDialog = false
                                     },
                                     modifier = Modifier.weight(1f)
@@ -536,7 +548,7 @@ fun CommandCenterScreen(
                         }
                     }
                 },
-                onRefreshClick = { libraryViewModel.refreshConnectedFolder(context) },
+                onRefreshClick = { importViewModel.refreshConnectedFolder(context) },
                 onShowDropdown = { showAccountDropdown = true },
                 onDropdownDismiss = { showAccountDropdown = false },
                 onSignOut = { authViewModel.signOut(); showAccountDropdown = false },
@@ -553,6 +565,9 @@ fun CommandCenterScreen(
             // Song list (search bar + rows) — fills available space
             LibraryListContent(
                 viewModel = libraryViewModel,
+                syncViewModel = syncViewModel,
+                importViewModel = importViewModel,
+                setViewModel = setViewModel,
                 onSongClick = { songId -> onSongClick(songId, selectedSetFilter) },
                 onEditChart = onEditChart,
                 modifier = Modifier.weight(1f)
@@ -566,10 +581,10 @@ fun CommandCenterScreen(
                     selectedSetFilter = if (selectedSetFilter == setNumber) null else setNumber
                 },
                 onClearFilter = { selectedSetFilter = null },
-                onCreateSet = { libraryViewModel.createNewSet() },
+                onCreateSet = { setViewModel.createNewSet() },
                 onDeleteSet = { set ->
                     if (selectedSetFilter == set.number) selectedSetFilter = null
-                    libraryViewModel.deleteSet(set)
+                    setViewModel.deleteSet(set)
                 }
             )
         }

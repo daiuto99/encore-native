@@ -41,7 +41,9 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
@@ -119,18 +121,21 @@ import kotlin.math.roundToInt
 @Composable
 fun LibraryScreen(
     viewModel: LibraryViewModel,
+    syncViewModel: SyncViewModel,
+    importViewModel: ImportViewModel,
+    setViewModel: SetViewModel,
     onSongClick: (String) -> Unit = {},
     onAddToSetlist: (String) -> Unit = {},
     setFilter: Int? = null
 ) {
     val songs by viewModel.songs.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
-    val isImporting by viewModel.isImporting.collectAsState()
-    val importResult by viewModel.importResult.collectAsState()
-    val statusMessage by viewModel.statusMessage.collectAsState()
+    val isImporting by importViewModel.isImporting.collectAsState()
+    val importResult by importViewModel.importResult.collectAsState()
+    val statusMessage by setViewModel.statusMessage.collectAsState()
     val activeSetFilter by viewModel.setFilter.collectAsState()
     val sortOrder by viewModel.sortOrder.collectAsState()
-    val conflictToResolve by viewModel.conflictToResolve.collectAsState()
+    val conflictToResolve by syncViewModel.conflictToResolve.collectAsState()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -139,7 +144,7 @@ fun LibraryScreen(
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
-        if (uris.isNotEmpty()) viewModel.importSongs(context, uris)
+        if (uris.isNotEmpty()) importViewModel.importSongs(context, uris)
     }
 
     LaunchedEffect(importResult) {
@@ -153,14 +158,14 @@ fun LibraryScreen(
                 if (result.addedCount == 0 && result.skippedCount == 0) append("No files imported")
             }
             snackbarHostState.showSnackbar(message)
-            viewModel.clearImportResult()
+            importViewModel.clearImportResult()
         }
     }
 
     LaunchedEffect(statusMessage) {
         statusMessage?.let {
             snackbarHostState.showSnackbar(it)
-            viewModel.clearStatusMessage()
+            setViewModel.clearStatusMessage()
         }
     }
 
@@ -169,9 +174,9 @@ fun LibraryScreen(
             songTitle = state.songTitle,
             localBody = state.localBody,
             remoteBody = state.remoteBody,
-            onKeepLocal = { viewModel.resolveConflictKeepLocal(state.songId) },
-            onKeepRemote = { viewModel.resolveConflictKeepRemote(state.songId) },
-            onDismiss = { viewModel.dismissConflictResolution() }
+            onKeepLocal = { syncViewModel.resolveConflictKeepLocal(state.songId) },
+            onKeepRemote = { syncViewModel.resolveConflictKeepRemote(state.songId) },
+            onDismiss = { syncViewModel.dismissConflictResolution() }
         )
     }
 
@@ -225,12 +230,14 @@ fun LibraryScreen(
                 SongList(
                     songs = songs,
                     viewModel = viewModel,
+                    setViewModel = setViewModel,
                     activeSetFilter = activeSetFilter,
                     onSongClick = onSongClick,
                     onDeleteSong = { song -> viewModel.deleteSong(song) },
-                    onRemoveFromSet = { songId, setNum -> viewModel.removeSongFromSetNumber(songId, setNum) },
-                    onAddToSet = { songId -> /* handled inside item with dialog */ },
-                    onReorder = { songId, toIdx -> viewModel.reorderSong(songId, toIdx) },
+                    onRemoveFromSet = { songId, setNum -> setViewModel.removeSongFromSetNumber(songId, setNum) },
+                    onAddToSet = { /* handled inside SongListItem via set picker dialog */ },
+                    onReorder = { songId, toIdx -> activeSetFilter?.let { setViewModel.reorderSong(songId, toIdx, it) } },
+                    onConflictClick = { songId -> syncViewModel.prepareConflictResolution(songId) },
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -245,18 +252,21 @@ fun LibraryScreen(
 @Composable
 fun LibraryListContent(
     viewModel: LibraryViewModel,
+    syncViewModel: SyncViewModel,
+    importViewModel: ImportViewModel,
+    setViewModel: SetViewModel,
     onSongClick: (String) -> Unit,
     onEditChart: ((songId: String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val songs by viewModel.songs.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
-    val isImporting by viewModel.isImporting.collectAsState()
-    val importResult by viewModel.importResult.collectAsState()
-    val statusMessage by viewModel.statusMessage.collectAsState()
+    val isImporting by importViewModel.isImporting.collectAsState()
+    val importResult by importViewModel.importResult.collectAsState()
+    val statusMessage by setViewModel.statusMessage.collectAsState()
     val activeSetFilter by viewModel.setFilter.collectAsState()
     val sortOrder by viewModel.sortOrder.collectAsState()
-    val conflictToResolve by viewModel.conflictToResolve.collectAsState()
+    val conflictToResolve by syncViewModel.conflictToResolve.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(importResult) {
@@ -269,14 +279,14 @@ fun LibraryListContent(
                 }
             }.ifEmpty { "No files imported" }
             snackbarHostState.showSnackbar(msg)
-            viewModel.clearImportResult()
+            importViewModel.clearImportResult()
         }
     }
 
     LaunchedEffect(statusMessage) {
         statusMessage?.let {
             snackbarHostState.showSnackbar(it)
-            viewModel.clearStatusMessage()
+            setViewModel.clearStatusMessage()
         }
     }
 
@@ -285,9 +295,9 @@ fun LibraryListContent(
             songTitle = state.songTitle,
             localBody = state.localBody,
             remoteBody = state.remoteBody,
-            onKeepLocal = { viewModel.resolveConflictKeepLocal(state.songId) },
-            onKeepRemote = { viewModel.resolveConflictKeepRemote(state.songId) },
-            onDismiss = { viewModel.dismissConflictResolution() }
+            onKeepLocal = { syncViewModel.resolveConflictKeepLocal(state.songId) },
+            onKeepRemote = { syncViewModel.resolveConflictKeepRemote(state.songId) },
+            onDismiss = { syncViewModel.dismissConflictResolution() }
         )
     }
 
@@ -324,12 +334,14 @@ fun LibraryListContent(
                 SongList(
                     songs = songs,
                     viewModel = viewModel,
+                    setViewModel = setViewModel,
                     activeSetFilter = activeSetFilter,
                     onSongClick = onSongClick,
                     onDeleteSong = { song -> viewModel.deleteSong(song) },
-                    onRemoveFromSet = { songId, setNum -> viewModel.removeSongFromSetNumber(songId, setNum) },
-                    onAddToSet = { songId -> viewModel.addToPerformSet(songId) },
-                    onReorder = { songId, toIdx -> viewModel.reorderSong(songId, toIdx) },
+                    onRemoveFromSet = { songId, setNum -> setViewModel.removeSongFromSetNumber(songId, setNum) },
+                    onAddToSet = { songId -> setViewModel.addToPerformSet(songId) },
+                    onReorder = { songId, toIdx -> activeSetFilter?.let { setViewModel.reorderSong(songId, toIdx, it) } },
+                    onConflictClick = { songId -> syncViewModel.prepareConflictResolution(songId) },
                     onEditChart = onEditChart,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -353,12 +365,14 @@ fun LibraryListContent(
 fun SongList(
     songs: List<SongEntity>,
     viewModel: LibraryViewModel,
+    setViewModel: SetViewModel,
     activeSetFilter: Int?,
     onSongClick: (String) -> Unit,
     onDeleteSong: (SongEntity) -> Unit,
     onRemoveFromSet: (String, Int) -> Unit,
     onAddToSet: (String) -> Unit,
     onReorder: (String, Int) -> Unit,
+    onConflictClick: (String) -> Unit = {},
     onEditChart: ((songId: String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -439,11 +453,13 @@ fun SongList(
             SongListItem(
                 song = song,
                 viewModel = viewModel,
+                setViewModel = setViewModel,
                 activeSetFilter = activeSetFilter,
                 onClick = { onSongClick(song.id) },
                 onDeleteSong = { onDeleteSong(song) },
                 onRemoveFromSet = onRemoveFromSet,
                 onAddToSet = { onAddToSet(song.id) },
+                onConflictClick = onConflictClick,
                 onEditChart = onEditChart,
                 isDragging = isDragging,
                 dragHandleModifier = dragHandleModifier,
@@ -474,20 +490,22 @@ fun SongList(
 fun SongListItem(
     song: SongEntity,
     viewModel: LibraryViewModel,
+    setViewModel: SetViewModel,
     activeSetFilter: Int?,
     onClick: () -> Unit,
     onDeleteSong: () -> Unit,
     onRemoveFromSet: (String, Int) -> Unit,
     onAddToSet: () -> Unit,
+    onConflictClick: (String) -> Unit = {},
     onEditChart: ((songId: String) -> Unit)? = null,
     isDragging: Boolean = false,
     dragHandleModifier: Modifier = Modifier,
     modifier: Modifier = Modifier
 ) {
     val encoreColors = LocalEncoreColors.current
-    val sets by remember(song.id) { viewModel.observeSetsContainingSong(song.id) }
+    val sets by remember(song.id) { setViewModel.observeSetsContainingSong(song.id) }
         .collectAsState(initial = emptyList())
-    val availableSets by viewModel.availableSets.collectAsState()
+    val availableSets by setViewModel.availableSets.collectAsState()
     // Only show membership for the active setlist — sets across other setlists are irrelevant
     val activeSets = remember(sets, availableSets) {
         val availableIds = availableSets.map { it.id }.toSet()
@@ -513,7 +531,7 @@ fun SongListItem(
                         OutlinedButton(
                             onClick = {
                                 showSetPicker = false
-                                viewModel.addSongToSetNumber(song.id, set.number)
+                                setViewModel.addSongToSetNumber(song.id, set.number)
                             },
                             enabled = !alreadyInSet,
                             modifier = Modifier.fillMaxWidth(),
@@ -621,8 +639,8 @@ fun SongListItem(
     if (showEditSheet) {
         SongEditBottomSheet(
             song = song,
-            onSave = { title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies, capoEnabled, capoFret ->
-                viewModel.updateSongMetadata(song.id, title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies, capoEnabled, capoFret)
+            onSave = { title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies, capoEnabled, capoFret, displayKey, bpm ->
+                viewModel.updateSongMetadata(song.id, title, artist, isLeadGuitar, harmonyMode, resetZoom, clearHarmonies, capoEnabled, capoFret, displayKey, bpm)
                 showEditSheet = false
             },
             onDismiss = { showEditSheet = false },
@@ -667,7 +685,7 @@ fun SongListItem(
                 .height(72.dp)
                 .clickable(onClick = {
                     if (song.syncStatus == SyncStatus.CONFLICT) {
-                        viewModel.prepareConflictResolution(song.id)
+                        onConflictClick(song.id)
                     } else {
                         onClick()
                     }
@@ -906,6 +924,34 @@ fun EmptyLibraryMessage(
 }
 
 /**
+ * Shifts a key name up or down by one half step.
+ * Going up (+1) uses sharp spelling; going down (-1) uses flat spelling.
+ * Preserves the minor suffix (e.g. "Am" → "A#m" on +1).
+ */
+private fun stepKey(key: String, delta: Int): String {
+    val noteToSemitone = mapOf(
+        "C" to 0, "C#" to 1, "Db" to 1, "D" to 2, "D#" to 3, "Eb" to 3,
+        "E" to 4, "F" to 5, "F#" to 6, "Gb" to 6, "G" to 7, "G#" to 8,
+        "Ab" to 8, "A" to 9, "A#" to 10, "Bb" to 10, "B" to 11
+    )
+    val sharps = listOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+    val flats  = listOf("C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B")
+    val root = if (key.length > 1 && (key[1] == '#' || key[1] == 'b')) key.substring(0, 2) else key.substring(0, 1)
+    val suffix = key.removePrefix(root) // e.g. "m" for minor keys
+    val current = noteToSemitone[root] ?: return key
+    val newSemi = ((current + delta) + 12) % 12
+    val newRoot = if (delta >= 0) sharps[newSemi] else flats[newSemi]
+    return newRoot + suffix
+}
+
+private val BPM_PARSE_PATTERN = Regex(
+    """(?i)(?:\*\*)?(?:bpm|tempo)(?:\*\*)?\s*:\s*(\d{2,3})""",
+    RegexOption.MULTILINE
+)
+private fun parseBpmFromBody(body: String): Int? =
+    BPM_PARSE_PATTERN.find(body)?.groupValues?.getOrNull(1)?.toIntOrNull()
+
+/**
  * Edit modal — Title, Artist, Key, Harmony Mode, Highlight Style with Zen theming.
  * Used by both Library (swipe-right) and Performance (header icon).
  */
@@ -913,7 +959,7 @@ fun EmptyLibraryMessage(
 @Composable
 fun SongEditBottomSheet(
     song: com.encore.core.data.entities.SongEntity,
-    onSave: (title: String, artist: String, isLeadGuitar: Boolean, isHarmonyMode: Boolean, resetZoom: Boolean, clearHarmonies: Boolean, capoEnabled: Boolean, capoFret: Int) -> Unit,
+    onSave: (title: String, artist: String, isLeadGuitar: Boolean, isHarmonyMode: Boolean, resetZoom: Boolean, clearHarmonies: Boolean, capoEnabled: Boolean, capoFret: Int, displayKey: String?, bpm: Int?) -> Unit,
     onDismiss: () -> Unit,
     onEditChart: (() -> Unit)? = null
 ) {
@@ -927,6 +973,8 @@ fun SongEditBottomSheet(
     var clearHarmonies by remember(song.id) { mutableStateOf(false) }
     var capoEnabled by remember(song.id) { mutableStateOf(song.capoEnabled) }
     var capoFret by remember(song.id) { mutableStateOf(song.capoFret.coerceIn(1, 12)) }
+    var displayKey by remember(song.id) { mutableStateOf(song.displayKey ?: song.originalKey) }
+    var bpmText by remember(song.id) { mutableStateOf(parseBpmFromBody(song.markdownBody)?.toString() ?: "") }
 
     val fieldColors = OutlinedTextFieldDefaults.colors(
         focusedTextColor = encoreColors.titleText,
@@ -1164,6 +1212,97 @@ fun SongEditBottomSheet(
                 }
             }
 
+            // ── Key Transposition ─────────────────────────────────────────────
+            val baseKey = song.originalKey ?: song.displayKey
+            if (baseKey != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    "Key",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = encoreColors.titleText
+                )
+                if (displayKey != null && displayKey != baseKey) {
+                    Text(
+                        "Original: $baseKey  →  $displayKey",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = encoreColors.artistText
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    IconButton(onClick = { displayKey = stepKey(displayKey ?: baseKey, -1) }) {
+                        Icon(
+                            Icons.Default.Remove,
+                            contentDescription = "Lower key by half step",
+                            tint = encoreColors.titleText
+                        )
+                    }
+                    Box(
+                        modifier = Modifier.width(60.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = displayKey ?: baseKey,
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = encoreColors.titleText
+                        )
+                    }
+                    IconButton(onClick = { displayKey = stepKey(displayKey ?: baseKey, +1) }) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = "Raise key by half step",
+                            tint = encoreColors.titleText
+                        )
+                    }
+                }
+                if (displayKey != null && displayKey != baseKey) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    TextButton(
+                        onClick = { displayKey = baseKey },
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text("Reset to original", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+
+            // ── BPM ───────────────────────────────────────────────────────────
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "BPM",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = encoreColors.titleText,
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = bpmText,
+                    onValueChange = { bpmText = it.filter { c -> c.isDigit() }.take(3) },
+                    modifier = Modifier.width(80.dp),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = encoreColors.titleText,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    ),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = encoreColors.divider,
+                        focusedTextColor = encoreColors.titleText,
+                        unfocusedTextColor = encoreColors.titleText
+                    )
+                )
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
 
             androidx.compose.material3.Button(
@@ -1176,7 +1315,9 @@ fun SongEditBottomSheet(
                         resetZoom,
                         clearHarmonies,
                         capoEnabled,
-                        capoFret
+                        capoFret,
+                        displayKey,
+                        bpmText.toIntOrNull()
                     )
                 },
                 shape = RoundedCornerShape(50),

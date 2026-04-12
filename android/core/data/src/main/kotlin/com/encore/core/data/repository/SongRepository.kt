@@ -242,6 +242,13 @@ interface SongRepository {
      * @return The remote markdown body, or null if the download failed.
      */
     suspend fun fetchRemoteMarkdownBody(userId: String, songId: String): String?
+
+    /**
+     * Delete the cloud object for [songId] and remove it from the manifest.
+     * Called after a local delete so GCS doesn't accumulate orphaned files.
+     * Failures are swallowed — a failed cloud delete is non-fatal.
+     */
+    suspend fun deleteSongFromCloud(userId: String, songId: String)
 }
 
 /**
@@ -445,10 +452,10 @@ class SongRepositoryImpl(
         val now = System.currentTimeMillis()
         songDao.update(
             existing.copy(
-                title          = yaml["title"]?.takeIf { it.isNotBlank() }        ?: existing.title,
-                artist         = yaml["artist"]?.takeIf { it.isNotBlank() }       ?: existing.artist,
-                displayKey     = yaml["display_key"]?.takeIf { it.isNotBlank() }  ?: existing.displayKey,
-                originalKey    = yaml["original_key"]?.takeIf { it.isNotBlank() } ?: existing.originalKey,
+                title          = yaml["title"]?.takeIf { it.isNotBlank() }?.take(200)       ?: existing.title,
+                artist         = yaml["artist"]?.takeIf { it.isNotBlank() }?.take(200)      ?: existing.artist,
+                displayKey     = yaml["display_key"]?.takeIf { it.isNotBlank() }?.take(20)  ?: existing.displayKey,
+                originalKey    = yaml["original_key"]?.takeIf { it.isNotBlank() }?.take(20) ?: existing.originalKey,
                 isLeadGuitar   = yaml["is_lead_guitar"]?.lowercase() == "true",
                 markdownBody   = trimmedBody,
                 isDirty        = false,
@@ -467,6 +474,9 @@ class SongRepositoryImpl(
     }
 
     override fun invalidateRemoteCache() = syncProvider.invalidateCache()
+
+    override suspend fun deleteSongFromCloud(userId: String, songId: String) =
+        syncProvider.deleteSong(userId, songId)
 
     override suspend fun fetchRemoteMarkdownBody(userId: String, songId: String): String? {
         val rawContent = syncProvider.downloadSong(userId, songId) ?: return null

@@ -16,8 +16,11 @@ import com.encore.core.data.entities.SetEntryEntity
 import com.encore.core.data.entities.SetlistEntity
 import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.entities.SyncStatus
+import android.util.Log
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -217,7 +220,6 @@ abstract class EncoreDatabase : RoomDatabase() {
                     DATABASE_NAME
                 )
                     .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
-                    .fallbackToDestructiveMigration()
                     .addCallback(DatabaseCallback(context.applicationContext))
                     .build()
                 INSTANCE = instance
@@ -239,7 +241,10 @@ abstract class EncoreDatabase : RoomDatabase() {
             override fun onCreate(db: SupportSQLiteDatabase) {
                 super.onCreate(db)
                 INSTANCE?.let { database ->
-                    CoroutineScope(Dispatchers.IO).launch {
+                    val handler = CoroutineExceptionHandler { _, t ->
+                        Log.e("EncoreDatabase", "prepopulateDatabase failed", t)
+                    }
+                    CoroutineScope(Dispatchers.IO + SupervisorJob() + handler).launch {
                         prepopulateDatabase(database.songDao())
                     }
                 }

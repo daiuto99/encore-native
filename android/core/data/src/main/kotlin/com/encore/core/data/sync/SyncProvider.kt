@@ -82,6 +82,16 @@ interface SyncProvider : EncoreApiService {
     suspend fun downloadSetData(userId: String, setNumber: Int): String?
 
     /**
+     * Delete the cloud object for [songId] and remove it from the manifest.
+     * No-op if the object doesn't exist. Failures are swallowed — a failed delete
+     * is non-fatal; the song is already gone from the local DB.
+     *
+     * @param userId  Owner's account ID (GCS path scope).
+     * @param songId  UUID of the song to remove.
+     */
+    suspend fun deleteSong(userId: String, songId: String)
+
+    /**
      * Invalidate any in-memory manifest cache so the next [getRemoteHash] call
      * fetches fresh data from the server.
      *

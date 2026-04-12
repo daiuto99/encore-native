@@ -132,10 +132,11 @@ Add cloud-backed account and sync behavior without breaking the offline-first lo
 
 ## Song Edit Sheet — COMPLETE
 
-### Current `onSave` signature (8 params)
+### Current `onSave` signature (10 params)
 ```
 title: String, artist: String, isLeadGuitar: Boolean, isHarmonyMode: Boolean,
-resetZoom: Boolean, clearHarmonies: Boolean, capoEnabled: Boolean, capoFret: Int
+resetZoom: Boolean, clearHarmonies: Boolean, capoEnabled: Boolean, capoFret: Int,
+displayKey: String?, bpm: Int?
 ```
 
 ### Controls in sheet
@@ -146,11 +147,34 @@ resetZoom: Boolean, clearHarmonies: Boolean, capoEnabled: Boolean, capoFret: Int
 - Clear Harmonies button (arms red → strips `[h]`/`[/h]` tags on Save)
 - **Capo toggle** — shows/hides fret stepper (1–12)
 - **Capo fret stepper** — `+` / `−` IconButtons, fret displayed as large number
+- **Key transposition stepper** — `−` / key / `+` ; sharp going up, flat going down; reset button if changed
+- **BPM field** — numeric `OutlinedTextField` (max 3 digits); pre-populated from markdown body; saves `bpm: N` line to body
 
 ### Capo architecture
 - Per-song: `capoEnabled: Boolean` and `capoFret: Int` on `SongEntity` (DB v9 migration).
 - `LibraryViewModel.updateSongMetadata` accepts and persists both fields.
 - `PerformanceDashboard` reads directly from `song.capoEnabled` / `song.capoFret`.
+
+### Key transposition architecture
+- `originalKey` (immutable, import-time) / `displayKey` (mutable user preference) on `SongEntity`.
+- `TranspositionUtils.kt` in `feature/performance`: `semitoneShift`, `transposeBody`, `isChordLine`.
+- `SongDetailScreen` `SongContent` block: `semitones = semitoneShift(originalKey, displayKey)` → `transposeBody` applied before `parseSongSections`.
+- `stepKey(key, delta)` private fun in `LibraryScreen.kt`: +1 uses sharps, -1 uses flats.
+- Backfill: `LibraryViewModel.backfillMissingKeys()` sets `originalKey = song.originalKey ?: key` on init.
+- Key picker guard: `val baseKey = song.originalKey ?: song.displayKey` — shows stepper even when only `displayKey` is set.
+
+### BPM architecture
+- BPM lives in markdown body only — no DB column.
+- `parseBpmFromBody()` private fun in `LibraryScreen.kt` — same regex as `parseBpm` in `SongDetailScreen`.
+- `LibraryViewModel.writeBpmToMarkdown()` — replaces existing BPM line or inserts after first non-blank line.
+- `SongDetailViewModel.writeBpmToMarkdown()` — same logic, used by `saveTapBpm`.
+
+### Tap tempo architecture
+- `SongDetailViewModel`: `_tapTimestamps: MutableStateFlow<List<Long>>`, `tapBpm: StateFlow<Int?>` (rolling 4-tap avg), `recordTap()`, `clearTapTempo()`, `saveTapBpm(bpm: Int)`.
+- 3s inactivity auto-resets tap sequence.
+- `PerformanceDashboard` params: `tapBpm`, `onTap`, `onSaveTapBpm`.
+- BPM column in status pill: tappable (`clickable { onTap() }`); shows live tap BPM (primary color) + "TAP" label while tapping; ✓ `IconButton` appears to save.
+- `saveTapBpm` upserts song + updates `_song.value` directly for immediate dashboard refresh.
 
 ---
 
@@ -180,7 +204,7 @@ resetZoom: Boolean, clearHarmonies: Boolean, capoEnabled: Boolean, capoFret: Int
 - **DataStore files:** `user_prefs` (auth), `app_prefs` (visual prefs). Do not mix.
 - **DB version:** 9
 - **`SetlistDetailScreen.kt`** — do not touch (user does not use it)
-- **`SongEditBottomSheet`** `onSave` has **8 params**: title, artist, isLeadGuitar, isHarmonyMode, resetZoom, clearHarmonies, capoEnabled, capoFret
+- **`SongEditBottomSheet`** `onSave` has **10 params**: title, artist, isLeadGuitar, isHarmonyMode, resetZoom, clearHarmonies, capoEnabled, capoFret, displayKey, bpm
 - **`SongChartEditorScreen`** in `feature/library` → `Routes.SONG_CHART_EDITOR = "chart_editor/{songId}"`
 - **Build filter:** `./gradlew assembleDebug 2>&1 | grep -E "FAILED|error:|BUILD SUCCESSFUL"`
 - **ADB path:** `~/Library/Android/sdk/platform-tools/adb`
@@ -192,6 +216,7 @@ resetZoom: Boolean, clearHarmonies: Boolean, capoEnabled: Boolean, capoFret: Int
 - **Song title color:** `appPreferences.titleColorOverride ?: setColor`; 19sp Bold Monospace
 - **Set label:** `"SET $setNumber"` uppercase, set color, `letterSpacing = 1.2.sp`
 - **Capo icon colors:** `darkLeadIconColor` / `lightLeadIconColor` (guitar pick), `darkCapoColor` / `lightCapoColor` (capo badge) — in Theme settings alongside bg color
+- **V1.1 next task:** 2.5 — unit tests for `TranspositionUtils.kt` in `feature/performance`; no test dir exists yet, needs `src/test/kotlin/...` scaffolding; check `build.gradle.kts` for JUnit dep
 
 ---
 

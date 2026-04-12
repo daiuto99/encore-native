@@ -7,8 +7,11 @@ import com.encore.core.data.entities.SetlistEntity
 import com.encore.core.data.relations.SetlistWithSets
 import com.encore.core.data.repository.SetlistRepository
 import com.encore.core.data.repository.SongRepository
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -26,6 +29,20 @@ class SetlistViewModel(
     private val setlistRepository: SetlistRepository,
     private val songRepository: SongRepository
 ) : ViewModel() {
+
+    // ── Song search (for SongSelectionDialog) ────────────────────────────────
+
+    private val _songSearchQuery = MutableStateFlow("")
+
+    fun updateSongSearchQuery(query: String) { _songSearchQuery.value = query }
+    fun clearSongSearch() { _songSearchQuery.value = "" }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val songSearchResults = _songSearchQuery
+        .flatMapLatest { q -> songRepository.searchSongs(q) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // ── Setlists ──────────────────────────────────────────────────────────────
 
     /**
      * All setlists ordered by name.

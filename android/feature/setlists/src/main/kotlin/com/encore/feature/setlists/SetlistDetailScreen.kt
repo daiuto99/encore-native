@@ -64,7 +64,6 @@ import com.encore.core.ui.theme.SetColor
 @Composable
 fun SetlistDetailScreen(
     viewModel: SetlistViewModel,
-    songRepository: com.encore.core.data.repository.SongRepository,
     setlistId: String,
     onNavigateBack: () -> Unit,
     onSongClick: (String) -> Unit = {}
@@ -142,8 +141,8 @@ fun SetlistDetailScreen(
     // Song Selection Dialog
     if (showSongSelectionDialog && selectedSetId != null) {
         SongSelectionDialog(
-            songRepository = songRepository,
-            onDismiss = { showSongSelectionDialog = false },
+            viewModel = viewModel,
+            onDismiss = { showSongSelectionDialog = false; viewModel.clearSongSearch() },
             onSongSelected = { songId ->
                 viewModel.addSongToSpecificSet(selectedSetId!!, songId)
                 showSongSelectionDialog = false
@@ -384,12 +383,12 @@ fun EmptySetlistDetailMessage(
  */
 @Composable
 fun SongSelectionDialog(
-    songRepository: com.encore.core.data.repository.SongRepository,
+    viewModel: SetlistViewModel,
     onDismiss: () -> Unit,
     onSongSelected: (String) -> Unit
 ) {
+    val allSongs by viewModel.songSearchResults.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
-    val allSongs by songRepository.searchSongs(searchQuery).collectAsState(initial = emptyList())
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -399,7 +398,7 @@ fun SongSelectionDialog(
                 // Search bar
                 TextField(
                     value = searchQuery,
-                    onValueChange = { searchQuery = it },
+                    onValueChange = { searchQuery = it; viewModel.updateSongSearchQuery(it) },
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text("Search songs...") },
                     leadingIcon = {
@@ -410,7 +409,7 @@ fun SongSelectionDialog(
                     },
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { searchQuery = "" }) {
+                            IconButton(onClick = { searchQuery = ""; viewModel.clearSongSearch() }) {
                                 Icon(
                                     imageVector = Icons.Default.Clear,
                                     contentDescription = "Clear"

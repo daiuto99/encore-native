@@ -7,6 +7,8 @@ import com.encore.core.data.entities.SetlistEntity
 import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.repository.SetlistRepository
 import com.encore.core.data.repository.SongRepository
+import com.encore.core.data.preferences.UserPreferencesRepository
+import com.encore.core.data.sync.SyncProvider
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -20,6 +22,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 
 /**
  * ViewModel for Song Detail / Performance Screen.
@@ -35,7 +38,9 @@ import kotlinx.coroutines.launch
  */
 class SongDetailViewModel(
     private val songRepository: SongRepository,
-    private val setlistRepository: SetlistRepository
+    private val setlistRepository: SetlistRepository,
+    private val userPrefs: UserPreferencesRepository? = null,
+    private val syncProvider: SyncProvider? = null
 ) : ViewModel() {
 
     // Song data
@@ -99,8 +104,14 @@ class SongDetailViewModel(
     private val _pagerResetTrigger = MutableStateFlow(0)
     val pagerResetTrigger: StateFlow<Int> = _pagerResetTrigger.asStateFlow()
 
-    // Song cache + pager state
+    // Song cache + pager state — capped at LRU-12 to bound memory on large libraries
     private val _songCache = MutableStateFlow<Map<String, SongEntity>>(emptyMap())
+    private fun putInCache(current: Map<String, SongEntity>, songId: String, song: SongEntity): Map<String, SongEntity> {
+        val lru = LinkedHashMap<String, SongEntity>(current)
+        lru[songId] = song
+        while (lru.size > 12) lru.remove(lru.keys.first())
+        return lru
+    }
     private val _performSongIds = MutableStateFlow<List<String>>(emptyList())
     val performSongIds: StateFlow<List<String>> = _performSongIds.asStateFlow()
 
@@ -114,7 +125,7 @@ class SongDetailViewModel(
         return songRepository.observeSong(songId)
             .onEach { song ->
                 if (song != null) {
-                    _songCache.value = _songCache.value + (songId to song)
+                    _songCache.value = putInCache(_songCache.value, songId, song)
                 }
             }
     }
@@ -321,8 +332,28 @@ class SongDetailViewModel(
                 // Signal composable to scroll to page 0
                 _pagerResetTrigger.value += 1
                 Log.d(TAG, "Loaded setlist $setlistId: ${newSongs.size} songs")
+
+                // Upload the updated Set 1 so the web app stays in sync
+                uploadSetInBackground(1, newIds)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load setlist $setlistId", e)
+            }
+        }
+    }
+
+    /** Upload a set's contents to GCS so the web app stays current after a load/save mutation. */
+    private fun uploadSetInBackground(setNumber: Int, songIds: List<String>) {
+        val provider = syncProvider ?: return
+        viewModelScope.launch {
+            val userId = userPrefs?.persistedUser?.first()?.googleAccountId ?: return@launch
+            try {
+                val now = System.currentTimeMillis()
+                val songIdsJson = songIds.joinToString(",") { "\"$it\"" }
+                val json = """{"version":1,"updatedAt":$now,"source":"tablet","songIds":[$songIdsJson]}"""
+                provider.uploadSetData(userId, setNumber, json)
+                Log.d(TAG, "uploadSetInBackground(set=$setNumber, ${songIds.size} songs) — done")
+            } catch (e: Exception) {
+                Log.w(TAG, "uploadSetInBackground(set=$setNumber) failed: ${e.message}")
             }
         }
     }
@@ -330,6 +361,78 @@ class SongDetailViewModel(
     /** Clear save success message after the composable has displayed it. */
     fun clearSaveSuccess() {
         _saveSuccess.value = null
+    }
+
+    // ── Tap Tempo ─────────────────────────────────────────────────────────────
+
+    private val _tapTimestamps = MutableStateFlow<List<Long>>(emptyList())
+
+    /** Live BPM calculated from recent taps. Null until 2+ taps recorded. */
+    val tapBpm: StateFlow<Int?> = _tapTimestamps.map { timestamps ->
+        if (timestamps.size < 2) null
+        else {
+            val intervals = timestamps.zipWithNext { a, b -> b - a }
+            val avgInterval = intervals.takeLast(4).average()
+            if (avgInterval <= 0) null else (60000.0 / avgInterval).toInt().coerceIn(30, 300)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    private var tapResetJob: Job? = null
+
+    /** Record a tap. Resets the sequence if >3s since the last tap. */
+    fun recordTap() {
+        val now = System.currentTimeMillis()
+        val current = _tapTimestamps.value
+        val updated = if (current.isNotEmpty() && now - current.last() > 3000L) {
+            listOf(now)
+        } else {
+            (current + now).takeLast(8)
+        }
+        _tapTimestamps.value = updated
+        tapResetJob?.cancel()
+        tapResetJob = viewModelScope.launch {
+            delay(3000L)
+            _tapTimestamps.value = emptyList()
+        }
+    }
+
+    fun clearTapTempo() {
+        tapResetJob?.cancel()
+        _tapTimestamps.value = emptyList()
+    }
+
+    /** Write the tapped BPM into the current song's markdown body and persist. */
+    fun saveTapBpm(bpm: Int) {
+        val song = _song.value ?: return
+        viewModelScope.launch {
+            val existing = songRepository.getSongById(song.id) ?: return@launch
+            val newBody = writeBpmToMarkdown(existing.markdownBody, bpm)
+            val now = System.currentTimeMillis()
+            val updated = existing.copy(
+                markdownBody = newBody,
+                updatedAt = now,
+                localUpdatedAt = now,
+                isDirty = true
+            )
+            songRepository.upsertSong(updated)
+            _song.value = updated   // update dashboard immediately
+            _tapTimestamps.value = emptyList()
+        }
+    }
+
+    private fun writeBpmToMarkdown(body: String, bpm: Int): String {
+        val bpmPattern = Regex(
+            """^(?:\*\*)?(?:bpm|tempo)(?:\*\*)?\s*:\s*\d{2,3}""",
+            setOf(RegexOption.IGNORE_CASE, RegexOption.MULTILINE)
+        )
+        return if (bpmPattern.containsMatchIn(body)) {
+            bpmPattern.replaceFirst(body, "bpm: $bpm")
+        } else {
+            val lines = body.lines().toMutableList()
+            val insertAt = (lines.indexOfFirst { it.isNotBlank() } + 1).coerceAtMost(lines.size)
+            lines.add(insertAt, "bpm: $bpm")
+            lines.joinToString("\n")
+        }
     }
 
     /**

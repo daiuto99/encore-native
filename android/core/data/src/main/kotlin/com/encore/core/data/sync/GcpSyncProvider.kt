@@ -8,6 +8,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
@@ -98,25 +100,28 @@ class GcpSyncProvider(
 
     @Volatile private var cachedToken: String? = null
     @Volatile private var tokenExpiresAt: Long = 0L
+    // Mutex ensures only one coroutine fetches a new token at a time — prevents
+    // concurrent callers from all missing the cache and hammering the token endpoint.
+    private val tokenMutex = Mutex()
 
     // Manifest cache — valid for 60 s so a full sync pass (~96 songs) reads GCS only once.
     @Volatile private var manifestCache: GcpManifest? = null
     @Volatile private var manifestCachedAt: Long = 0L
     private val MANIFEST_CACHE_TTL_MS = 60_000L
+    // Mutex serialises manifest read-modify-write operations so concurrent uploads
+    // (e.g. global sync + background fire-and-forget) don't clobber each other's entries.
+    private val manifestMutex = Mutex()
 
     private suspend fun token(): String = withContext(Dispatchers.IO) {
-        val now = System.currentTimeMillis()
-        cachedToken?.takeIf { now < tokenExpiresAt }?.let {
-            Log.d(TAG, "token() — using cached token (expires in ${(tokenExpiresAt - now) / 1000}s)")
-            return@withContext it
+        tokenMutex.withLock {
+            val now = System.currentTimeMillis()
+            cachedToken?.takeIf { now < tokenExpiresAt }?.let { return@withLock it }
+            Log.d(TAG, "token() — fetching new token for ${creds.clientEmail}")
+            val tok = fetchServiceAccountToken()
+            cachedToken = tok
+            tokenExpiresAt = now + TOKEN_TTL_MS
+            tok
         }
-
-        Log.d(TAG, "token() — fetching new service account token for ${creds.clientEmail}")
-        val tok = fetchServiceAccountToken()
-        cachedToken = tok
-        tokenExpiresAt = now + TOKEN_TTL_MS
-        Log.d(TAG, "token() — acquired; prefix=${tok.take(10)}…")
-        tok
     }
 
     private fun fetchServiceAccountToken(): String {
@@ -157,12 +162,14 @@ class GcpSyncProvider(
             .build()
 
         http.newCall(request).execute().use { response ->
-            val responseBody = response.body?.string()
             Log.d(TAG, "fetchServiceAccountToken — HTTP ${response.code}")
-            if (!response.isSuccessful || responseBody == null) {
-                Log.e(TAG, "fetchServiceAccountToken — FAILED ${response.code}: $responseBody")
-                throw IllegalStateException("Token fetch failed: HTTP ${response.code}: $responseBody")
+            if (!response.isSuccessful) {
+                // Do not log the response body — it may contain partial credential identifiers.
+                Log.e(TAG, "fetchServiceAccountToken — FAILED HTTP ${response.code}")
+                throw IllegalStateException("Token fetch failed: HTTP ${response.code}")
             }
+            val responseBody = response.body?.string()
+                ?: throw IllegalStateException("Token fetch returned empty body")
             val json = JSONObject(responseBody)
             return json.getString("access_token")
         }
@@ -192,22 +199,56 @@ class GcpSyncProvider(
             val lockPath = lockObjectPath(songId)
             val owner = creds.clientEmail
 
-            val existingOwner = readObject(tok, lockPath)
-            if (existingOwner != null && existingOwner.trim().isNotEmpty()) {
-                val held = existingOwner.trim()
-                Log.d(TAG, "requestLock($songId) — lock held by '$held'")
-                if (held != owner) return@withContext LockResult.LockedBy(held)
-                Log.d(TAG, "requestLock($songId) — we already hold the lock")
+            // Atomic create: ifGenerationMatch=0 means GCS only accepts the write if the object
+            // does not yet exist. Two simultaneous callers: one gets 201, the other gets 412.
+            // This closes the read-then-write race in the old implementation.
+            val created = tryCreateObject(tok, lockPath, owner, "text/plain")
+            if (created) {
+                Log.d(TAG, "requestLock($songId) — lock acquired")
                 return@withContext LockResult.Acquired
             }
 
-            Log.d(TAG, "requestLock($songId) — no existing lock; writing ours ($owner)")
-            uploadObject(tok, lockPath, owner, "text/plain")
-            Log.d(TAG, "requestLock($songId) — lock acquired")
-            LockResult.Acquired
+            // Object already exists — read current owner to decide if it's us or another client
+            val existingOwner = readObject(tok, lockPath)?.trim()
+            return@withContext if (existingOwner == null || existingOwner == owner) {
+                Log.d(TAG, "requestLock($songId) — we already hold the lock")
+                LockResult.Acquired
+            } else {
+                Log.d(TAG, "requestLock($songId) — lock held by '$existingOwner'")
+                LockResult.LockedBy(existingOwner)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "requestLock($songId) failed — ${e::class.simpleName}: ${e.message}; granting silently")
             LockResult.Acquired
+        }
+    }
+
+    /**
+     * Upload [content] to [objectPath] only if no object exists there yet.
+     * Uses GCS precondition `ifGenerationMatch=0` — the request is rejected with 412
+     * if an object with any generation already exists, making lock acquisition atomic.
+     *
+     * @return true if the object was created, false if it already existed (412).
+     */
+    private fun tryCreateObject(token: String, objectPath: String, content: String, mimeType: String): Boolean {
+        val encodedName = encodePath(objectPath)
+        val url = "$UPLOAD_URL/b/$BUCKET/o?uploadType=media&name=$encodedName&ifGenerationMatch=0"
+        val body = content.toRequestBody(mimeType.toMediaType())
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("Authorization", "Bearer $token")
+            .post(body)
+            .build()
+        http.newCall(request).execute().use { response ->
+            Log.d(TAG, "tryCreateObject($objectPath) — HTTP ${response.code}")
+            return when (response.code) {
+                200, 201 -> true   // Created — we own the lock
+                412      -> false  // Precondition Failed — object already exists
+                else -> {
+                    Log.e(TAG, "tryCreateObject($objectPath) — unexpected HTTP ${response.code}")
+                    false
+                }
+            }
         }
     }
 
@@ -380,21 +421,36 @@ class GcpSyncProvider(
         }
     }
 
-    private fun updateManifest(token: String, songId: String, markdownBody: String) {
-        Log.d(TAG, "updateManifest($songId)")
-        val existing = readObject(token, MANIFEST_OBJECT)
-        val root = if (existing != null) {
-            try { JSONObject(existing) } catch (_: Exception) { JSONObject() }
-        } else {
-            Log.d(TAG, "updateManifest — no existing manifest; creating fresh")
-            JSONObject()
+    /**
+     * Atomically read-modify-write the manifest under [manifestMutex].
+     * [action] receives the current manifest JSONObject and modifies it in place.
+     * The result is written back to GCS and the in-memory cache is invalidated.
+     *
+     * All callers that mutate the manifest must go through this function to prevent
+     * concurrent uploads from clobbering each other's entries.
+     */
+    private suspend fun mutateManifest(token: String, action: (JSONObject) -> Unit) {
+        manifestMutex.withLock {
+            val existing = readObject(token, MANIFEST_OBJECT)
+            val root = if (existing != null) {
+                try { JSONObject(existing) } catch (_: Exception) { JSONObject() }
+            } else {
+                JSONObject()
+            }
+            action(root)
+            uploadObject(token, MANIFEST_OBJECT, root.toString(), "application/json")
+            invalidateManifestCache()
         }
-        root.put(songId, JSONObject().apply {
-            put("hash", FileHashUtils.hashMarkdownBodySync(markdownBody))
-            put("updatedAt", System.currentTimeMillis())
-        })
-        uploadObject(token, MANIFEST_OBJECT, root.toString(), "application/json")
-        invalidateManifestCache() // force fresh read after writing
+    }
+
+    private suspend fun updateManifest(token: String, songId: String, markdownBody: String) {
+        Log.d(TAG, "updateManifest($songId)")
+        mutateManifest(token) { root ->
+            root.put(songId, JSONObject().apply {
+                put("hash", FileHashUtils.hashMarkdownBodySync(markdownBody))
+                put("updatedAt", System.currentTimeMillis())
+            })
+        }
     }
 
     // ── Path helpers ─────────────────────────────────────────────────────────
@@ -430,4 +486,18 @@ class GcpSyncProvider(
                 null
             }
         }
+
+    override suspend fun deleteSong(userId: String, songId: String) {
+        withContext(Dispatchers.IO) {
+            Log.d(TAG, "deleteSong(userId=$userId, songId=$songId)")
+            try {
+                val tok = token()
+                deleteObject(tok, songObjectPath(userId, songId))
+                mutateManifest(tok) { root -> root.remove(songId) }
+                Log.d(TAG, "deleteSong($songId) — object deleted and manifest updated")
+            } catch (e: Exception) {
+                Log.e(TAG, "deleteSong($songId) failed (non-fatal): ${e.message}")
+            }
+        }
+    }
 }

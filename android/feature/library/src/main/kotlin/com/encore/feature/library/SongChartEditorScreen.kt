@@ -20,9 +20,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
+import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -33,6 +37,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -198,6 +203,7 @@ fun SongChartEditorScreen(
     val lockState by viewModel.lockState.collectAsState()
     val isReadOnly = lockState is LockResult.LockedBy
     val lockOwner = (lockState as? LockResult.LockedBy)?.owner ?: ""
+    val normalizeState by viewModel.normalizeState.collectAsState()
 
     // Request lock when the editor opens; release when it leaves composition.
     LaunchedEffect(songId) {
@@ -219,6 +225,11 @@ fun SongChartEditorScreen(
     }
 
     var isDirty by remember { mutableStateOf(false) }
+    var showDiscardDialog by remember { mutableStateOf(false) }
+
+    // Intercept system back gesture when there are unsaved changes
+    BackHandler(enabled = isDirty) { showDiscardDialog = true }
+
     val scrollState = rememberScrollState()
 
     val context by remember { derivedStateOf { detectContext(fieldValue) } }
@@ -249,9 +260,13 @@ fun SongChartEditorScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = {
-                        focusManager.clearFocus()
-                        keyboardController?.hide()
-                        onNavigateBack()
+                        if (isDirty) {
+                            showDiscardDialog = true
+                        } else {
+                            focusManager.clearFocus()
+                            keyboardController?.hide()
+                            onNavigateBack()
+                        }
                     }) {
                         Icon(
                             imageVector = Icons.Default.ArrowBack,
@@ -286,8 +301,33 @@ fun SongChartEditorScreen(
                             onClick = { inlineEditActive = true }
                         )
                     }
+                    // Normalize button — only shown when an API key is configured
+                    if (viewModel.hasAnthropicKey && !isReadOnly) {
+                        when (normalizeState) {
+                            is LibraryViewModel.NormalizeState.Loading -> {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp).padding(end = 8.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            }
+                            else -> {
+                                IconButton(onClick = {
+                                    focusManager.clearFocus()
+                                    keyboardController?.hide()
+                                    viewModel.normalizeSong(songId)
+                                }) {
+                                    Icon(
+                                        imageVector = Icons.Default.AutoAwesome,
+                                        contentDescription = "Normalize with AI",
+                                        tint = Color(0xFFFF9F0A)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     if (isDirty && !isReadOnly) {
-                        androidx.compose.material3.TextButton(
+                        TextButton(
                             onClick = {
                                 song?.let { fieldValue = TextFieldValue(it.markdownBody) }
                                 isDirty = false
@@ -408,6 +448,67 @@ fun SongChartEditorScreen(
                 }
             }
         }
+    }
+
+    if (showDiscardDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscardDialog = false },
+            title = { Text("Discard changes?") },
+            text = { Text("Your edits will be lost.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDiscardDialog = false
+                    focusManager.clearFocus()
+                    keyboardController?.hide()
+                    onNavigateBack()
+                }) {
+                    Text("Discard", color = androidx.compose.ui.graphics.Color(0xFFFF453A))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardDialog = false }) {
+                    Text("Keep editing")
+                }
+            }
+        )
+    }
+
+    when (val state = normalizeState) {
+        is LibraryViewModel.NormalizeState.Success -> {
+            AlertDialog(
+                onDismissRequest = { viewModel.clearNormalizeState() },
+                title = { Text("Apply normalized chart?") },
+                text = { Text("The AI has reformatted this song for optimal tablet display. This will replace the current chart content.") },
+                confirmButton = {
+                    Button(onClick = {
+                        viewModel.updateMarkdownBody(songId, state.normalized)
+                        fieldValue = TextFieldValue(state.normalized)
+                        isDirty = false
+                        viewModel.clearNormalizeState()
+                    }) {
+                        Text("Apply")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.clearNormalizeState() }) {
+                        Text("Discard")
+                    }
+                }
+            )
+        }
+        is LibraryViewModel.NormalizeState.Error -> {
+            AlertDialog(
+                onDismissRequest = { viewModel.clearNormalizeState() },
+                title = { Text("Normalize failed") },
+                text = { Text(state.message) },
+                confirmButton = {
+                    TextButton(onClick = { viewModel.clearNormalizeState() }) {
+                        Text("OK")
+                    }
+                }
+            )
+        }
+        else -> {}
     }
 }
 

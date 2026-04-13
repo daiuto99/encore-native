@@ -253,6 +253,9 @@ fun MainScreen(
                     // Simple push — no popUpTo so Back returns to the current song in the set.
                     navController.navigate(Routes.songDetail(songId, -1))
                 },
+                onEditChart = { songId ->
+                    navController.navigate(Routes.chartEditor(songId))
+                },
                 syncHudState = syncHudState
             )
         }

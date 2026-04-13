@@ -229,6 +229,7 @@ class AppPreferencesRepository(private val context: Context) {
         }
     }
 
+
     suspend fun updateDarkSectionStyle(section: String, style: SectionStyle) {
         context.appDataStore.edit { prefs ->
             val current = prefs[Keys.DARK_SECTION_STYLES_JSON]

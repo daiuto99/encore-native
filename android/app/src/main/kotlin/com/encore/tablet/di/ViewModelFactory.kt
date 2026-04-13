@@ -24,7 +24,8 @@ class ViewModelFactory(
                     appContainer.songRepository,
                     appContainer.userPreferencesRepository,
                     appContainer.appPreferencesRepository,
-                    appContainer.syncProvider
+                    appContainer.syncProvider,
+                    appContainer.anthropicApiKey
                 ) as T
             }
             modelClass.isAssignableFrom(SetViewModel::class.java) -> {

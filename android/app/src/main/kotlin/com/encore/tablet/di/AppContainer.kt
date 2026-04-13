@@ -13,6 +13,7 @@ import com.encore.core.data.repository.SongRepository
 import com.encore.core.data.repository.SongRepositoryImpl
 import com.encore.core.data.sync.GcpSyncProvider
 import com.encore.core.data.sync.SyncProvider
+import org.json.JSONObject
 
 /**
  * Simple dependency injection container.
@@ -60,5 +61,12 @@ class AppContainer(private val context: Context) {
 
     val authRepository: AuthRepository by lazy {
         AuthRepositoryImpl(context, BuildConfig.GOOGLE_WEB_CLIENT_ID, userPreferencesRepository)
+    }
+
+    val anthropicApiKey: String by lazy {
+        try {
+            val json = context.assets.open("anthropic_config.json").bufferedReader().readText()
+            JSONObject(json).getString("api_key").trim()
+        } catch (_: Exception) { "" }
     }
 }

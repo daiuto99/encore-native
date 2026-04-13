@@ -152,4 +152,5 @@ class AppPreferencesViewModel(
 
     fun promoteToGlobal(song: SongEntity, isDarkTheme: Boolean) =
         viewModelScope.launch { repo.promoteToGlobal(song, isDarkTheme) }
+
 }

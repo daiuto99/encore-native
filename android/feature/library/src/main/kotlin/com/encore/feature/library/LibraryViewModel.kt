@@ -43,7 +43,8 @@ class LibraryViewModel(
     private val songRepository: SongRepository,
     private val userPrefs: UserPreferencesRepository,
     private val appPrefsRepository: AppPreferencesRepository? = null,
-    private val syncProvider: SyncProvider? = null
+    private val syncProvider: SyncProvider? = null,
+    private val anthropicApiKey: String = ""
 ) : ViewModel() {
 
     // ── Search / filter / sort ────────────────────────────────────────────────
@@ -240,6 +241,36 @@ class LibraryViewModel(
     fun getSongFlow(songId: String): Flow<SongEntity?> = kotlinx.coroutines.flow.flow {
         emit(songRepository.getSongById(songId))
     }
+
+    // ── AI normalize ──────────────────────────────────────────────────────────
+
+    sealed class NormalizeState {
+        object Idle : NormalizeState()
+        object Loading : NormalizeState()
+        data class Success(val normalized: String) : NormalizeState()
+        data class Error(val message: String) : NormalizeState()
+    }
+
+    private val _normalizeState = MutableStateFlow<NormalizeState>(NormalizeState.Idle)
+    val normalizeState: StateFlow<NormalizeState> = _normalizeState.asStateFlow()
+
+    val hasAnthropicKey: Boolean get() = anthropicApiKey.isNotBlank()
+
+    fun normalizeSong(songId: String) {
+        viewModelScope.launch {
+            _normalizeState.value = NormalizeState.Loading
+            val song = songRepository.getSongById(songId) ?: run {
+                _normalizeState.value = NormalizeState.Error("Song not found")
+                return@launch
+            }
+            com.encore.core.data.ai.AnthropicClient
+                .normalizeChordSheet(anthropicApiKey, song.markdownBody)
+                .onSuccess { _normalizeState.value = NormalizeState.Success(it) }
+                .onFailure { _normalizeState.value = NormalizeState.Error(it.message ?: "Normalize failed") }
+        }
+    }
+
+    fun clearNormalizeState() { _normalizeState.value = NormalizeState.Idle }
 
     // ── Upload helper (residual — see class-level note, Track 1.4) ──────────
 

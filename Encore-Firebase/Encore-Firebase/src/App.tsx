@@ -137,6 +137,33 @@ function normalizeMarkdownBody(body: string) {
     .trim();
 }
 
+/**
+ * Strips the first non-blank line from the body if it is a title duplicate.
+ * Handles both markdown heading format (# Title) and bracket format ([Title]).
+ * The metadata bar is the single source of truth for the title.
+ */
+function stripLeadingTitle(body: string, title: string): string {
+  if (!title.trim()) return body;
+  const lines = body.split('\n');
+  const firstNonBlank = lines.findIndex((l) => l.trim().length > 0);
+  if (firstNonBlank === -1) return body;
+  const raw = lines[firstNonBlank].trim();
+  let candidate: string;
+  if (raw.startsWith('[') && raw.endsWith(']')) {
+    candidate = raw.slice(1, -1).trim();
+  } else {
+    candidate = raw.replace(/^#+\s*/, '').trim();
+  }
+  // Strip parentheticals like "(Leo)" before comparing so "[ANY WAY YOU WANT IT (LEO)]" matches title "ANY WAY YOU WANT IT"
+  const normalizedCandidate = candidate.replace(/\s*\([^)]*\)/g, '').trim();
+  if (normalizedCandidate.toLowerCase() === title.trim().toLowerCase()) {
+    const result = [...lines];
+    result.splice(firstNonBlank, 1);
+    return result.join('\n');
+  }
+  return body;
+}
+
 function parseSong(path: string, raw: string): SongRecord {
   const normalized = normalizeLineEndings(raw);
   const { frontMatter, body } = parseYaml(normalized);
@@ -421,6 +448,7 @@ export default function App() {
   const [draft, setDraft]               = useState('');
   const [draftMeta, setDraftMeta]       = useState<SongMeta>(EMPTY_META);
   const [searchQuery, setSearchQuery]   = useState('');
+  const [sortBy, setSortBy]             = useState<'title' | 'artist' | 'key'>('title');
   const [setName, setSetName]           = useState('Friday Night');
   const [setSongIds, setSetSongIds]     = useState<string[]>([]);
   const [libraryHandle, setLibraryHandle]   = useState<FsDirectoryHandle | null>(null);
@@ -454,13 +482,23 @@ export default function App() {
 
   const filteredSongs = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return songs;
-    return songs.filter((s) =>
+    const base = !q ? songs : songs.filter((s) =>
       s.metadata.title.toLowerCase().includes(q) ||
       s.metadata.artist.toLowerCase().includes(q) ||
       s.metadata.display_key.toLowerCase().includes(q),
     );
-  }, [songs, searchQuery]);
+    return [...base].sort((a, b) => {
+      if (sortBy === 'artist') {
+        const cmp = a.metadata.artist.toLowerCase().localeCompare(b.metadata.artist.toLowerCase());
+        return cmp !== 0 ? cmp : a.metadata.title.toLowerCase().localeCompare(b.metadata.title.toLowerCase());
+      }
+      if (sortBy === 'key') {
+        const cmp = a.metadata.display_key.toLowerCase().localeCompare(b.metadata.display_key.toLowerCase());
+        return cmp !== 0 ? cmp : a.metadata.title.toLowerCase().localeCompare(b.metadata.title.toLowerCase());
+      }
+      return a.metadata.title.toLowerCase().localeCompare(b.metadata.title.toLowerCase());
+    });
+  }, [songs, searchQuery, sortBy]);
 
   const activeSetSongs = useMemo(
     () => setSongIds.map((p) => songs.find((s) => s.path === p)).filter((s): s is SongRecord => Boolean(s)),
@@ -488,7 +526,8 @@ export default function App() {
   useEffect(() => {
     if (selectedSong) {
       setDraftMeta(selectedSong.metadata);
-      setDraft(normalizeMarkdownBody(selectedSong.body));
+      const normalizedBody = normalizeMarkdownBody(selectedSong.body);
+      setDraft(stripLeadingTitle(normalizedBody, selectedSong.metadata.title));
     } else {
       setDraftMeta(EMPTY_META);
       setDraft('');
@@ -610,7 +649,7 @@ export default function App() {
         const file = await item.handle.getFile();
         loaded.push(parseSong(item.path, await file.text()));
       }
-      loaded.sort((a, b) => a.path.localeCompare(b.path));
+      loaded.sort((a, b) => a.metadata.title.toLowerCase().localeCompare(b.metadata.title.toLowerCase()));
       setFileHandles(nextHandles);
       setSongs(loaded);
       setSelectedPath((cur) => cur || loaded[0]?.path || '');
@@ -814,6 +853,22 @@ export default function App() {
                   <X size={13} />
                 </button>
               )}
+            </div>
+            <div className="mt-2 flex items-center gap-1">
+              <span className="text-[10px] text-slate-400 mr-1">Sort:</span>
+              {(['title', 'artist', 'key'] as const).map((opt) => (
+                <button
+                  key={opt}
+                  onClick={() => setSortBy(opt)}
+                  className={`rounded px-2 py-0.5 text-[10px] font-medium transition ${
+                    sortBy === opt
+                      ? 'bg-blue-100 text-blue-700'
+                      : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  {opt.charAt(0).toUpperCase() + opt.slice(1)}
+                </button>
+              ))}
             </div>
           </div>
 

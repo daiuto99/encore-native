@@ -69,35 +69,44 @@ Add cloud-backed account and sync behavior without breaking the offline-first lo
 
 ---
 
-## Performance Dashboard — COMPLETE (Floating Card, second bar)
+## Performance Bar — COMPLETE (Task 4.6, consolidated 2-row chrome)
 
-### Layout (left → right inside card)
-- **Key Anchor:** `background(harmonyColor×13%)` + `border(1dp, harmonyColor×35%)`, root 20sp ExtraBold Monospace, scale 9sp below
-- **Identity:** title **19sp** Bold Monospace (color = `titleColorOverride ?? setColor`) + artist bodySmall (color = `artistColorOverride ?? encoreColors.artistText`)
-- **Status Pill:** `Surface(RoundedCornerShape(50))` — guitar pick icon (20dp, `leadIconColor` tinted) + CAPO badge (fret number + "CAPO" label, `capoColor` tinted, shown when `song.capoEnabled`) + BPM column.
-- **Transposition warning:** ⚠ emoji (amber) if `displayKey ≠ originalKey`
-- **1dp vertical divider** (60% height)
-- **Control Pill:** `Surface(RoundedCornerShape(12.dp))` — three 60dp `IconButton`s (☀/🌙, ✏, ✕)
+### Shipped layout
+```
+Row 1 (52dp): [SET 1] [SET 2] [SET 3]  •  9:45 PM  ☀  [  🔍  ]  ···  ✕
+Row 2 (72dp): [←56dp]  [G maj]  Song Title 22sp / artist 12sp  [status pill]  [→56dp]
+```
 
-### Icon colors (per-theme in AppPreferences)
-- `darkLeadIconColor` / `lightLeadIconColor` — guitar pick icon tint (default = harmony color)
-- `darkCapoColor` / `lightCapoColor` — capo fret number + label tint (default = harmony color)
-- Configurable in **Settings → Theme** alongside background and section colors.
+### Row 1 details
+- **SET tabs:** pill-shaped (`RoundedCornerShape(50)`), 18dp h-pad, 8dp spacing, 13sp text. Active = set color at 20% bg + 55% border. Tapping an inactive tab calls `viewModel.getFirstSongIdForSet(n)` → `onNavigateToSongInSet(songId, n)`.
+- **Clock:** 12-hour AM/PM format, updates every 30s. Replaced by sync HUD (`InProgress`/`Complete`) when syncing.
+- **Dark mode toggle:** ☀/🌙 `IconButton` (48dp), always visible on bar.
+- **Search:** 72dp×48dp wide `Box` with `clip(RoundedCornerShape(8.dp))` — extra hit zone.
+- **Overflow `···`:** `DropdownMenu` — Save Set, Load Set.
+- **Exit ✕:** 48dp `IconButton` at far right.
 
----
+### Row 2 details
+- **Prev/Next arrows:** `IconButton(56dp)`, 32dp chevron icon, disabled (18% alpha) at set boundaries.
+- **Key badge:** compact `Column` (18sp root, 8sp scale label), `RoundedCornerShape(6.dp)`, harmonyColor tinted. Hidden when song has no key.
+- **Song title:** 22sp SemiBold Default, `titleColorOverride ?? setColor`, maxLines=1 ellipsis. Shows `saveSuccess` text in green when save completes.
+- **Artist:** 12sp below title, `artistColorOverride ?? artistText`. Hidden when "Unknown Artist".
+- **Status pill:** `RoundedCornerShape(50)` — lead guitar icon (18dp) + capo column (13sp + "CAPO" 7sp) + BPM column (tappable for tap tempo).
+- **Transposition warning:** ⚠ amber when `displayKey ≠ originalKey`.
 
-## Performance Context Bar — COMPLETE (top bar, first bar)
+### Architecture
+- Replaces both `PerformanceContextBar` + `PerformanceDashboard` (dead code still in file, compiler-strips; clean up in 4.7).
+- `SongDetailScreen` new params: `availableSetNumbers: List<Int>`, `onNavigateToSongInSet: ((String, Int) -> Unit)?`
+- `SongDetailViewModel.getFirstSongIdForSet(setNumber, callback)` — uses `setlistRepository.getOrCreateSetByNumber` + `.getSongsInSet().first()`
+- `MainScreen.kt`: `availableSetNumbers` derived from `setViewModel.availableSets.map { it.number }.sorted()`
+- Chart top padding: 152dp → 128dp
 
-### What was built
-- `PerformanceContextBar` composable — 52dp floating card **above** `PerformanceDashboard`.
-- Layout: **← prev pill** | **SET N** (set color, uppercase, bold, letter-spaced) | **next pill →** | 1dp divider | **HH:MM:SS live clock** (or sync HUD when active)
-- Set label is `"SET $setNumber"` only — no setlist name shown.
-- Pills show truncated title or `"..."` when at first/last song; clicking animates pager.
-- Card hidden when `setName` is empty (single-song / no-set mode).
+### Known issue for 4.7
+- Song title + key badge feel unanchored in Row 2 — they compete visually with the status pill and arrows. Need stronger hero hierarchy: consider 24sp title, always-visible key badge, or bolder color contrast. Confirm direction at start of next session.
 
-### Bar order (top → bottom)
-1. `PerformanceContextBar` — navigation, SET N label, clock
-2. `PerformanceDashboard` — song title, key anchor, status pill, controls
+### Icon colors (per-theme in AppPreferences — unchanged from M3)
+- `darkLeadIconColor` / `lightLeadIconColor` — guitar pick tint
+- `darkCapoColor` / `lightCapoColor` — capo badge tint
+- Configurable in Settings → Theme.
 
 ---
 
@@ -200,6 +209,52 @@ displayKey: String?, bpm: Int?
 
 ---
 
+## Track 4 Design Strategy — UI Rework
+
+### References
+- **Primary:** Original Encore Replit prototype → [github.com/daiuto99/Encore](https://github.com/daiuto99/Encore)
+- **Secondary:** Apple Music
+
+### Design Direction
+The current app reads as a utility screen (true black + flat graphite, monospace titles, sets buried at the bottom). The target is a deep, layered feel — like a real music product.
+
+**The three systemic problems and their fixes:**
+
+| Problem | Root Cause | Fix |
+|---|---|---|
+| Screen feels shallow / no depth | True black background; no surface hierarchy | Deep navy palette: `#060E1F` bg, `#0D1829` cards |
+| Titles feel like a terminal | Monospace Bold used for song title + artist | Sans-serif for title/artist; Monospace only for chords, key root, BPM |
+| Sets feel disconnected / buried | Sets panel at bottom of library; no forward flow | Sets tabs sticky at top, shown contextually by mode |
+| Performance top area clunky | Two chrome rows eat real estate; no action priority | Collapse to one smart bar; secondary actions behind tap |
+
+### What to Keep (do not change)
+- Left blue accent bars on library song rows
+- Key pill + info badge on the right of library song rows
+- Key anchor box (letter + scale) in performance view top-left
+- Left accent bars on song detail section blocks
+- Theme preset system — keep as power-user feature; fix only the defaults
+
+### Phase Sequence
+1. **Phase 1 (visual system)** — palette + typography + logo. Confirm on device before Phase 2.
+2. **Phase 2 (sets nav)** — move sets to top, contextual visibility, set membership clarity in library.
+3. **Phase 3 (performance consolidation)** — single bar, action priority. Requires confirming on-stage action list with user first.
+
+### Phase 3 Confirmed Bar Layout
+```
+┌────────────────────────────────────────────────────────┐
+│  SET 1   SET 2   SET 3        8:36 PM      🔍   ···   │  ← Row 1: sticky
+└────────────────────────────────────────────────────────┘
+ ← Prev Song Name                    Next Song Name →       ← Row 2: nav
+```
+- **Left:** Set tabs (always visible)
+- **Center:** Live clock
+- **Right:** Search icon (for song requests), overflow `···` → Dark/Light + Exit
+- **Row 2:** Prev/Next with adjacent song names
+- **Removed from chrome:** Edit song (library only)
+- **Moved into chart:** Key anchor, BPM, capo badge, guitar pick — small header at top of song content
+
+---
+
 ## Known Facts for Next Session
 - **DataStore files:** `user_prefs` (auth), `app_prefs` (visual prefs). Do not mix.
 - **DB version:** 9
@@ -208,15 +263,15 @@ displayKey: String?, bpm: Int?
 - **`SongChartEditorScreen`** in `feature/library` → `Routes.SONG_CHART_EDITOR = "chart_editor/{songId}"`
 - **Build filter:** `./gradlew assembleDebug 2>&1 | grep -E "FAILED|error:|BUILD SUCCESSFUL"`
 - **ADB path:** `~/Library/Android/sdk/platform-tools/adb`
-- **Performance card scroll padding:** `152dp` in `SongDetailScreen.kt`
+- **Performance chart scroll padding:** `128dp` in `SongDetailScreen.kt` (was 152dp pre-4.6)
 - **Light mode is the default** — `MainScreen.kt` `isDarkMode = mutableStateOf(false)`
-- **Icon sizes:** all `IconButton` = 60dp hit target, icon visual = 20-24dp
+- **Performance bar touch targets:** Row 1 icons = 48dp; Row 2 prev/next = 56dp; search = 72dp×48dp wide Box
 - **Guitar pick icon:** `feature/performance/src/main/res/drawable/ic_guitar_pick.xml`
-- **Bar order:** ContextBar (top) → Dashboard (below); both in a `Column` aligned to `Alignment.TopStart`
-- **Song title color:** `appPreferences.titleColorOverride ?: setColor`; 19sp Bold Monospace
-- **Set label:** `"SET $setNumber"` uppercase, set color, `letterSpacing = 1.2.sp`
-- **Capo icon colors:** `darkLeadIconColor` / `lightLeadIconColor` (guitar pick), `darkCapoColor` / `lightCapoColor` (capo badge) — in Theme settings alongside bg color
-- **V1.1 next task:** 2.5 — unit tests for `TranspositionUtils.kt` in `feature/performance`; no test dir exists yet, needs `src/test/kotlin/...` scaffolding; check `build.gradle.kts` for JUnit dep
+- **Performance chrome:** Single `PerformanceBar` composable (~line 856 in `SongDetailScreen.kt`). Dead `PerformanceContextBar` + `PerformanceDashboard` stubs below it — remove in 4.7 cleanup.
+- **Song title in bar:** 22sp SemiBold Default; color = `titleColorOverride ?: setColor`
+- **Set switching in performance:** `viewModel.getFirstSongIdForSet(n, callback)` → `onNavigateToSongInSet(songId, n)`
+- **Capo icon colors:** `darkLeadIconColor` / `lightLeadIconColor` (guitar pick), `darkCapoColor` / `lightCapoColor` (capo badge) — in Theme settings
+- **V1.1 current track:** Track 4 — Phase 3. Tasks 4.1–4.6 COMPLETE. Next: 4.7 (typography pass + title/key anchoring in performance bar).
 
 ---
 

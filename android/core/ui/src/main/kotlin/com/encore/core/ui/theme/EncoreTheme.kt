@@ -42,8 +42,8 @@ data class EncoreColors(
 )
 
 val DarkEncoreColors = EncoreColors(
-    screenBackground = Color(0xFF000000),
-    cardBackground = Color(0xFF1C1C1E),
+    screenBackground = Color(0xFF060E1F),
+    cardBackground = Color(0xFF0D1829),
     cardElevation = 0.dp,
     titleText = Color.White,
     artistText = Color.White.copy(alpha = 0.6f),

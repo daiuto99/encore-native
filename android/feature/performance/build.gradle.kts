@@ -56,4 +56,7 @@ dependencies {
 
     // Material Icons Extended (for more icons)
     implementation("androidx.compose.material:material-icons-extended")
+
+    // Unit tests
+    testImplementation("junit:junit:4.13.2")
 }

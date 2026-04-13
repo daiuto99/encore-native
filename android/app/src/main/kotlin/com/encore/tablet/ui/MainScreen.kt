@@ -131,6 +131,8 @@ fun MainScreen(
     val appPreferences by appPrefsViewModel.preferences.collectAsState()
     val syncHudState by syncViewModel.syncHudState.collectAsState()
     val lastSyncTimestamp by syncViewModel.lastSyncTimestamp.collectAsState()
+    val availableSets by setViewModel.availableSets.collectAsState()
+    val availableSetNumbers = remember(availableSets) { availableSets.map { it.number }.sorted() }
     var isDarkMode by remember { mutableStateOf(false) }
     var editSong by remember { mutableStateOf<SongEntity?>(null) }
     val encoreColors = if (isDarkMode) DarkEncoreColors else LightEncoreColors
@@ -216,6 +218,7 @@ fun MainScreen(
                 viewModel = viewModel,
                 songId = songId,
                 setNumber = setNumber,
+                availableSetNumbers = availableSetNumbers,
                 appPreferences = appPreferences,
                 onToggleDarkMode = { isDarkMode = !isDarkMode },
                 onEditClick = { song -> editSong = song },
@@ -236,6 +239,12 @@ fun MainScreen(
                     // popUpTo("command_center") clears any previous song_detail entries,
                     // keeping command_center as the sole base so Back always works.
                     navController.navigate(Routes.songDetail(newSongId, setNumber)) {
+                        popUpTo("command_center")
+                        launchSingleTop = true
+                    }
+                },
+                onNavigateToSongInSet = { newSongId, newSetNumber ->
+                    navController.navigate(Routes.songDetail(newSongId, newSetNumber)) {
                         popUpTo("command_center")
                         launchSingleTop = true
                     }
@@ -556,10 +565,18 @@ fun CommandCenterScreen(
                 onSettingsClick = onSettingsClick
             )
 
-            HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 16.dp),
-                thickness = 0.5.dp,
-                color = encoreColors.divider
+            // ── Sets Bar — sticky below header ───────────────────────────────
+            SetsSection(
+                sets = availableSets,
+                selectedSet = selectedSetFilter,
+                onSetSelected = { setNumber ->
+                    selectedSetFilter = if (selectedSetFilter == setNumber) null else setNumber
+                },
+                onCreateSet = { setViewModel.createNewSet() },
+                onDeleteSet = { set ->
+                    if (selectedSetFilter == set.number) selectedSetFilter = null
+                    setViewModel.deleteSet(set)
+                }
             )
 
             // Song list (search bar + rows) — fills available space
@@ -571,21 +588,6 @@ fun CommandCenterScreen(
                 onSongClick = { songId -> onSongClick(songId, selectedSetFilter) },
                 onEditChart = onEditChart,
                 modifier = Modifier.weight(1f)
-            )
-
-            // ── Sets Section ─────────────────────────────────────────────────
-            SetsSection(
-                sets = availableSets,
-                selectedSet = selectedSetFilter,
-                onSetSelected = { setNumber ->
-                    selectedSetFilter = if (selectedSetFilter == setNumber) null else setNumber
-                },
-                onClearFilter = { selectedSetFilter = null },
-                onCreateSet = { setViewModel.createNewSet() },
-                onDeleteSet = { set ->
-                    if (selectedSetFilter == set.number) selectedSetFilter = null
-                    setViewModel.deleteSet(set)
-                }
             )
         }
     }
@@ -781,12 +783,18 @@ fun ImportModal(
  * it (toggle). "New Set" chip appended at the end creates the next numbered set.
  */
 @OptIn(ExperimentalFoundationApi::class)
+/**
+ * Sticky set-filter tab bar shown just below the header.
+ *
+ * Tapping a chip filters the library to that set; tapping the active chip
+ * clears the filter. Long-pressing a non-Set-1 chip deletes it.
+ * "+ New Set" creates an additional set.
+ */
 @Composable
 fun SetsSection(
     sets: List<SetEntity>,
     selectedSet: Int?,
     onSetSelected: (Int) -> Unit,
-    onClearFilter: () -> Unit,
     onCreateSet: () -> Unit,
     onDeleteSet: (SetEntity) -> Unit,
     modifier: Modifier = Modifier
@@ -813,44 +821,13 @@ fun SetsSection(
     }
 
     val encoreColors = LocalEncoreColors.current
-    HorizontalDivider(
-        thickness = 0.5.dp,
-        color = encoreColors.divider
-    )
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 10.dp)
-    ) {
+    Column(modifier = modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Sets",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                color = encoreColors.titleText,
-                modifier = Modifier.weight(1f)
-            )
-            if (selectedSet != null) {
-                TextButton(
-                    onClick = onClearFilter,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                ) {
-                    Text(
-                        text = "Show All",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = encoreColors.iconTint
-                    )
-                }
-            }
-        }
-        Spacer(modifier = Modifier.height(6.dp))
-        Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             sets.forEach { set ->
@@ -871,10 +848,10 @@ fun SetsSection(
                 ) {
                     Text(
                         text = "Set ${set.number}",
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium,
                         color = if (isSelected) Color.White else setColor,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp)
                     )
                 }
             }
@@ -884,18 +861,25 @@ fun SetsSection(
                 label = {
                     Text(
                         text = "+ New Set",
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium,
-                        color = encoreColors.titleText,
-                        modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp)
+                        color = encoreColors.subtleText,
+                        modifier = Modifier.padding(vertical = 4.dp, horizontal = 2.dp)
                     )
                 },
                 colors = FilterChipDefaults.filterChipColors(
-                    containerColor = encoreColors.cardBackground,
-                    labelColor = encoreColors.titleText
+                    containerColor = Color.Transparent,
+                    labelColor = encoreColors.subtleText
+                ),
+                border = FilterChipDefaults.filterChipBorder(
+                    enabled = true,
+                    selected = false,
+                    borderColor = encoreColors.divider,
+                    selectedBorderColor = encoreColors.divider
                 )
             )
         }
+        HorizontalDivider(thickness = 0.5.dp, color = encoreColors.divider)
     }
 }
 

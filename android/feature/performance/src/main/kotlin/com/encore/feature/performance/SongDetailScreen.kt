@@ -16,6 +16,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.pager.HorizontalPager
@@ -44,6 +45,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.ui.res.painterResource
@@ -55,6 +57,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -217,11 +221,13 @@ fun SongDetailScreen(
     viewModel: SongDetailViewModel,
     songId: String,
     setNumber: Int = -1,
+    availableSetNumbers: List<Int> = emptyList(),
     onNavigateBack: () -> Unit,
     onToggleDarkMode: (() -> Unit)? = null,
     onEditClick: ((com.encore.core.data.entities.SongEntity) -> Unit)? = null,
     onPageChanged: (() -> Unit)? = null,
     onNavigateToSong: ((String) -> Unit)? = null,
+    onNavigateToSongInSet: ((String, Int) -> Unit)? = null,
     onQuickSearchSong: ((String) -> Unit)? = null,
     appPreferences: AppPreferences = AppPreferences(),
     syncHudState: com.encore.core.data.sync.SyncHudState? = null,
@@ -385,57 +391,52 @@ fun SongDetailScreen(
                 }
             }
 
-            // ── Context Bar + Performance Dashboard (pinned) ─────────────
-            Column(
+            // ── Consolidated Performance Bar (pinned, full-width) ────────
+            PerformanceBar(
+                song = currentSong,
+                setNumber = setNumber,
+                availableSetNumbers = availableSetNumbers,
+                harmonyColor = parseColorSafe(
+                    if (encoreColors.isDark) appPreferences.darkHarmonyColor
+                    else appPreferences.lightHarmonyColor
+                ),
+                setColor = SetColor.getSetColor(setNumber),
+                leadIconColor = parseColorSafe(
+                    if (encoreColors.isDark) appPreferences.darkLeadIconColor
+                    else appPreferences.lightLeadIconColor
+                ),
+                capoColor = parseColorSafe(
+                    if (encoreColors.isDark) appPreferences.darkCapoColor
+                    else appPreferences.lightCapoColor
+                ),
+                syncHudState = syncHudState,
+                prevSong = prevSong,
+                nextSong = nextSong,
+                saveSuccess = saveSuccess,
+                appPreferences = appPreferences,
+                onPrevClick = {
+                    scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
+                },
+                onNextClick = {
+                    scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
+                },
+                onSwitchToSet = if (onNavigateToSongInSet != null) { targetSet ->
+                    viewModel.getFirstSongIdForSet(targetSet) { firstSongId ->
+                        if (firstSongId != null) onNavigateToSongInSet(firstSongId, targetSet)
+                    }
+                } else null,
+                onToggleDarkMode = onToggleDarkMode,
+                onNavigateBack = onNavigateBack,
+                onSaveClick = if (setNumber > 0) ({ showSaveDialog = true }) else null,
+                onLoadClick = if (setNumber > 0) ({ showLoadDialog = true }) else null,
+                onSearchClick = if (onQuickSearchSong != null) ({ showQuickSearch = true }) else null,
+                tapBpm = tapBpm,
+                onTap = { viewModel.recordTap() },
+                onSaveTapBpm = { bpm -> viewModel.saveTapBpm(bpm) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.TopStart)
-            ) {
-                if (setName.isNotEmpty()) {
-                    PerformanceContextBar(
-                        setName = setName,
-                        setNumber = setNumber,
-                        setColor = SetColor.getSetColor(setNumber),
-                        syncHudState = syncHudState,
-                        prevSong = prevSong,
-                        nextSong = nextSong,
-                        saveSuccess = saveSuccess,
-                        onPrevClick = {
-                            scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
-                        },
-                        onNextClick = {
-                            scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
-                        }
-                    )
-                }
-                PerformanceDashboard(
-                    song = currentSong,
-                    harmonyColor = parseColorSafe(
-                        if (encoreColors.isDark) appPreferences.darkHarmonyColor
-                        else appPreferences.lightHarmonyColor
-                    ),
-                    setColor = SetColor.getSetColor(setNumber),
-                    leadIconColor = parseColorSafe(
-                        if (encoreColors.isDark) appPreferences.darkLeadIconColor
-                        else appPreferences.lightLeadIconColor
-                    ),
-                    capoColor = parseColorSafe(
-                        if (encoreColors.isDark) appPreferences.darkCapoColor
-                        else appPreferences.lightCapoColor
-                    ),
-                    appPreferences = appPreferences,
-                    onToggleDarkMode = onToggleDarkMode,
-                    onEditClick = onEditClick,
-                    onNavigateBack = onNavigateBack,
-                    onSaveClick = if (setNumber > 0) ({ showSaveDialog = true }) else null,
-                    onLoadClick = if (setNumber > 0) ({ showLoadDialog = true }) else null,
-                    onSearchClick = if (onQuickSearchSong != null) ({ showQuickSearch = true }) else null,
-                    tapBpm = tapBpm,
-                    onTap = { viewModel.recordTap() },
-                    onSaveTapBpm = { bpm -> viewModel.saveTapBpm(bpm) },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
+            )
 
             // ── Prev song arrow ──────────────────────────────────────────────
             if (prevSongId != null) {
@@ -658,8 +659,8 @@ fun SongContent(
                 }
             }
             .verticalScroll(scrollState)
-            // top padding clears the floating cards: 8dp + 68dp dashboard + 8dp + 52dp context bar + 8dp gap = 144dp → 152dp
-            .padding(start = 24.dp, end = 24.dp, bottom = 24.dp, top = 152.dp)
+            // top padding clears the pinned bar: 52dp row1 + 72dp row2 + 2dp dividers = 126dp → 128dp
+            .padding(start = 24.dp, end = 24.dp, bottom = 24.dp, top = 128.dp)
     ) {
         // Hoist per-song color lookups out of the render loop
         val lyricColor = parseColorSafe(
@@ -842,18 +843,476 @@ private fun SectionBodyLines(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Performance Context Bar
+// Performance Bar — consolidated 2-row chrome (replaces ContextBar + Dashboard)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Floating card pinned above [PerformanceDashboard] showing set-level navigation context.
+ * Pinned performance bar — two rows, full-width, edge-to-edge.
  *
- * Layout (left → right):
- *  - Prev song pill (← title) or "..." when first song
- *  - Set name centred in set colour
- *  - Next song pill (title →) or "..." when last song
- *  - Divider + live clock (HH:MM:SS, 1-second tick)
+ * Row 1 (40dp): SET tabs | live clock | 🔍 | ··· overflow (dark/light, save, load) | ✕
+ * Row 2 (60dp): ← prev | key anchor | SONG TITLE (large) | status pill | → next
  */
+@Composable
+private fun PerformanceBar(
+    song: SongEntity,
+    setNumber: Int,
+    availableSetNumbers: List<Int>,
+    harmonyColor: Color,
+    setColor: Color,
+    leadIconColor: Color,
+    capoColor: Color,
+    syncHudState: com.encore.core.data.sync.SyncHudState?,
+    prevSong: SongEntity?,
+    nextSong: SongEntity?,
+    saveSuccess: String?,
+    appPreferences: AppPreferences,
+    onPrevClick: () -> Unit,
+    onNextClick: () -> Unit,
+    onSwitchToSet: ((Int) -> Unit)?,
+    onToggleDarkMode: (() -> Unit)?,
+    onNavigateBack: () -> Unit,
+    onSaveClick: (() -> Unit)?,
+    onLoadClick: (() -> Unit)?,
+    onSearchClick: (() -> Unit)?,
+    tapBpm: Int?,
+    onTap: () -> Unit,
+    onSaveTapBpm: ((Int) -> Unit)?,
+    modifier: Modifier = Modifier
+) {
+    val encoreColors = LocalEncoreColors.current
+    var currentTime by remember { mutableStateOf("") }
+    var showOverflow by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            val cal = java.util.Calendar.getInstance()
+            val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
+            val min = cal.get(java.util.Calendar.MINUTE)
+            val amPm = if (hour < 12) "AM" else "PM"
+            val h12 = when {
+                hour == 0 -> 12
+                hour > 12 -> hour - 12
+                else -> hour
+            }
+            currentTime = "%d:%02d %s".format(h12, min, amPm)
+            delay(30_000)
+        }
+    }
+
+    val bpm = remember(song.markdownBody) { parseBpm(song.markdownBody) }
+    val (keyRoot, keyScale) = remember(song.displayKey) { splitKey(song.displayKey) }
+    val keyBadgeBg = harmonyColor.copy(alpha = 0.15f)
+    val keyBadgeBorder = harmonyColor.copy(alpha = 0.30f)
+
+    Surface(
+        modifier = modifier,
+        color = encoreColors.cardBackground,
+        shadowElevation = if (encoreColors.isDark) 0.dp else 4.dp,
+        tonalElevation = 0.dp
+    ) {
+        Column {
+            // ── Row 1: Set tabs | clock | actions ──────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .padding(horizontal = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Set tabs — scrollable row of pills (match library pill shape)
+                val setTabScrollState = rememberScrollState()
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(setTabScrollState),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val displaySets = if (availableSetNumbers.isNotEmpty()) availableSetNumbers else
+                        if (setNumber > 0) listOf(setNumber) else emptyList()
+                    displaySets.forEach { tabSet ->
+                        val isActive = tabSet == setNumber
+                        val tabColor = SetColor.getSetColor(tabSet)
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(
+                                    if (isActive) tabColor.copy(alpha = 0.20f)
+                                    else encoreColors.titleText.copy(alpha = 0.06f)
+                                )
+                                .border(
+                                    1.dp,
+                                    if (isActive) tabColor.copy(alpha = 0.55f)
+                                    else encoreColors.divider,
+                                    RoundedCornerShape(50)
+                                )
+                                .clickable(enabled = !isActive && onSwitchToSet != null) {
+                                    onSwitchToSet?.invoke(tabSet)
+                                }
+                                .padding(horizontal = 18.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "SET $tabSet",
+                                color = if (isActive) tabColor else encoreColors.titleText.copy(alpha = 0.50f),
+                                fontSize = 13.sp,
+                                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
+                                letterSpacing = 0.6.sp
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                // Clock or sync hud
+                when (val hud = syncHudState) {
+                    is com.encore.core.data.sync.SyncHudState.InProgress -> {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 2.dp,
+                                color = encoreColors.titleText.copy(alpha = 0.55f)
+                            )
+                            Text(
+                                text = "${hud.current}/${hud.total}",
+                                color = encoreColors.titleText.copy(alpha = 0.55f),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+                    is com.encore.core.data.sync.SyncHudState.Complete -> {
+                        Text(
+                            text = "✓ Synced",
+                            color = Color(0xFF4CAF50),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    null -> {
+                        Text(
+                            text = currentTime,
+                            color = encoreColors.titleText.copy(alpha = 0.55f),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(4.dp))
+
+                // Dark mode toggle — always visible on bar
+                if (onToggleDarkMode != null) {
+                    IconButton(onClick = onToggleDarkMode, modifier = Modifier.size(48.dp)) {
+                        Icon(
+                            imageVector = if (encoreColors.isDark) Icons.Outlined.WbSunny else Icons.Outlined.NightsStay,
+                            contentDescription = if (encoreColors.isDark) "Light mode" else "Dark mode",
+                            tint = encoreColors.iconTint,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+
+                // Search — wide hit zone
+                if (onSearchClick != null) {
+                    Box(
+                        modifier = Modifier
+                            .width(72.dp)
+                            .height(48.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(onClick = onSearchClick),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Quick search",
+                            tint = encoreColors.iconTint,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+
+                // Overflow ···
+                Box {
+                    IconButton(onClick = { showOverflow = true }, modifier = Modifier.size(48.dp)) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "More options",
+                            tint = encoreColors.iconTint,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showOverflow,
+                        onDismissRequest = { showOverflow = false }
+                    ) {
+                        if (onSaveClick != null) {
+                            DropdownMenuItem(
+                                text = { Text("Save Set") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(18.dp))
+                                },
+                                onClick = {
+                                    showOverflow = false
+                                    onSaveClick()
+                                }
+                            )
+                        }
+                        if (onLoadClick != null) {
+                            DropdownMenuItem(
+                                text = { Text("Load Set") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
+                                },
+                                onClick = {
+                                    showOverflow = false
+                                    onLoadClick()
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // Exit ✕
+                IconButton(onClick = onNavigateBack, modifier = Modifier.size(48.dp)) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Exit performance mode",
+                        tint = encoreColors.titleText.copy(alpha = 0.40f),
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+
+            // Row 1 / Row 2 separator
+            HorizontalDivider(
+                color = encoreColors.divider,
+                thickness = 0.5.dp
+            )
+
+            // ── Row 2: ← | key | TITLE | status | → ──────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(72.dp)
+                    .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Prev arrow
+                IconButton(
+                    onClick = onPrevClick,
+                    enabled = prevSong != null,
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ChevronLeft,
+                        contentDescription = prevSong?.title ?: "No previous song",
+                        tint = if (prevSong != null) encoreColors.titleText.copy(alpha = 0.65f)
+                               else encoreColors.titleText.copy(alpha = 0.18f),
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+
+                // Key anchor — compact badge
+                if (keyRoot.isNotEmpty()) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .background(keyBadgeBg, RoundedCornerShape(6.dp))
+                            .border(1.dp, keyBadgeBorder, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = keyRoot,
+                            color = harmonyColor,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontFamily = FontFamily.Monospace,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 19.sp
+                        )
+                        if (keyScale.isNotEmpty()) {
+                            Text(
+                                text = keyScale,
+                                color = harmonyColor.copy(alpha = 0.70f),
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                fontFamily = FontFamily.Monospace,
+                                textAlign = TextAlign.Center,
+                                lineHeight = 9.sp
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                }
+
+                // Song title + artist
+                val titleColor = appPreferences.titleColorOverride
+                    ?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() }
+                    ?: setColor
+                val artistColor = appPreferences.artistColorOverride
+                    ?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() }
+                    ?: encoreColors.artistText
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = saveSuccess ?: song.title,
+                        color = if (saveSuccess != null) Color(0xFF4CAF50) else titleColor,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Default,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (song.artist != "Unknown Artist") {
+                        Text(
+                            text = song.artist,
+                            color = artistColor,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                // Status pill: lead icon + capo + BPM
+                val showStatusPill = (appPreferences.showLeadIndicator && song.isLeadGuitar)
+                    || song.capoEnabled
+                    || bpm != null
+                    || tapBpm != null
+                if (showStatusPill) {
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = encoreColors.titleText.copy(alpha = 0.07f),
+                        tonalElevation = 0.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (appPreferences.showLeadIndicator && song.isLeadGuitar) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_guitar_pick),
+                                    contentDescription = "Lead guitar",
+                                    tint = leadIconColor,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            if (song.capoEnabled) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        text = "${song.capoFret}",
+                                        color = capoColor,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        lineHeight = 14.sp
+                                    )
+                                    Text(
+                                        text = "CAPO",
+                                        color = capoColor.copy(alpha = 0.65f),
+                                        fontSize = 7.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        letterSpacing = 0.4.sp,
+                                        lineHeight = 8.sp
+                                    )
+                                }
+                            }
+                            val displayBpm = tapBpm ?: bpm
+                            if (displayBpm != null) {
+                                val isTapping = tapBpm != null
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.clickable { onTap() }
+                                ) {
+                                    Text(
+                                        text = "$displayBpm",
+                                        color = if (isTapping) MaterialTheme.colorScheme.primary
+                                                else encoreColors.titleText.copy(alpha = 0.88f),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        lineHeight = 14.sp
+                                    )
+                                    Text(
+                                        text = if (isTapping) "TAP" else "BPM",
+                                        color = if (isTapping) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                                                else encoreColors.artistText.copy(alpha = 0.55f),
+                                        fontSize = 7.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        letterSpacing = 0.4.sp,
+                                        lineHeight = 8.sp
+                                    )
+                                }
+                                if (isTapping && onSaveTapBpm != null) {
+                                    IconButton(
+                                        onClick = { onSaveTapBpm(displayBpm) },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = "Save BPM",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
+
+                // Transposition warning
+                val displayKey = song.displayKey
+                val originalKey = song.originalKey
+                if (appPreferences.showTranspositionWarning &&
+                    displayKey != null && originalKey != null &&
+                    displayKey != originalKey) {
+                    Text(
+                        text = "⚠",
+                        color = Color(0xFFFF9F0A),
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(end = 4.dp)
+                    )
+                }
+
+                // Next arrow
+                IconButton(
+                    onClick = onNextClick,
+                    enabled = nextSong != null,
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = nextSong?.title ?: "No next song",
+                        tint = if (nextSong != null) encoreColors.titleText.copy(alpha = 0.65f)
+                               else encoreColors.titleText.copy(alpha = 0.18f),
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+            }
+
+            // Bottom border (dark mode — shadow invisible on dark surface)
+            if (encoreColors.isDark) {
+                HorizontalDivider(color = encoreColors.divider, thickness = 1.dp)
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LEGACY stubs — kept to satisfy existing call sites until refactor completes
+// ─────────────────────────────────────────────────────────────────────────────
+
 @Composable
 private fun PerformanceContextBar(
     setName: String,
@@ -1155,8 +1614,8 @@ private fun PerformanceDashboard(
                         text = song.title,
                         color = titleColor,
                         fontSize = 19.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Default,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )

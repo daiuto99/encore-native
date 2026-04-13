@@ -363,6 +363,23 @@ class SongDetailViewModel(
         _saveSuccess.value = null
     }
 
+    /**
+     * Fetch the first song ID in a given set number.
+     * Used by the set-tab switcher in the performance bar.
+     */
+    fun getFirstSongIdForSet(setNumber: Int, onResult: (String?) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val setEntity = setlistRepository.getOrCreateSetByNumber(setNumber)
+                val songs = setlistRepository.getSongsInSet(setEntity.id).first()
+                onResult(songs.firstOrNull()?.song?.id)
+            } catch (e: Exception) {
+                Log.e(TAG, "getFirstSongIdForSet($setNumber) failed", e)
+                onResult(null)
+            }
+        }
+    }
+
     // ── Tap Tempo ─────────────────────────────────────────────────────────────
 
     private val _tapTimestamps = MutableStateFlow<List<Long>>(emptyList())

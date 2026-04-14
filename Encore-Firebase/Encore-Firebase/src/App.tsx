@@ -6,15 +6,18 @@ import {
   Cloud,
   FileText,
   FolderOpen,
+  GripVertical,
   Guitar,
   Hash,
   ListMusic,
   LogIn,
   LogOut,
   Music2,
+  Maximize2,
   RefreshCw,
   Save,
   Search,
+  Sparkles,
   Tag,
   Upload,
   X,
@@ -22,6 +25,23 @@ import {
 import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
 import { auth, googleProvider } from './lib/firebase';
 import { CloudLibraryService } from './services/CloudLibraryService';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -315,6 +335,72 @@ function renderPreview(body: string): string {
   }).join('');
 }
 
+// ── Performance renderer ──────────────────────────────────────────────────────
+
+const PERF_SECTION_COLORS: Record<string, string> = {
+  intro:          '#3B82F6',
+  verse:          '#F97316',
+  chorus:         '#EF4444',
+  bridge:         '#8B5CF6',
+  outro:          '#F59E0B',
+  solo:           '#10B981',
+  interlude:      '#06B6D4',
+  instrumental:   '#EC4899',
+  'pre-chorus':   '#F97316',
+  prechorus:      '#F97316',
+  tag:            '#F59E0B',
+  hook:           '#EF4444',
+  coda:           '#F59E0B',
+  breakdown:      '#8B5CF6',
+  vamp:           '#06B6D4',
+};
+
+function getPerfSectionColor(label: string): string {
+  const n = label.toLowerCase().trim();
+  for (const [key, color] of Object.entries(PERF_SECTION_COLORS)) {
+    if (n.includes(key)) return color;
+  }
+  return '#94a3b8';
+}
+
+function renderPerformance(body: string): string {
+  const normalized = normalizeMarkdownBody(body);
+  const lines = normalized.split('\n');
+
+  return lines.map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return '<div style="height:10px"></div>';
+
+    // Section headers — [Verse 1] or ## Verse 1
+    const bracketM = trimmed.match(/^\[([^\]]+)\]$/);
+    const mdM      = trimmed.match(/^#{1,2}\s+(.+)$/);
+    const spanM    = trimmed.match(/<span[^>]*>##?\s*(.*?)<\/span>/i);
+    const label    = bracketM?.[1] ?? mdM?.[1] ?? spanM?.[1] ?? null;
+    if (label) {
+      const color = getPerfSectionColor(label);
+      return `<div style="margin-top:28px;margin-bottom:10px;font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:${color};border-left:3px solid ${color};padding-left:10px">${label}</div>`;
+    }
+
+    // Lines with inline backtick chords `[G]`
+    if (trimmed.includes('`[')) {
+      const rendered = trimmed.replace(
+        /`\[([^\]]+)\]`/g,
+        '<span style="color:#FFD60A;font-weight:700;font-size:15px;font-family:monospace">$1 </span>',
+      );
+      return `<div style="font-size:20px;line-height:2;color:#e2e8f0;font-family:monospace">${rendered}</div>`;
+    }
+
+    // Legacy chord-only lines (G  Em  C  D)
+    const isChordLine = /^[A-G][#b]?[^\s]*(\s+[A-G][#b]?[^\s]*)*\s*$/.test(trimmed) && !/[a-z]{3}/.test(trimmed);
+    if (isChordLine) {
+      return `<div style="font-family:monospace;font-size:15px;font-weight:700;color:#FFD60A;letter-spacing:.06em;line-height:1.6">${trimmed}</div>`;
+    }
+
+    // Lyric line
+    return `<div style="font-size:20px;line-height:1.9;color:#e2e8f0;font-family:monospace">${trimmed}</div>`;
+  }).join('');
+}
+
 // ── Health check (mirrors Android LibraryAuditWorker exactly) ─────────────────
 
 function checkSongHealth(song: SongRecord): string[] {
@@ -434,6 +520,121 @@ function SectionButton({
 
 // ── App ────────────────────────────────────────────────────────────────────────
 
+// ── ChordSidekick AI ─────────────────────────────────────────────────────────
+
+const CHORDSIDEKICK_SYSTEM = `You are ChordSidekick, a guitar-savvy assistant specialized in producing chord sheets for the Encore tablet performance app.
+
+Your job: given a song title, artist, key, and optional capo or existing lyrics, produce a clean, complete chord sheet in Encore format.
+
+ENCORE FORMAT RULES (mandatory):
+- Start with YAML front matter: ---\\ntitle: ...\\nartist: ...\\ndisplay_key: ...\\noriginal_key: ...\\nis_lead_guitar: false\\n---
+- After the front matter, body begins immediately — NO title line in the body
+- Section headers: plain markdown only — ## Intro, ## Verse 1, ## Chorus, ## Bridge, ## Outro, ## Solo, etc. NO <span> HTML tags
+- Chords: inline backtick notation placed immediately before the syllable where the change falls, same line as the lyric: \`[G]\` She loves to laugh  \`[D/F#]\` She loves to sing
+- Combine short lyric fragments onto one line (~80 chars per line = one musical phrase)
+- No blank lines between chord-lyric lines within a section
+- Separate sections with one blank line
+- If the user provides raw lyrics with chords above the lyrics, convert to inline format
+
+CHORD PLACEMENT:
+- Place \`[Chord]\` immediately before the syllable where the chord change occurs
+- For instrumental sections: \`[G]\` / \`[Em]\` / \`[C]\` / \`[D]\`
+- For repeated sections, write them out fully — no "repeat Chorus" shortcuts
+
+OUTPUT: Produce only the markdown content. No commentary, no explanation, no markdown code fences.`;
+
+const ALL_KEYS = [
+  'C','C#','Db','D','D#','Eb','E','F','F#','Gb','G','G#','Ab','A','A#','Bb','B'
+];
+
+async function callChordSidekick(userMessage: string): Promise<string> {
+  const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY as string;
+  if (!apiKey) throw new Error('Anthropic API key not configured.');
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 4096,
+      system: CHORDSIDEKICK_SYSTEM,
+      messages: [{ role: 'user', content: userMessage }],
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { error?: { message?: string } }).error?.message ?? `API error ${res.status}`);
+  }
+  const data = await res.json() as { content: Array<{ type: string; text: string }> };
+  return data.content.find((b) => b.type === 'text')?.text ?? '';
+}
+
+// ── Sortable set item (drag-to-reorder) ───────────────────────────────────────
+
+function SortableSongItem({
+  id,
+  position,
+  title,
+  artist,
+  displayKey,
+  onRemove,
+}: {
+  id: string;
+  position: number;
+  title: string;
+  artist: string;
+  displayKey: string;
+  onRemove: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="mb-1 flex items-center gap-2 rounded-lg px-2 py-2 hover:bg-slate-50"
+    >
+      <button
+        {...attributes}
+        {...listeners}
+        className="shrink-0 cursor-grab touch-none rounded p-1 text-slate-300 hover:text-slate-500 active:cursor-grabbing"
+        aria-label="Drag to reorder"
+      >
+        <GripVertical size={14} />
+      </button>
+      <span className="w-5 shrink-0 text-right text-xs font-bold text-slate-400">{position}</span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium text-slate-800">{title || 'Untitled'}</div>
+        <div className="flex items-center gap-2 text-xs text-slate-400">
+          <span>{artist || 'Unknown artist'}</span>
+          {displayKey && (
+            <span className="rounded bg-blue-100 px-1 py-0.5 text-[10px] font-semibold text-blue-600">
+              {displayKey}
+            </span>
+          )}
+        </div>
+      </div>
+      <button
+        onClick={onRemove}
+        className="shrink-0 rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-500"
+      >
+        <X size={13} />
+      </button>
+    </div>
+  );
+}
+
 export default function App() {
   const [mode, setMode]                 = useState<AppMode>('cloud');
   const [activeTab, setActiveTab]       = useState<AppTab>('editor');
@@ -449,8 +650,38 @@ export default function App() {
   const [draftMeta, setDraftMeta]       = useState<SongMeta>(EMPTY_META);
   const [searchQuery, setSearchQuery]   = useState('');
   const [sortBy, setSortBy]             = useState<'title' | 'artist' | 'key'>('title');
+
+  // Performance view
+  const [showPerfView, setShowPerfView] = useState(false);
+
+  // Create Song panel
+  const [showCreatePanel, setShowCreatePanel] = useState(false);
+  const [createTitle, setCreateTitle]   = useState('');
+  const [createArtist, setCreateArtist] = useState('');
+  const [createKey, setCreateKey]       = useState('G');
+  const [createCapo, setCreateCapo]     = useState('');
+  const [createNotes, setCreateNotes]   = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
   const [setName, setSetName]           = useState('Friday Night');
   const [setSongIds, setSetSongIds]     = useState<string[]>([]);
+
+  // Drag-to-reorder sensors
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function handleSetDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setSetSongIds((ids) => {
+        const oldIndex = ids.indexOf(active.id as string);
+        const newIndex = ids.indexOf(over.id as string);
+        return arrayMove(ids, oldIndex, newIndex);
+      });
+    }
+  }
+
   const [libraryHandle, setLibraryHandle]   = useState<FsDirectoryHandle | null>(null);
   const [fileHandles, setFileHandles]       = useState<Record<string, FsFileHandle>>({});
 
@@ -686,6 +917,48 @@ export default function App() {
     }
   }
 
+  async function handleCreateSong() {
+    if (!createTitle.trim() || !createArtist.trim()) return;
+    setIsGenerating(true);
+    setStatus('ChordSidekick is writing your chart…');
+    try {
+      const userMsg = [
+        `Title: ${createTitle.trim()}`,
+        `Artist: ${createArtist.trim()}`,
+        `Key: ${createKey}`,
+        createCapo ? `Capo: ${createCapo}` : '',
+        createNotes.trim() ? `\nAdditional notes / existing lyrics:\n${createNotes.trim()}` : '',
+      ].filter(Boolean).join('\n');
+
+      const generated = await callChordSidekick(userMsg);
+
+      // Build a synthetic path for this new song (UUID-based so it doesn't collide)
+      const uid = crypto.randomUUID();
+      const safeName = `${createTitle.trim()} - ${createArtist.trim()}`.replace(/[/:*?"<>|]+/g, '-');
+      const newPath = mode === 'cloud' && user
+        ? `${user.email}/songs/${uid}.md`
+        : `${safeName}.md`;
+
+      const newRecord = parseSong(newPath, generated);
+      setSongs((cur) => [newRecord, ...cur]);
+      setSelectedPath(newPath);
+      setActiveTab('editor');
+
+      // Reset panel
+      setShowCreatePanel(false);
+      setCreateTitle('');
+      setCreateArtist('');
+      setCreateKey('G');
+      setCreateCapo('');
+      setCreateNotes('');
+      setStatus(`"${newRecord.metadata.title}" created — review and Save to keep it.`);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : 'Generation failed.');
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
   async function exportSet() {
     const setData: SetSong[] = activeSetSongs.map((s) => ({
       title:        s.metadata.title  || inferTitleArtistFromPath(s.path).title,
@@ -720,6 +993,7 @@ export default function App() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
+    <>
     <div className="flex h-screen flex-col overflow-hidden bg-slate-50 text-slate-900">
 
       {/* ── Header ── */}
@@ -839,21 +1113,37 @@ export default function App() {
           </div>
 
           <div className="shrink-0 border-b border-slate-100 p-3">
-            <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-              <Search size={14} className="shrink-0 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Search songs…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="flex-1 bg-transparent text-sm text-slate-700 placeholder:text-slate-400 outline-none"
-              />
-              {searchQuery && (
-                <button onClick={() => setSearchQuery('')} className="text-slate-300 hover:text-slate-500">
-                  <X size={13} />
-                </button>
-              )}
+            {/* Search row */}
+            <div className="flex items-center gap-2">
+              <div className="flex flex-1 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <Search size={14} className="shrink-0 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search songs…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="flex-1 bg-transparent text-sm text-slate-700 placeholder:text-slate-400 outline-none"
+                />
+                {searchQuery && (
+                  <button onClick={() => setSearchQuery('')} className="text-slate-300 hover:text-slate-500">
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+              <button
+                onClick={() => setShowCreatePanel((v) => !v)}
+                title="Create a new song with AI"
+                className={`flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-2 text-xs font-medium transition ${
+                  showCreatePanel
+                    ? 'border-violet-300 bg-violet-50 text-violet-700'
+                    : 'border-slate-200 bg-white text-slate-500 hover:border-violet-300 hover:text-violet-600'
+                }`}
+              >
+                <Sparkles size={13} />
+              </button>
             </div>
+
+            {/* Sort row */}
             <div className="mt-2 flex items-center gap-1">
               <span className="text-[10px] text-slate-400 mr-1">Sort:</span>
               {(['title', 'artist', 'key'] as const).map((opt) => (
@@ -870,6 +1160,65 @@ export default function App() {
                 </button>
               ))}
             </div>
+
+            {/* Create Song panel */}
+            {showCreatePanel && (
+              <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 p-3">
+                <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-violet-700">
+                  <Sparkles size={11} /> ChordSidekick — Create Song
+                </p>
+                <div className="space-y-2">
+                  <input
+                    placeholder="Song title *"
+                    value={createTitle}
+                    onChange={(e) => setCreateTitle(e.target.value)}
+                    className="w-full rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-violet-300 placeholder:text-slate-400"
+                  />
+                  <input
+                    placeholder="Artist *"
+                    value={createArtist}
+                    onChange={(e) => setCreateArtist(e.target.value)}
+                    className="w-full rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-violet-300 placeholder:text-slate-400"
+                  />
+                  <div className="flex gap-2">
+                    <select
+                      value={createKey}
+                      onChange={(e) => setCreateKey(e.target.value)}
+                      className="flex-1 rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-violet-300"
+                    >
+                      {ALL_KEYS.map((k) => <option key={k} value={k}>{k}</option>)}
+                    </select>
+                    <input
+                      placeholder="Capo"
+                      type="number"
+                      min={1}
+                      max={12}
+                      value={createCapo}
+                      onChange={(e) => setCreateCapo(e.target.value)}
+                      className="w-16 rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-violet-300 placeholder:text-slate-400"
+                    />
+                  </div>
+                  <textarea
+                    placeholder="Paste existing chords/lyrics, or leave blank for AI to generate…"
+                    value={createNotes}
+                    onChange={(e) => setCreateNotes(e.target.value)}
+                    rows={3}
+                    className="w-full resize-none rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-violet-300 placeholder:text-slate-400"
+                  />
+                  <button
+                    onClick={handleCreateSong}
+                    disabled={isGenerating || !createTitle.trim() || !createArtist.trim()}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+                  >
+                    {isGenerating ? (
+                      <><RefreshCw size={13} className="animate-spin" /> Generating…</>
+                    ) : (
+                      <><Sparkles size={13} /> Generate Chart</>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex-1 overflow-y-auto p-2">
@@ -938,7 +1287,17 @@ export default function App() {
               <div className="flex flex-wrap items-end gap-3">
                 <MetaField label="Title"  value={draftMeta.title}        onChange={(v) => setDraftMeta((m) => ({ ...m, title: v }))}          width="180px" />
                 <MetaField label="Artist" value={draftMeta.artist}       onChange={(v) => setDraftMeta((m) => ({ ...m, artist: v }))}         width="160px" />
-                <MetaField label="Key"    value={draftMeta.display_key}  onChange={(v) => setDraftMeta((m) => ({ ...m, display_key: v }))}    width="60px" />
+                <label className="flex flex-col gap-0.5">
+                  <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Key</span>
+                  <select
+                    value={draftMeta.display_key}
+                    onChange={(e) => setDraftMeta((m) => ({ ...m, display_key: e.target.value }))}
+                    className="rounded-md border border-slate-200 bg-white px-2 py-1 text-sm text-slate-800 outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
+                  >
+                    <option value="">—</option>
+                    {ALL_KEYS.map((k) => <option key={k} value={k}>{k}</option>)}
+                  </select>
+                </label>
                 <MetaField label="BPM"    value={draftMeta.bpm}          onChange={(v) => setDraftMeta((m) => ({ ...m, bpm: v }))}            width="56px" type="number" />
                 <MetaField label="Capo"   value={draftMeta.capo}         onChange={(v) => setDraftMeta((m) => ({ ...m, capo: v }))}           width="48px" type="number" />
                 <label className="flex cursor-pointer flex-col gap-0.5">
@@ -1061,8 +1420,17 @@ export default function App() {
 
               {/* Song Preview */}
               <div className="flex flex-1 flex-col overflow-hidden">
-                <div className="shrink-0 border-b border-slate-100 bg-slate-50 px-4 py-2">
+                <div className="shrink-0 flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-2">
                   <span className="text-xs font-semibold uppercase tracking-widest text-slate-400">Song Preview</span>
+                  {selectedSong && (
+                    <button
+                      onClick={() => setShowPerfView(true)}
+                      title="Open performance view"
+                      className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-500 hover:border-slate-300 hover:text-slate-700 transition"
+                    >
+                      <Maximize2 size={11} /> Performance View
+                    </button>
+                  )}
                 </div>
                 <div className="flex-1 overflow-y-auto p-6">
                   {selectedSong ? (
@@ -1161,30 +1529,28 @@ export default function App() {
                     {activeSetSongs.length === 0 ? (
                       <p className="mt-6 text-center text-sm text-slate-400">Click songs on the left to add them.</p>
                     ) : (
-                      activeSetSongs.map((song, i) => (
-                        <div key={song.path} className="mb-1 flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-slate-50">
-                          <span className="w-5 shrink-0 text-right text-xs font-bold text-slate-400">{i + 1}</span>
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate text-sm font-medium text-slate-800">
-                              {song.metadata.title || 'Untitled'}
-                            </div>
-                            <div className="flex items-center gap-2 text-xs text-slate-400">
-                              <span>{song.metadata.artist || 'Unknown artist'}</span>
-                              {song.metadata.display_key && (
-                                <span className="rounded bg-blue-100 px-1 py-0.5 text-[10px] font-semibold text-blue-600">
-                                  {song.metadata.display_key}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => setSetSongIds((cur) => cur.filter((id) => id !== song.path))}
-                            className="shrink-0 rounded p-1 text-slate-300 hover:bg-slate-100 hover:text-slate-500"
-                          >
-                            <X size={13} />
-                          </button>
-                        </div>
-                      ))
+                      <DndContext
+                        sensors={dndSensors}
+                        collisionDetection={closestCenter}
+                        onDragEnd={handleSetDragEnd}
+                      >
+                        <SortableContext
+                          items={setSongIds}
+                          strategy={verticalListSortingStrategy}
+                        >
+                          {activeSetSongs.map((song, i) => (
+                            <SortableSongItem
+                              key={song.path}
+                              id={song.path}
+                              position={i + 1}
+                              title={song.metadata.title}
+                              artist={song.metadata.artist}
+                              displayKey={song.metadata.display_key}
+                              onRemove={() => setSetSongIds((cur) => cur.filter((id) => id !== song.path))}
+                            />
+                          ))}
+                        </SortableContext>
+                      </DndContext>
                     )}
                   </div>
                 </div>
@@ -1249,5 +1615,48 @@ export default function App() {
         </main>
       </div>
     </div>
+
+    {/* ── Performance View modal ── */}
+    {showPerfView && selectedSong && (
+      <div
+        className="fixed inset-0 z-50 flex flex-col overflow-hidden"
+        style={{ background: '#000' }}
+      >
+        {/* Header bar */}
+        <div className="shrink-0 flex items-center gap-4 px-8 py-4" style={{ borderBottom: '1px solid #1e293b' }}>
+          <div className="flex-1 min-w-0">
+            <h1 className="truncate text-xl font-bold text-white">{draftMeta.title || 'Untitled'}</h1>
+            <div className="flex items-center gap-3 mt-0.5">
+              {draftMeta.artist && (
+                <span className="text-sm text-slate-400">{draftMeta.artist}</span>
+              )}
+              {draftMeta.display_key && (
+                <span className="rounded-full bg-amber-900/40 px-2.5 py-0.5 text-xs font-bold text-amber-400">
+                  Key of {draftMeta.display_key}
+                </span>
+              )}
+              {draftMeta.bpm && (
+                <span className="text-xs text-slate-500">{draftMeta.bpm} BPM</span>
+              )}
+              {draftMeta.capo && (
+                <span className="text-xs text-slate-500">Capo {draftMeta.capo}</span>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={() => setShowPerfView(false)}
+            className="shrink-0 rounded-lg border border-slate-700 p-2 text-slate-400 hover:border-slate-500 hover:text-white transition"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Chart content */}
+        <div className="flex-1 overflow-y-auto px-12 py-6">
+          <div dangerouslySetInnerHTML={{ __html: renderPerformance(draft) }} />
+        </div>
+      </div>
+    )}
+    </>
   );
 }

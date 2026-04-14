@@ -1,5 +1,6 @@
 package com.encore.core.data.repository
 
+import com.encore.core.data.AppConstants.LOCAL_USER_ID
 import com.encore.core.data.dao.SetDao
 import com.encore.core.data.dao.SetEntryDao
 import com.encore.core.data.dao.SetlistDao
@@ -52,12 +53,12 @@ interface SetlistRepository {
      * Create a new setlist with an initial Set 1.
      *
      * @param name Setlist name
-     * @param userId User ID (default "local-user")
+     * @param userId User ID (default LOCAL_USER_ID)
      * @return Result with setlist ID or error
      */
     suspend fun createSetlist(
         name: String,
-        userId: String = "local-user"
+        userId: String = LOCAL_USER_ID
     ): Result<String>
 
     /**
@@ -545,7 +546,7 @@ class SetlistRepositoryImpl(
             setlistDao.insert(
                 SetlistEntity(
                     id = setlistId,
-                    userId = "local-user",
+                    userId = LOCAL_USER_ID,
                     name = "My Setlist",
                     version = 1,
                     createdAt = now,

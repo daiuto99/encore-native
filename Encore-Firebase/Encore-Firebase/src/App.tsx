@@ -82,6 +82,91 @@ type HealthItem = { song: SongRecord; issues: string[] };
 type FsDirectoryHandle = FileSystemDirectoryHandle & { values(): AsyncIterable<FileSystemHandle> };
 type FsFileHandle = FileSystemFileHandle;
 
+// ── Transposition utilities ────────────────────────────────────────────────────
+
+const NOTE_TO_SEMITONE: Record<string, number> = {
+  C: 0, 'C#': 1, Db: 1,
+  D: 2, 'D#': 3, Eb: 3,
+  E: 4,
+  F: 5, 'F#': 6, Gb: 6,
+  G: 7, 'G#': 8, Ab: 8,
+  A: 9, 'A#': 10, Bb: 10,
+  B: 11,
+};
+const SHARP_SCALE = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const FLAT_SCALE  = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+const FLAT_KEYS   = new Set(['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb', 'Dm', 'Gm', 'Cm', 'Fm', 'Bbm', 'Ebm']);
+
+function parseKeyRoot(key: string): string | null {
+  const t = key.trim();
+  if (!t) return null;
+  const base = t[0].toUpperCase();
+  if (base < 'A' || base > 'G') return null;
+  if (t.length > 1 && t[1] === '#') return base + '#';
+  if (t.length > 1 && t[1] === 'b') return base + 'b';
+  return base;
+}
+
+function semitoneShift(originalKey: string, displayKey: string): number {
+  if (!originalKey || !displayKey) return 0;
+  const orig = parseKeyRoot(originalKey);
+  const disp = parseKeyRoot(displayKey);
+  if (!orig || !disp) return 0;
+  const o = NOTE_TO_SEMITONE[orig];
+  const d = NOTE_TO_SEMITONE[disp];
+  if (o === undefined || d === undefined) return 0;
+  return ((d - o) + 12) % 12;
+}
+
+function useFlatSpelling(key: string): boolean {
+  const root = parseKeyRoot(key);
+  if (!root) return false;
+  return FLAT_KEYS.has(root) || FLAT_KEYS.has(key.trim());
+}
+
+function extractRoot(chord: string): string | null {
+  if (!chord) return null;
+  const base = chord[0].toUpperCase();
+  if (base < 'A' || base > 'G') return null;
+  if (chord.length > 1 && chord[1] === '#') return base + '#';
+  // 'b' only if followed by uppercase, end-of-string, or non-letter (avoids "Bb" vs "B bass note")
+  if (chord.length > 1 && chord[1] === 'b' && (chord.length < 3 || chord[2] === chord[2].toUpperCase() || !/[a-z]/.test(chord[2]))) return base + 'b';
+  return base;
+}
+
+function transposeChordToken(chord: string, semitones: number, useFlats: boolean): string {
+  // Handle slash chord (C/E → root/bass both transposed)
+  const slashIdx = chord.indexOf('/');
+  if (slashIdx > 0) {
+    const root = chord.slice(0, slashIdx);
+    const bass = chord.slice(slashIdx + 1);
+    return transposeChordToken(root, semitones, useFlats) + '/' + transposeChordToken(bass, semitones, useFlats);
+  }
+  const root = extractRoot(chord);
+  if (!root) return chord;
+  const suffix = chord.slice(root.length);
+  const origSemi = NOTE_TO_SEMITONE[root];
+  if (origSemi === undefined) return chord;
+  const newSemi = ((origSemi + semitones) + 12) % 12;
+  const scale = useFlats ? FLAT_SCALE : SHARP_SCALE;
+  return scale[newSemi] + suffix;
+}
+
+const CHORD_TOKEN_RE = /[A-G][#b]?(?:m(?:aj)?|maj|min|aug|dim|sus|add)?[0-9]*(?:\/[A-G][#b]?)?/g;
+
+/** Transpose all chord tokens inside backtick-bracket inline format: `[G]` → `[newChord]` */
+function transposeInlineChordLine(line: string, semitones: number, useFlats: boolean): string {
+  return line.replace(/`\[([^\]]+)\]`/g, (_match, chord) => {
+    const transposed = chord.replace(CHORD_TOKEN_RE, (c: string) => transposeChordToken(c, semitones, useFlats));
+    return '`[' + transposed + ']`';
+  });
+}
+
+/** Transpose chord tokens on a legacy chord-only line (G  Em  C  D) */
+function transposeLegacyChordLine(line: string, semitones: number, useFlats: boolean): string {
+  return line.replace(CHORD_TOKEN_RE, (c) => transposeChordToken(c, semitones, useFlats));
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const SECTION_PRESETS = [
@@ -363,9 +448,10 @@ function getPerfSectionColor(label: string): string {
   return '#94a3b8';
 }
 
-function renderPerformance(body: string): string {
+function renderPerformance(body: string, semitones = 0, displayKey = ''): string {
   const normalized = normalizeMarkdownBody(body);
   const lines = normalized.split('\n');
+  const useFlats = semitones !== 0 ? useFlatSpelling(displayKey) : false;
 
   return lines.map((line) => {
     const trimmed = line.trim();
@@ -383,7 +469,8 @@ function renderPerformance(body: string): string {
 
     // Lines with inline backtick chords `[G]`
     if (trimmed.includes('`[')) {
-      const rendered = trimmed.replace(
+      const transposed = semitones !== 0 ? transposeInlineChordLine(trimmed, semitones, useFlats) : trimmed;
+      const rendered = transposed.replace(
         /`\[([^\]]+)\]`/g,
         '<span style="color:#FFD60A;font-weight:700;font-size:15px;font-family:monospace">$1 </span>',
       );
@@ -393,7 +480,8 @@ function renderPerformance(body: string): string {
     // Legacy chord-only lines (G  Em  C  D)
     const isChordLine = /^[A-G][#b]?[^\s]*(\s+[A-G][#b]?[^\s]*)*\s*$/.test(trimmed) && !/[a-z]{3}/.test(trimmed);
     if (isChordLine) {
-      return `<div style="font-family:monospace;font-size:15px;font-weight:700;color:#FFD60A;letter-spacing:.06em;line-height:1.6">${trimmed}</div>`;
+      const transposedLine = semitones !== 0 ? transposeLegacyChordLine(trimmed, semitones, useFlats) : trimmed;
+      return `<div style="font-family:monospace;font-size:15px;font-weight:700;color:#FFD60A;letter-spacing:.06em;line-height:1.6">${transposedLine}</div>`;
     }
 
     // Lyric line
@@ -1653,7 +1741,11 @@ export default function App() {
 
         {/* Chart content */}
         <div className="flex-1 overflow-y-auto px-12 py-6">
-          <div dangerouslySetInnerHTML={{ __html: renderPerformance(draft) }} />
+          <div dangerouslySetInnerHTML={{ __html: renderPerformance(
+            draft,
+            semitoneShift(draftMeta.original_key, draftMeta.display_key),
+            draftMeta.display_key,
+          ) }} />
         </div>
       </div>
     )}

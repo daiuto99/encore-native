@@ -8,6 +8,7 @@ import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.encore.core.data.AppConstants.LOCAL_USER_ID
 import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.entities.SyncStatus
 import com.encore.core.data.preferences.UserPreferencesRepository
@@ -87,7 +88,7 @@ class ImportViewModel(
                         val (title, artist) = normalizeSongData(rawTitle, rawArtist)
                         val key = parseKey(content)
                         val now = System.currentTimeMillis()
-                        val existing = songRepository.findDuplicate(title, artist, "local-user")
+                        val existing = songRepository.findDuplicate(title, artist, LOCAL_USER_ID)
                         if (existing != null) {
                             songRepository.upsertSong(
                                 existing.copy(
@@ -106,7 +107,7 @@ class ImportViewModel(
                         }
                         val song = SongEntity(
                             id = UUID.randomUUID().toString(),
-                            userId = "local-user",
+                            userId = LOCAL_USER_ID,
                             title = title,
                             artist = artist,
                             displayKey = key,
@@ -171,7 +172,7 @@ class ImportViewModel(
                         val (rawTitle, rawArtist) = parseFilename(filename)
                         val (title, artist) = normalizeSongData(rawTitle, rawArtist)
                         val key = parseKey(content)
-                        val existingDuplicate = songRepository.findDuplicate(title, artist, "local-user")
+                        val existingDuplicate = songRepository.findDuplicate(title, artist, LOCAL_USER_ID)
                         if (existingDuplicate != null) {
                             skippedCount++
                             return@forEachIndexed
@@ -179,7 +180,7 @@ class ImportViewModel(
                         val now = System.currentTimeMillis()
                         val song = SongEntity(
                             id = UUID.randomUUID().toString(),
-                            userId = "local-user",
+                            userId = LOCAL_USER_ID,
                             title = title,
                             artist = artist,
                             displayKey = key,
@@ -242,7 +243,7 @@ class ImportViewModel(
                         val filename = file.name ?: return@forEachIndexed
                         val (rawTitle, rawArtist) = parseFilename(filename)
                         val (title, artist) = normalizeSongData(rawTitle, rawArtist)
-                        val existing = songRepository.findDuplicate(title, artist, "local-user")
+                        val existing = songRepository.findDuplicate(title, artist, LOCAL_USER_ID)
                         val fileModified = file.lastModified()
                         if (existing != null && fileModified > 0 && fileModified <= existing.localUpdatedAt) {
                             skippedCount++
@@ -271,7 +272,7 @@ class ImportViewModel(
                         } else {
                             val song = SongEntity(
                                 id = UUID.randomUUID().toString(),
-                                userId = "local-user",
+                                userId = LOCAL_USER_ID,
                                 title = title,
                                 artist = artist,
                                 displayKey = key,
@@ -341,30 +342,38 @@ class ImportViewModel(
                 val content = context.contentResolver.openInputStream(uri)?.use { stream ->
                     stream.bufferedReader().use { it.readText() }
                 } ?: return@launch
+                // Guard: reject obviously oversized files (> 5 MB) before parsing
+                if (content.length > 5_242_880) {
+                    Log.w(TAG, "Set JSON import rejected: file too large (${content.length} bytes)")
+                    return@launch
+                }
                 val root = JSONObject(content)
                 val name = root.optString("name", "Imported Set").ifBlank { "Imported Set" }
                 val songsArray = root.optJSONArray("songs") ?: return@launch
+                // Cap song count to prevent accidental bulk-import abuse
+                val songCount = minOf(songsArray.length(), 200)
                 val newSetlistId = setlistRepository.createSetlist(name).getOrNull() ?: return@launch
                 val newSets = setlistRepository.getSetsForSetlist(newSetlistId).first()
                 val newSetId = newSets.firstOrNull()?.id ?: return@launch
                 val now = System.currentTimeMillis()
                 var addedCount = 0
                 var reusedCount = 0
-                for (i in 0 until songsArray.length()) {
+                for (i in 0 until songCount) {
                     val obj = songsArray.getJSONObject(i)
                     val title = obj.optString("title").trim()
                     val artist = obj.optString("artist").trim()
                     if (title.isEmpty()) continue
                     val displayKey = obj.optString("displayKey").takeIf { it.isNotEmpty() }
-                    val markdownBody = obj.optString("markdownBody")
-                    val existing = songRepository.findDuplicate(title, artist, "local-user")
+                    // Cap individual body length to 256 KB — chord charts are never this large
+                    val markdownBody = obj.optString("markdownBody").take(262_144)
+                    val existing = songRepository.findDuplicate(title, artist, LOCAL_USER_ID)
                     val songId = if (existing != null) {
                         reusedCount++
                         existing.id
                     } else {
                         val song = SongEntity(
                             id = UUID.randomUUID().toString(),
-                            userId = "local-user",
+                            userId = LOCAL_USER_ID,
                             title = title,
                             artist = artist,
                             displayKey = displayKey,

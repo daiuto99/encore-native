@@ -46,6 +46,4 @@ dependencies {
     // HTTP client for GCS REST API (used by GcpSyncProvider)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
-    // Google Play Services Auth — OAuth2 token fetch for GcpSyncProvider
-    implementation("com.google.android.gms:play-services-auth:21.0.0")
 }

@@ -1,5 +1,6 @@
 package com.encore.core.data.repository
 
+import com.encore.core.data.AppConstants.LOCAL_USER_ID
 import com.encore.core.data.dao.SongDao
 import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.entities.SyncStatus
@@ -95,7 +96,7 @@ interface SongRepository {
     suspend fun findDuplicate(
         title: String,
         artist: String,
-        userId: String = "local-user"
+        userId: String = LOCAL_USER_ID
     ): SongEntity?
 
     /**

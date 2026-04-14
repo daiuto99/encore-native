@@ -15,6 +15,7 @@ import com.encore.core.data.entities.SetEntity
 import com.encore.core.data.entities.SetEntryEntity
 import com.encore.core.data.entities.SetlistEntity
 import com.encore.core.data.entities.SongEntity
+import com.encore.core.data.AppConstants.LOCAL_USER_ID
 import com.encore.core.data.entities.SyncStatus
 import android.util.Log
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -259,7 +260,7 @@ abstract class EncoreDatabase : RoomDatabase() {
 
                 val amazingGraceSong = SongEntity(
                     id = UUID.randomUUID().toString(),
-                    userId = "local-user", // Hardcoded for Milestone 2
+                    userId = LOCAL_USER_ID,
                     title = "Amazing Grace",
                     artist = "John Newton",
                     displayKey = "G",

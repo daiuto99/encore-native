@@ -69,41 +69,38 @@ Add cloud-backed account and sync behavior without breaking the offline-first lo
 
 ---
 
-## Performance Bar — COMPLETE (Task 4.6, consolidated 2-row chrome)
+## Performance Bar — COMPLETE (Tasks 4.6–4.11)
 
 ### Shipped layout
 ```
-Row 1 (52dp): [SET 1] [SET 2] [SET 3]  •  9:45 PM  ☀  [  🔍  ]  ···  ✕
-Row 2 (72dp): [←56dp]  [G maj]  Song Title 22sp / artist 12sp  [status pill]  [→56dp]
+Row 1 (52dp): [SET 1] [SET 2] [SET 3]  •  9:45 PM  ☀  [  🔍  ]  ✏  ✕
+Row 2 (80dp):  ← Prev Song    [G]  SONG TITLE · Artist  [status pill]    Next Song →
 ```
 
 ### Row 1 details
-- **SET tabs:** pill-shaped (`RoundedCornerShape(50)`), 18dp h-pad, 8dp spacing, 13sp text. Active = set color at 20% bg + 55% border. Tapping an inactive tab calls `viewModel.getFirstSongIdForSet(n)` → `onNavigateToSongInSet(songId, n)`.
-- **Clock:** 12-hour AM/PM format, updates every 30s. Replaced by sync HUD (`InProgress`/`Complete`) when syncing.
-- **Dark mode toggle:** ☀/🌙 `IconButton` (48dp), always visible on bar.
-- **Search:** 72dp×48dp wide `Box` with `clip(RoundedCornerShape(8.dp))` — extra hit zone.
-- **Overflow `···`:** `DropdownMenu` — Save Set, Load Set.
-- **Exit ✕:** 48dp `IconButton` at far right.
+- **SET tabs:** outlined pill only (`RoundedCornerShape(50)`), no fill. Active = set color border (80% alpha) + set color text. Inactive = dim gray border + dim text.
+- **Clock:** 12-hour AM/PM, updates every 30s. Replaced by sync HUD when syncing.
+- **Dark mode toggle:** ☀/🌙 `IconButton` (48dp).
+- **Search:** 72dp×48dp wide `Box` — extra hit zone.
+- **Edit ✏:** `IconButton` (48dp) — only shown when `setNumber <= 0` (song detail / library mode). Navigates directly to chart editor.
+- **Exit ✕:** 48dp `IconButton` at far right. No overflow `···` menu.
 
-### Row 2 details
-- **Prev/Next arrows:** `IconButton(56dp)`, 32dp chevron icon, disabled (18% alpha) at set boundaries.
-- **Key badge:** compact `Column` (18sp root, 8sp scale label), `RoundedCornerShape(6.dp)`, harmonyColor tinted. Hidden when song has no key.
-- **Song title:** 22sp SemiBold Default, `titleColorOverride ?? setColor`, maxLines=1 ellipsis. Shows `saveSuccess` text in green when save completes.
-- **Artist:** 12sp below title, `artistColorOverride ?? artistText`. Hidden when "Unknown Artist".
-- **Status pill:** `RoundedCornerShape(50)` — lead guitar icon (18dp) + capo column (13sp + "CAPO" 7sp) + BPM column (tappable for tap tempo).
-- **Transposition warning:** ⚠ amber when `displayKey ≠ originalKey`.
+### Row 2 details (Box layout — title truly centered)
+- **Container:** `Box` (not `Row`) so center group floats independently of prev/next width.
+- **Prev/Next pills:** outlined pill (`RoundedCornerShape(50)`), no fill, 1dp dim border, 12sp text, 16dp chevron. Anchored `CenterStart` / `CenterEnd`. `widthIn(max = 200.dp)`.
+- **Center group:** `Row` with `fillMaxWidth().padding(horizontal = 210.dp)` + `horizontalArrangement = Arrangement.Center`. Contains: key circle + title + artist + status pill + transposition warning.
+- **Key circle:** 54dp filled circle, set color. Root + scale label in white. Hidden when no key.
+- **Song title:** 22sp SemiBold, `widthIn(max = 320.dp)`, `titleColorOverride ?: setColor`. Ellipsis on overflow.
+- **Artist:** 15sp Normal, `widthIn(max = 180.dp)`. Hidden when "Unknown Artist".
+- **Status pill:** `RoundedCornerShape(50)` — lead icon + capo + BPM (tappable tap tempo).
+- **Bottom divider:** 2dp `HorizontalDivider` using `setColor.copy(alpha = 0.55f dark / 0.40f light)` — creates visual bridge to first section.
 
 ### Architecture
-- Replaces both `PerformanceContextBar` + `PerformanceDashboard` (dead code still in file, compiler-strips; clean up in 4.7).
-- `SongDetailScreen` new params: `availableSetNumbers: List<Int>`, `onNavigateToSongInSet: ((String, Int) -> Unit)?`
-- `SongDetailViewModel.getFirstSongIdForSet(setNumber, callback)` — uses `setlistRepository.getOrCreateSetByNumber` + `.getSongsInSet().first()`
-- `MainScreen.kt`: `availableSetNumbers` derived from `setViewModel.availableSets.map { it.number }.sorted()`
-- Chart top padding: 152dp → 128dp
+- Single `PerformanceBar` composable (~line 839 in `SongDetailScreen.kt`).
+- `onEditChart: ((String) -> Unit)?` param on `SongDetailScreen` — wired in `MainScreen.kt` to `Routes.chartEditor(songId)`.
+- `stripLeadingTitle()` removes `# Title`, `[Title]`, and parenthetical variants from body before render.
 
-### Known issue for 4.7
-- Song title + key badge feel unanchored in Row 2 — they compete visually with the status pill and arrows. Need stronger hero hierarchy: consider 24sp title, always-visible key badge, or bolder color contrast. Confirm direction at start of next session.
-
-### Icon colors (per-theme in AppPreferences — unchanged from M3)
+### Icon colors (per-theme in AppPreferences)
 - `darkLeadIconColor` / `lightLeadIconColor` — guitar pick tint
 - `darkCapoColor` / `lightCapoColor` — capo badge tint
 - Configurable in Settings → Theme.
@@ -271,7 +268,7 @@ The current app reads as a utility screen (true black + flat graphite, monospace
 - **Song title in bar:** 22sp SemiBold Default; color = `titleColorOverride ?: setColor`
 - **Set switching in performance:** `viewModel.getFirstSongIdForSet(n, callback)` → `onNavigateToSongInSet(songId, n)`
 - **Capo icon colors:** `darkLeadIconColor` / `lightLeadIconColor` (guitar pick), `darkCapoColor` / `lightCapoColor` (capo badge) — in Theme settings
-- **V1.1 current track:** Track 4 — Phase 3. Tasks 4.1–4.6 COMPLETE. Next: 4.7 (typography pass + title/key anchoring in performance bar).
+- **V1.1 current track:** Track 5 — Web companion. Tasks 5.1, 5.3, 5.5 COMPLETE. Next: 5.4 drag-to-reorder in web setlist, then 5.7 AI create-song skill.
 
 ---
 

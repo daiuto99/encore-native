@@ -268,7 +268,9 @@ The current app reads as a utility screen (true black + flat graphite, monospace
 - **Song title in bar:** 22sp SemiBold Default; color = `titleColorOverride ?: setColor`
 - **Set switching in performance:** `viewModel.getFirstSongIdForSet(n, callback)` → `onNavigateToSongInSet(songId, n)`
 - **Capo icon colors:** `darkLeadIconColor` / `lightLeadIconColor` (guitar pick), `darkCapoColor` / `lightCapoColor` (capo badge) — in Theme settings
-- **V1.1 current track:** Track 5 — Web companion. Tasks 5.1, 5.3, 5.5 COMPLETE. Next: 5.4 drag-to-reorder in web setlist, then 5.7 AI create-song skill.
+- **V1.1 status:** Tracks 1–5 fully COMPLETE. Track 6 doable tasks (6.3, 6.4) COMPLETE. Remaining: 6.1/6.2 (backend proxy auth) — deferred, blocked on backend work.
+- **AppConstants.LOCAL_USER_ID** — `"local-user"` placeholder constant in `core/data/AppConstants.kt`. Used everywhere instead of bare string literals. Replace with real user ID when Track 6.1 ships.
+- **Web transposition:** `renderPerformance(body, semitones, displayKey)` in `App.tsx` — full TS port of TranspositionUtils. Inline `\`[chord]\`` and legacy chord-line formats both transposed. Performance modal passes `semitoneShift(original_key, display_key)` automatically.
 
 ---
 
@@ -296,7 +298,7 @@ The current app reads as a utility screen (true black + flat graphite, monospace
 
 ### Known facts
 - `FakeSyncProvider` still wired — swap in `AppContainer` for offline/debug testing.
-- `play-services-auth` dep still in `app/build.gradle.kts` — unused, can be removed.
+- `play-services-auth` removed from `app/build.gradle.kts` and `core/data/build.gradle.kts` (6.4 COMPLETE).
 
 ---
 

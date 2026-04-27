@@ -85,6 +85,16 @@ import com.encore.core.data.entities.SetEntity
 import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.preferences.AppPreferences
 import com.encore.core.ui.theme.SetColor
+import com.encore.core.ui.theme.setCoverColors
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.painterResource
+import com.encore.tablet.R
 import com.encore.tablet.audit.LibraryAuditViewModel
 import com.encore.tablet.preferences.AppPreferencesViewModel
 import com.encore.feature.library.ImportViewModel
@@ -297,7 +307,6 @@ fun CommandCenterScreen(
     var showLoadSetDialog by remember { mutableStateOf(false) }
     var saveSetName by remember { mutableStateOf("") }
     val profileSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var showAccountDropdown by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     // Sync set filter state into ViewModel
@@ -309,7 +318,6 @@ fun CommandCenterScreen(
     val connectedFolderUri by importViewModel.connectedFolderUri.collectAsState()
     val availableSets by setViewModel.availableSets.collectAsState()
     val songs by libraryViewModel.songs.collectAsState()
-    val performSetEntries by setViewModel.performSetEntries.collectAsState()
     val setlists by setViewModel.setlists.collectAsState()
 
     // Folder Sync — OpenDocumentTree gives a persistent tree URI
@@ -536,50 +544,158 @@ fun CommandCenterScreen(
                 .background(encoreColors.screenBackground)
                 .padding(paddingValues)
         ) {
-            // ── Header ───────────────────────────────────────────────────────
-            EncoreHeader(
-                authState = authState,
-                showAccountDropdown = showAccountDropdown,
-                connectedFolderUri = connectedFolderUri,
-                onImportClick = { showImportSheet = true },
-                onSaveSetClick = { showSaveSetDialog = true },
-                onLoadSetClick = { showLoadSetDialog = true },
-                onToggleDarkMode = onToggleDarkMode,
-                onPerformClick = {
-                    val setNum = selectedSetFilter ?: 1
-                    val firstSongId = if (selectedSetFilter != null) {
-                        songs.firstOrNull()?.id
-                    } else {
-                        performSetEntries.firstOrNull()?.song?.id
+            // ── iOS-style large-title header ─────────────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 12.dp, top = 20.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AsyncImage(
+                        model = coil.request.ImageRequest.Builder(LocalContext.current)
+                            .data(R.drawable.encore_logo_full)
+                            .build(),
+                        contentDescription = "Encore",
+                        modifier = Modifier
+                            .height(52.dp)
+                            .width(52.dp),
+                        contentScale = ContentScale.Crop
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Library",
+                            fontSize = 34.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = (-1.2).sp,
+                            color = encoreColors.titleText,
+                            lineHeight = 37.sp
+                        )
+                        Text(
+                            text = "${songs.size} songs · ${availableSets.size} sets",
+                            fontSize = 13.sp,
+                            color = encoreColors.subtleText,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
                     }
-                    if (firstSongId != null) {
-                        onSongClick(firstSongId, setNum)
-                    } else {
-                        scope.launch {
-                            snackbarHostState.showSnackbar("No songs in set")
-                        }
-                    }
-                },
-                onRefreshClick = { importViewModel.refreshConnectedFolder(context) },
-                onShowDropdown = { showAccountDropdown = true },
-                onDropdownDismiss = { showAccountDropdown = false },
-                onSignOut = { authViewModel.signOut(); showAccountDropdown = false },
-                onProfileSheetRequest = { showProfileSheet = true },
-                onSettingsClick = onSettingsClick
-            )
-
-            // ── Sets Bar — sticky below header ───────────────────────────────
-            SetsSection(
-                sets = availableSets,
-                selectedSet = selectedSetFilter,
-                onSetSelected = { setNumber ->
-                    selectedSetFilter = if (selectedSetFilter == setNumber) null else setNumber
-                },
-                onCreateSet = { setViewModel.createNewSet() },
-                onDeleteSet = { set ->
-                    if (selectedSetFilter == set.number) selectedSetFilter = null
-                    setViewModel.deleteSet(set)
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = onToggleDarkMode,
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Text(
+                            text = if (encoreColors.isDark) "☀" else "☾",
+                            fontSize = 18.sp,
+                            color = encoreColors.iconTint
+                        )
+                    }
+                    IconButton(
+                        onClick = { showImportSheet = true },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CreateNewFolder,
+                            contentDescription = "Import",
+                            tint = encoreColors.iconTint,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = onSettingsClick,
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Settings",
+                            tint = encoreColors.iconTint,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = { showProfileSheet = true },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        UserAvatar(
+                            profilePictureUri = (authState as? AuthState.Authenticated)?.user?.profilePictureUri,
+                            isAuthenticated = authState is AuthState.Authenticated,
+                            size = 28.dp
+                        )
+                    }
+                }
+            }
+
+            // ── Tonight's Sets carousel ───────────────────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Tonight's Sets",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.5).sp,
+                    color = encoreColors.titleText
+                )
+                TextButton(
+                    onClick = { selectedSetFilter = null },
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text(
+                        text = if (selectedSetFilter == null) "All" else "Show all",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF3B82F6)
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                LibrarySetTile(
+                    number = null,
+                    label = "All Songs",
+                    subLabel = "${songs.size} songs",
+                    isActive = selectedSetFilter == null,
+                    isDark = encoreColors.isDark,
+                    titleTextColor = encoreColors.titleText,
+                    onClick = { selectedSetFilter = null }
+                )
+                availableSets.forEach { set ->
+                    LibrarySetTile(
+                        number = set.number,
+                        label = "Set ${set.number}",
+                        subLabel = null,
+                        isActive = selectedSetFilter == set.number,
+                        isDark = encoreColors.isDark,
+                        titleTextColor = encoreColors.titleText,
+                        onClick = {
+                            selectedSetFilter = if (selectedSetFilter == set.number) null else set.number
+                        }
+                    )
+                }
+            }
+
+            // ── Section header ────────────────────────────────────────────────
+            Text(
+                text = if (selectedSetFilter == null) "All Songs"
+                       else "Set $selectedSetFilter",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.5).sp,
+                color = encoreColors.titleText,
+                modifier = Modifier.padding(horizontal = 20.dp).padding(bottom = 6.dp)
             )
 
             // Song list (search bar + rows) — fills available space
@@ -883,6 +999,104 @@ fun SetsSection(
             )
         }
         HorizontalDivider(thickness = 0.5.dp, color = encoreColors.divider)
+    }
+}
+
+/**
+ * Apple Music-style set tile for the "Tonight's Sets" carousel.
+ *
+ * @param number Set number (null = "All Songs" infinity tile)
+ * @param label  Title shown below the tile (set name or "All Songs")
+ * @param subLabel Optional subtitle shown below label (e.g. "N songs")
+ * @param isActive Whether this tile has a 3px selection ring
+ * @param isDark Current color mode (affects the "All Songs" neutral palette)
+ * @param titleTextColor Active ring color
+ * @param onClick Selection callback
+ */
+@Composable
+fun LibrarySetTile(
+    number: Int?,
+    label: String,
+    subLabel: String?,
+    isActive: Boolean,
+    isDark: Boolean,
+    titleTextColor: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val encoreColors = LocalEncoreColors.current
+    val coverBg = if (number != null) setCoverColors(number).bg
+                  else if (isDark) Color(0xFF3A3A3C) else Color(0xFFE5E5EA)
+    val coverFg = if (number != null) setCoverColors(number).fg
+                  else if (isDark) Color.White else Color(0xFF1C1C1E)
+
+    Column(
+        modifier = modifier
+            .width(130.dp)
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.Start
+    ) {
+        Box(
+            modifier = Modifier
+                .size(130.dp)
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+                .background(coverBg)
+                .then(if (isActive) Modifier.border(
+                    3.dp,
+                    titleTextColor,
+                    androidx.compose.foundation.shape.RoundedCornerShape(14.dp)
+                ) else Modifier),
+            contentAlignment = Alignment.Center
+        ) {
+            // Corner "Set" / "All" label
+            Text(
+                text = if (number != null) "Set" else "All",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.8.sp,
+                color = coverFg.copy(alpha = 0.75f),
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = 12.dp, top = 10.dp)
+            )
+            // Large centered number or library icon for "All Songs"
+            if (number != null) {
+                Text(
+                    text = number.toString(),
+                    fontSize = 76.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = (-4.5).sp,
+                    color = coverFg,
+                    lineHeight = 76.sp
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.LibraryMusic,
+                    contentDescription = "All Songs",
+                    tint = coverFg,
+                    modifier = Modifier.size(52.dp)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = label,
+            fontSize = 13.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = encoreColors.titleText,
+            letterSpacing = (-0.14).sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth()
+        )
+        if (subLabel != null) {
+            Text(
+                text = subLabel,
+                fontSize = 12.sp,
+                color = encoreColors.subtleText,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
     }
 }
 

@@ -92,6 +92,13 @@ private enum class SettingsCategory(val label: String) {
     LIBRARY_TOOLS("Library Tools")
 }
 
+private fun SettingsCategory.accentColor() = when (this) {
+    SettingsCategory.THEME           -> Color(0xFF3B82F6) // blue
+    SettingsCategory.TYPOGRAPHY      -> Color(0xFFF59E0B) // amber
+    SettingsCategory.PERFORMANCE_HUD -> Color(0xFF8B5CF6) // purple
+    SettingsCategory.LIBRARY_TOOLS   -> Color(0xFF10B981) // green
+}
+
 private fun parseColorSafe(hex: String): Color =
     try { Color(AndroidColor.parseColor(hex)) } catch (_: Exception) { Color.Gray }
 
@@ -141,25 +148,31 @@ fun SettingsScreen(
             Spacer(Modifier.height(8.dp))
             enumValues<SettingsCategory>().forEach { cat ->
                 val selected = cat == selectedCategory
+                val accent = cat.accentColor()
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 8.dp, vertical = 2.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(
-                            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                            else Color.Transparent
-                        )
+                        .background(if (selected) accent.copy(alpha = 0.15f) else Color.Transparent)
                         .clickable { selectedCategory = cat }
                         .padding(horizontal = 12.dp, vertical = 10.dp)
                 ) {
-                    Text(
-                        text = cat.label,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                        color = if (selected) MaterialTheme.colorScheme.primary
-                                else encoreColors.titleText
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(accent)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            text = cat.label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                            color = if (selected) accent else encoreColors.titleText
+                        )
+                    }
                 }
             }
         }
@@ -370,14 +383,14 @@ private fun SectionStyleRow(
         shape = RoundedCornerShape(12.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // Row 1: color dot (tap to open picker) + section name + bold toggle
+            // Row 1: color square (tap to open picker) + section name + bold toggle
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
-                        .size(22.dp)
-                        .clip(CircleShape)
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(8.dp))
                         .background(parseColorSafe(style.hexColor))
-                        .border(1.dp, encoreColors.divider, CircleShape)
+                        .border(1.dp, encoreColors.divider, RoundedCornerShape(8.dp))
                         .clickable { showPicker = true }
                 )
                 Spacer(Modifier.width(10.dp))
@@ -1124,20 +1137,22 @@ private fun PresetChip(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        // Color preview dots (bg + chord)
-        Box(
+        // 3-color strip: bg · chord · chorus
+        val chorusHex = preset.sectionStyles["chorus"]?.hexColor ?: preset.chordColor
+        Row(
             modifier = Modifier
-                .size(10.dp)
-                .clip(CircleShape)
-                .background(parseColorSafe(preset.bgColor))
-                .border(0.5.dp, encoreColors.divider, CircleShape)
-        )
-        Box(
-            modifier = Modifier
-                .size(10.dp)
-                .clip(CircleShape)
-                .background(parseColorSafe(preset.chordColor))
-        )
+                .clip(RoundedCornerShape(4.dp))
+                .border(0.5.dp, encoreColors.divider, RoundedCornerShape(4.dp)),
+            horizontalArrangement = Arrangement.spacedBy(0.dp)
+        ) {
+            listOf(preset.bgColor, preset.chordColor, chorusHex).forEach { hex ->
+                Box(
+                    modifier = Modifier
+                        .size(width = 10.dp, height = 20.dp)
+                        .background(parseColorSafe(hex))
+                )
+            }
+        }
         Text(
             text = preset.name,
             style = MaterialTheme.typography.labelMedium,

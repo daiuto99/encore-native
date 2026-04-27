@@ -4,29 +4,47 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
 
 /**
- * Set Color Helper for Setlist UI.
+ * Set cover color system — 10-color cycling Apple Music–style palette.
  *
- * Provides distinct, mild background colors using Material 3 tonal palettes.
- * Each set number gets a different color to visually distinguish sets in the UI.
+ * Each set gets a (bg, fg) pair from the palette, cycling for sets beyond 10.
+ * Used for SetTile album art, SetBuilderScreen hero, and SongTile initials.
  */
+data class SetCoverColors(val bg: Color, val fg: Color)
+
+val SET_COVER_PALETTE = listOf(
+    SetCoverColors(Color(0xFFF87171), Color(0xFF7F1D1D)), // coral
+    SetCoverColors(Color(0xFFFB923C), Color(0xFF7C2D12)), // tangerine
+    SetCoverColors(Color(0xFFFBBF24), Color(0xFF78350F)), // amber
+    SetCoverColors(Color(0xFFA3E635), Color(0xFF365314)), // lime
+    SetCoverColors(Color(0xFF34D399), Color(0xFF064E3B)), // mint
+    SetCoverColors(Color(0xFF22D3EE), Color(0xFF164E63)), // cyan
+    SetCoverColors(Color(0xFF60A5FA), Color(0xFF1E3A8A)), // sky
+    SetCoverColors(Color(0xFFA78BFA), Color(0xFF4C1D95)), // lavender
+    SetCoverColors(Color(0xFFF472B6), Color(0xFF831843)), // rose
+    SetCoverColors(Color(0xFF94A3B8), Color(0xFF0F172A)), // graphite
+)
+
+/** Returns the cover color pair for a set number (cycles every 10). */
+fun setCoverColors(setNumber: Int): SetCoverColors =
+    SET_COVER_PALETTE[(setNumber - 1) % SET_COVER_PALETTE.size]
+
+/**
+ * Stable hash-derived cover for songs not in a set.
+ * Maps any string id to one of the 10 palette entries.
+ */
+fun songCoverColors(songId: String): SetCoverColors {
+    var h = 0
+    for (c in songId) h = (h * 31 + c.code) or 0
+    return SET_COVER_PALETTE[Math.abs(h) % SET_COVER_PALETTE.size]
+}
+
 object SetColor {
 
     /**
-     * Global persistent color for a set number (1-4).
-     * These are fixed, vivid colors shared across Library circles, Sets chips, and any future UI.
-     *
-     * @param setNumber Set number (1-4)
-     * @return Vivid Color for this set
+     * Legacy single-color accessor kept for backward compatibility with SongDetailScreen
+     * and other existing components. Returns the bg color for the set.
      */
-    fun getSetColor(setNumber: Int): Color {
-        return when (setNumber) {
-            1 -> Color(0xFF5AC8FA) // Soft Blue
-            2 -> Color(0xFF4CD964) // Soft Green
-            3 -> Color(0xFFAF52DE) // Soft Purple
-            4 -> Color(0xFF8B5CF6) // Purple (unchanged)
-            else -> Color(0xFF6B7280) // Gray fallback
-        }
-    }
+    fun getSetColor(setNumber: Int): Color = setCoverColors(setNumber).bg
 
     /**
      * Get background color for a set based on its number.

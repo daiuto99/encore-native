@@ -110,6 +110,8 @@ import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.entities.SyncStatus
 import com.encore.core.ui.theme.LocalEncoreColors
 import com.encore.core.ui.theme.SetColor
+import com.encore.core.ui.theme.setCoverColors
+import com.encore.core.ui.theme.songCoverColors
 import kotlin.math.roundToInt
 
 /**
@@ -400,8 +402,8 @@ fun SongList(
     LazyColumn(
         state = listState,
         modifier = modifier,
-        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
         items(localSongs, key = { it.id }) { song ->
             val index = localSongs.indexOf(song)
@@ -477,9 +479,44 @@ fun SongList(
 }
 
 /**
+ * Album-art style cover tile — 44dp square with 8dp corners.
+ * Uses set cover palette when the song belongs to a set; otherwise derives a
+ * stable color from the song id so each track has its own consistent swatch.
+ */
+@Composable
+private fun SongTile(
+    song: SongEntity,
+    setNumber: Int?,
+    modifier: Modifier = Modifier
+) {
+    val cover = if (setNumber != null) setCoverColors(setNumber) else songCoverColors(song.id)
+    val glyph = remember(song.title) {
+        song.title.split("\\s+".toRegex())
+            .take(2)
+            .mapNotNull { it.firstOrNull()?.uppercaseChar() }
+            .joinToString("")
+    }
+    Box(
+        modifier = modifier
+            .size(44.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(cover.bg),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = glyph,
+            color = cover.fg,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.ExtraBold,
+            letterSpacing = (-0.02).sp
+        )
+    }
+}
+
+/**
  * Single song row with swipe-to-dismiss gesture.
  *
- * Layout: [drag handle] [Title – Artist  key]  [●1][●3]  [+]
+ * Layout: [SongTile 44dp] [Title — Artist / key · capo · lead]  [sync]
  *
  * Left swipe reveals a colored background and triggers a confirmation dialog.
  * - If set filter active: "Remove from Set N"
@@ -512,46 +549,9 @@ fun SongListItem(
         sets.filter { it.id in availableIds }
     }
     var showConfirmDialog by remember { mutableStateOf(false) }
-    var showSetPicker by remember { mutableStateOf(false) }
 
-    val rowAccentColor = remember(activeSets) {
-        activeSets.minByOrNull { it.number }?.number?.let { SetColor.getSetColor(it) }
-    }
-
-    // Set picker dialog — shown when user taps the + button
-    if (showSetPicker) {
-        AlertDialog(
-            onDismissRequest = { showSetPicker = false },
-            title = { Text("Add to Set") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    availableSets.forEach { set ->
-                        val setColor = SetColor.getSetColor(set.number)
-                        val alreadyInSet = activeSets.any { it.id == set.id }
-                        OutlinedButton(
-                            onClick = {
-                                showSetPicker = false
-                                setViewModel.addSongToSetNumber(song.id, set.number)
-                            },
-                            enabled = !alreadyInSet,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, if (alreadyInSet) setColor.copy(alpha = 0.3f) else setColor)
-                        ) {
-                            Text(
-                                text = if (alreadyInSet) "Set ${set.number} — already added" else "Set ${set.number}",
-                                color = if (alreadyInSet) setColor.copy(alpha = 0.4f) else setColor,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { showSetPicker = false }) { Text("Cancel") }
-            }
-        )
+    val primarySetNumber = remember(activeSets) {
+        activeSets.minByOrNull { it.number }?.number
     }
 
     // Two-action confirmation dialog triggered by left swipe
@@ -685,129 +685,88 @@ fun SongListItem(
             .clip(RoundedCornerShape(12.dp))
             .let { if (isDragging) it.padding(horizontal = 4.dp) else it }
     ) {
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = encoreColors.cardBackground,
-            shadowElevation = encoreColors.cardElevation,
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(72.dp)
-                .clickable(onClick = {
+                .clip(RoundedCornerShape(12.dp))
+                .clickable {
                     if (song.syncStatus == SyncStatus.CONFLICT) {
                         onConflictClick(song.id)
                     } else {
                         onClick()
                     }
-                })
+                }
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxSize(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Left accent bar — 4dp wide, full height, set color
-                Box(
+            // Drag handle — only shown when set filter is active
+            if (activeSetFilter != null) {
+                Icon(
+                    imageVector = Icons.Default.Menu,
+                    contentDescription = "Drag to reorder",
+                    tint = encoreColors.titleText.copy(alpha = 0.3f),
                     modifier = Modifier
-                        .fillMaxHeight()
-                        .width(4.dp)
-                        .background(rowAccentColor ?: Color.Transparent)
+                        .size(20.dp)
+                        .then(dragHandleModifier)
                 )
+            }
 
-                // Content row with internal padding
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Drag handle — only shown when set filter is active
-                    if (activeSetFilter != null) {
-                        Icon(
-                            imageVector = Icons.Default.Menu,
-                            contentDescription = "Drag to reorder",
-                            tint = encoreColors.titleText.copy(alpha = 0.3f),
-                            modifier = Modifier
-                                .size(20.dp)
-                                .then(dragHandleModifier)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                    }
+            // Album-art tile
+            SongTile(song = song, setNumber = primarySetNumber)
 
-                    // Single-line: [Bold Title] — [Artist]
-                    val titleText = remember(song.id, song.title, song.artist, encoreColors.titleText, encoreColors.artistText, encoreColors.separatorText) {
-                        buildAnnotatedString {
-                            withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = encoreColors.titleText)) {
-                                append(song.title)
-                            }
-                            if (song.artist != "Unknown Artist") {
-                                withStyle(SpanStyle(color = encoreColors.separatorText)) {
-                                    append("  —  ")
-                                }
-                                withStyle(SpanStyle(color = encoreColors.artistText)) {
-                                    append(song.artist)
-                                }
+            // Title + meta text column
+            Column(modifier = Modifier.weight(1f)) {
+                val titleAnnotated = remember(song.id, song.title, song.artist, encoreColors.titleText, encoreColors.subtleText) {
+                    buildAnnotatedString {
+                        withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = encoreColors.titleText)) {
+                            append(song.title)
+                        }
+                        if (song.artist != "Unknown Artist") {
+                            withStyle(SpanStyle(color = encoreColors.subtleText, fontWeight = FontWeight.Normal)) {
+                                append(" — ${song.artist}")
                             }
                         }
                     }
-                    Text(
-                        text = titleText,
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodyLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    // Key badge — glass pill
-                    song.displayKey?.let { key ->
-                        KeyBadge(key = key, accentColor = rowAccentColor)
-                        Spacer(modifier = Modifier.width(4.dp))
-                    }
-
-                    // Set membership circles
-                    Spacer(modifier = Modifier.width(6.dp))
-                    activeSets.forEach { set ->
-                        SetNumberCircle(
-                            setNumber = set.number,
-                            modifier = Modifier.padding(end = 4.dp)
-                        )
-                    }
-
-                    // Sync/lock status badges
-                    if (song.syncStatus == SyncStatus.CONFLICT) {
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "⚠",
-                            fontSize = 14.sp,
-                            color = Color(0xFFFF9500)
-                        )
-                    }
-                    if (song.isLockedByOther) {
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "🔒",
-                            fontSize = 14.sp
-                        )
-                    }
-
-                    // Stage-for-perform pill — tap to open set picker
-                    Spacer(modifier = Modifier.width(4.dp))
-                    OutlinedButton(
-                        onClick = { showSetPicker = true },
-                        shape = RoundedCornerShape(50.dp),
-                        border = BorderStroke(1.dp, encoreColors.titleText.copy(alpha = 0.2f)),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
-                        modifier = Modifier
-                            .height(60.dp)
-                            .padding(end = 8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Add to set",
-                            tint = encoreColors.artistText,
-                            modifier = Modifier.size(18.dp)
-                        )
+                }
+                Text(
+                    text = titleAnnotated,
+                    fontSize = 15.sp,
+                    letterSpacing = (-0.02).sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                val metaText = remember(song.id, song.displayKey, song.capoEnabled, song.capoFret, song.isLeadGuitar) {
+                    buildString {
+                        song.displayKey?.let { append(it) }
+                        if (song.capoEnabled && song.capoFret > 0) {
+                            if (isNotEmpty()) append(" · ")
+                            append("Capo ${song.capoFret}")
+                        }
+                        if (song.isLeadGuitar) {
+                            if (isNotEmpty()) append(" · ")
+                            append("Lead")
+                        }
                     }
                 }
+                if (metaText.isNotEmpty()) {
+                    Text(
+                        text = metaText,
+                        fontSize = 12.sp,
+                        color = encoreColors.subtleText,
+                        letterSpacing = (-0.01).sp,
+                        modifier = Modifier.padding(top = 2.dp),
+                        maxLines = 1
+                    )
+                }
+            }
+
+            // Sync / conflict indicator
+            when {
+                song.syncStatus == SyncStatus.CONFLICT ->
+                    Text(text = "⚠", fontSize = 14.sp, color = Color(0xFFFF9500))
+                song.isLockedByOther ->
+                    Text(text = "🔒", fontSize = 14.sp)
             }
         }
     }

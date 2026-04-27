@@ -1,4 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.Encore" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!-- Splash screen theme — shown before Compose UI is ready -->
+    <style name="Theme.Encore.Splash" parent="Theme.SplashScreen">
+        <!-- Splash background color — white so the logo's white bg blends seamlessly -->
+        <item name="windowSplashScreenBackground">#FFFFFF</item>
+        <!-- Self-contained circular icon — white oval + centered mark -->
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash_icon</item>
+        <!-- Post-splash theme (must match the Activity's normal theme) -->
+        <item name="postSplashScreenTheme">@style/Theme.Encore</item>
+    </style>
 </resources>

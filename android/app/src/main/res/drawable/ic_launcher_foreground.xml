@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive icon foreground — mark fills the full canvas; both mark and background
+     are white so the launcher's corner clip is invisible. The orange note is
+     centered and well within the safe zone. -->
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:src="@drawable/encore_mark"
+    android:gravity="center" />

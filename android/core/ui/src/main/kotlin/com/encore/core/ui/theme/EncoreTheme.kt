@@ -39,21 +39,33 @@ data class EncoreColors(
     /** Thin divider lines between sections. */
     val divider: Color,
     val isDark: Boolean,
+    /** Slightly elevated surface (e.g. set builder song rows on dark). */
+    val surfaceRaised: Color,
+    /** Sunken surface (e.g. input fields, slider tracks). */
+    val surfaceSunken: Color,
+    /** Subtle 1px border — low contrast, used for card outlines. */
+    val borderSubtle: Color,
+    /** Stronger 1px border — used for interactive element outlines, dialogs. */
+    val borderStrong: Color,
 )
 
 val DarkEncoreColors = EncoreColors(
-    screenBackground = Color(0xFF060E1F),
-    cardBackground = Color(0xFF0D1829),
+    screenBackground = Color(0xFF000000),
+    cardBackground = Color(0xFF1C1C1E),
     cardElevation = 0.dp,
     titleText = Color.White,
-    artistText = Color.White.copy(alpha = 0.6f),
-    separatorText = Color.White.copy(alpha = 0.25f),
-    iconTint = Color.White.copy(alpha = 0.7f),
-    subtleText = Color.White.copy(alpha = 0.45f),
-    searchBarBackground = Color(0xFF2C2C2E),
+    artistText = Color(0xFFEBEBF5).copy(alpha = 0.60f),
+    separatorText = Color(0xFFEBEBF5).copy(alpha = 0.30f),
+    iconTint = Color(0xFFEBEBF5).copy(alpha = 0.78f),
+    subtleText = Color(0xFFEBEBF5).copy(alpha = 0.55f),
+    searchBarBackground = Color(0xFF767680).copy(alpha = 0.24f),
     lyricText = Color.White,
-    divider = Color.White.copy(alpha = 0.12f),
+    divider = Color.White.copy(alpha = 0.10f),
     isDark = true,
+    surfaceRaised = Color(0xFF1C1C1E),
+    surfaceSunken = Color(0xFF0A0A0B),
+    borderSubtle = Color.White.copy(alpha = 0.08f),
+    borderStrong = Color.White.copy(alpha = 0.18f),
 )
 
 val LightEncoreColors = EncoreColors(
@@ -61,14 +73,18 @@ val LightEncoreColors = EncoreColors(
     cardBackground = Color.White,
     cardElevation = 2.dp,
     titleText = Color.Black,
-    artistText = Color.Black.copy(alpha = 0.6f),
-    separatorText = Color.Black.copy(alpha = 0.25f),
-    iconTint = Color.Black.copy(alpha = 0.7f),
-    subtleText = Color.Black.copy(alpha = 0.45f),
-    searchBarBackground = Color.White,
+    artistText = Color(0xFF3C3C43).copy(alpha = 0.60f),
+    separatorText = Color(0xFF3C3C43).copy(alpha = 0.30f),
+    iconTint = Color(0xFF3C3C43).copy(alpha = 0.78f),
+    subtleText = Color(0xFF3C3C43).copy(alpha = 0.55f),
+    searchBarBackground = Color(0xFF767680).copy(alpha = 0.12f),
     lyricText = Color.Black,
-    divider = Color.Black.copy(alpha = 0.12f),
+    divider = Color(0xFF3C3C43).copy(alpha = 0.18f),
     isDark = false,
+    surfaceRaised = Color.White,
+    surfaceSunken = Color(0xFFE9E9EE),
+    borderSubtle = Color(0xFF3C3C43).copy(alpha = 0.10f),
+    borderStrong = Color(0xFF3C3C43).copy(alpha = 0.22f),
 )
 
 /**

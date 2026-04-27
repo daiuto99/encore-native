@@ -21,6 +21,7 @@ import {
   Sun,
   Tag,
   Upload,
+  Wand2,
   X,
 } from 'lucide-react';
 import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut, type User } from 'firebase/auth';
@@ -195,8 +196,10 @@ const SECTION_PRESETS = [
 
 const KNOWN_SECTIONS = new Set([
   'intro', 'verse', 'chorus', 'pre-chorus', 'prechorus', 'pre chorus',
-  'bridge', 'outro', 'solo', 'interlude', 'instrumental', 'key', 'tag',
-  'vamp', 'breakdown', 'hook', 'refrain', 'coda', 'turnaround',
+  'post-chorus', 'post chorus', 'postchorus',
+  'bridge', 'outro', 'fade', 'fade out', 'fadeout', 'ending', 'end',
+  'solo', 'guitar solo', 'lead', 'interlude', 'instrumental', 'key', 'tag',
+  'vamp', 'breakdown', 'hook', 'refrain', 'coda', 'turnaround', 'riff', 'fill',
 ]);
 
 // ── String helpers ─────────────────────────────────────────────────────────────
@@ -455,10 +458,31 @@ function renderPerformance(body: string, semitones = 0, displayKey = ''): string
 
 // ── Health check ──────────────────────────────────────────────────────────────
 
+/** Normalize a raw section label for matching against KNOWN_SECTIONS:
+ *  - strip leading markdown `#` markers and spaces
+ *  - strip leading ordinals like "1st", "2nd", "3rd"
+ *  - lowercase, strip trailing digits/spaces */
+function normalizeSectionKey(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/^[#\s*]+/, '')            // strip leading # * whitespace
+    .replace(/^\d+(?:st|nd|rd|th)\s+/, '') // strip leading ordinal "1st ", "2nd " etc.
+    .replace(/[\s\d]+$/, '')            // strip trailing whitespace and digits
+    .trim();
+}
+
+const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Matches chord-like tokens: A–G + optional # or b + optional quality + optional number
+const CHORD_RE = /^[A-G][#b]?(?:m(?:aj)?|maj|min|sus|dim|aug|add)?[0-9]*(?:\/[A-G][#b]?)?$/;
+
+function looksLikeChord(raw: string): boolean {
+  return CHORD_RE.test(raw.trim());
+}
+
 function checkSongHealth(song: SongRecord): string[] {
   const issues: string[] = [];
   const body = song.body;
-  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(song.metadata.title);
+  const isUuid = UUID_RE.test(song.metadata.title);
   if (!song.metadata.title || isUuid) issues.push('Missing title');
   if (!song.metadata.artist || song.metadata.artist.toLowerCase() === 'unknown artist') issues.push('Missing artist');
   if (!song.metadata.display_key) issues.push('Missing key');
@@ -469,12 +493,201 @@ function checkSongHealth(song: SongRecord): string[] {
   const mdH      = Array.from(body.matchAll(/^#{1,2}\s+(.+)$/gm)).map((m) => m[1].trim());
   const bracketH = Array.from(body.matchAll(/^\[([A-Za-z][^\]]*)\]$/gm)).map((m) => m[1].trim());
   [...spanH, ...mdH, ...bracketH].forEach((raw) => {
-    const n = raw.toLowerCase().replace(/[\s\d]+$/, '').trim();
+    if (looksLikeChord(raw)) return; // chord annotation, not a section header
+    const n = normalizeSectionKey(raw);
     if (![...KNOWN_SECTIONS].some((s) => n === s || n.startsWith(s)) && raw) {
       issues.push(`Non-standard section: "${raw}"`);
     }
   });
   return issues;
+}
+
+// ── Fix suggestions ────────────────────────────────────────────────────────────
+
+type FixSuggestion = {
+  issue: string;
+  label: string;
+  apply: (song: SongRecord) => SongRecord;
+};
+
+/** Extract title from first heading line in the markdown body. */
+function inferTitleFromBody(body: string): string {
+  for (const line of body.split('\n')) {
+    const t = line.trim();
+    if (!t) continue;
+    // Markdown heading: # Title
+    const mdMatch = t.match(/^#{1,3}\s+(.+)$/);
+    if (mdMatch) return mdMatch[1].replace(/<[^>]+>/g, '').trim();
+    // Bracket heading: [Title] — skip if it looks like a chord
+    const brMatch = t.match(/^\[([A-Za-z][^\]]*)\]$/);
+    if (brMatch && !looksLikeChord(brMatch[1])) return brMatch[1].trim();
+    break; // only inspect first non-blank line
+  }
+  return '';
+}
+
+/** Return the canonical display name for a non-standard section label, or null if no match. */
+function closestSection(raw: string): string | null {
+  const n = normalizeSectionKey(raw);
+  // Already valid after normalization → no rename needed
+  if ([...KNOWN_SECTIONS].some((s) => n === s || n.startsWith(s))) return null;
+  // Alias map: normalized key → canonical display label
+  const ALIASES: Record<string, string> = {
+    // Pre/Post chorus
+    'prechorus': 'Pre-Chorus',
+    'pre chorus': 'Pre-Chorus',
+    'pre-chorus': 'Pre-Chorus',
+    'postchorus': 'Post-Chorus',
+    'post chorus': 'Post-Chorus',
+    'post-chorus': 'Post-Chorus',
+    // Outro / fade
+    'ending': 'Outro',
+    'end': 'Outro',
+    'fade out': 'Outro',
+    'fadeout': 'Outro',
+    'fade': 'Outro',
+    // Final / last section
+    'final chorus': 'Chorus',
+    'last chorus': 'Chorus',
+    'closing': 'Outro',
+    // Solo
+    'guitar solo': 'Solo',
+    'lead guitar': 'Solo',
+    'lead solo': 'Solo',
+    // Instrumental/groove
+    'riff': 'Instrumental',
+    'groove': 'Vamp',
+    'jam': 'Vamp',
+    'fill': 'Interlude',
+    // Misc
+    'refrain': 'Chorus',
+    'turn': 'Turnaround',
+    'stanza': 'Verse',
+    'section': 'Verse',
+  };
+  if (ALIASES[n]) return ALIASES[n];
+  // Prefix match against known sections
+  const match = [...KNOWN_SECTIONS].find((s) => n.startsWith(s) || s.startsWith(n));
+  if (match) return match.split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join('-');
+  return null;
+}
+
+function suggestFixes(song: SongRecord): FixSuggestion[] {
+  const fixes: FixSuggestion[] = [];
+  const isUuid = UUID_RE.test(song.metadata.title);
+
+  // ── Missing title ──────────────────────────────────────────────────────────
+  if (!song.metadata.title || isUuid) {
+    // Try filename first (only if not UUID)
+    const inferred = inferTitleArtistFromPath(song.path);
+    const filenameTitle = UUID_RE.test(inferred.title) ? '' : inferred.title;
+    const bodyTitle = inferTitleFromBody(song.body);
+    const suggested = filenameTitle || bodyTitle;
+    if (suggested) {
+      fixes.push({
+        issue: 'Missing title',
+        label: `Set title → "${suggested}"`,
+        apply: (s) => ({ ...s, metadata: { ...s.metadata, title: suggested } }),
+      });
+    }
+  }
+
+  // ── Missing artist ─────────────────────────────────────────────────────────
+  if (!song.metadata.artist || song.metadata.artist.toLowerCase() === 'unknown artist') {
+    const inferred = inferTitleArtistFromPath(song.path);
+    if (inferred.artist) {
+      fixes.push({
+        issue: 'Missing artist',
+        label: `Set artist → "${inferred.artist}"`,
+        apply: (s) => ({ ...s, metadata: { ...s.metadata, artist: inferred.artist } }),
+      });
+    } else {
+      const artistMatch = song.body.match(/^(?:Artist|By|Performed by)[:\s]+(.+)$/im);
+      if (artistMatch) {
+        const found = artistMatch[1].trim();
+        fixes.push({
+          issue: 'Missing artist',
+          label: `Set artist → "${found}"`,
+          apply: (s) => ({ ...s, metadata: { ...s.metadata, artist: found } }),
+        });
+      }
+    }
+  }
+
+  // ── Missing key ────────────────────────────────────────────────────────────
+  if (!song.metadata.display_key) {
+    const bodyMeta = extractBodyMetadata(song.body);
+    if (bodyMeta.displayKey) {
+      fixes.push({
+        issue: 'Missing key',
+        label: `Set key → "${bodyMeta.displayKey}"`,
+        apply: (s) => ({ ...s, metadata: { ...s.metadata, display_key: bodyMeta.displayKey, original_key: s.metadata.original_key || bodyMeta.displayKey } }),
+      });
+    } else {
+      // Scan for first inline chord `[X]` or standalone bracket chord line [X]
+      const chordMatch =
+        song.body.match(/`\[([A-G][#b]?(?:m(?:aj)?|maj|min|sus|dim|aug|add)?[0-9]*(?:\/[A-G][#b]?)?)\]`/) ||
+        song.body.match(/^\[([A-G][#b]?(?:m(?:aj)?|maj|min|sus|dim|aug|add)?[0-9]*)\]$/m);
+      if (chordMatch) {
+        const root = chordMatch[1].match(/^[A-G][#b]?/)?.[0];
+        const isMinor = /^[A-G][#b]?m(?!aj)/i.test(chordMatch[1]);
+        const key = root ? (isMinor ? root + 'm' : root) : null;
+        if (key) {
+          fixes.push({
+            issue: 'Missing key',
+            label: `Set key → "${key}" (from first chord)`,
+            apply: (s) => ({ ...s, metadata: { ...s.metadata, display_key: key, original_key: s.metadata.original_key || key } }),
+          });
+        }
+      }
+    }
+  }
+
+  // ── Unclosed [h] tags ──────────────────────────────────────────────────────
+  const opens  = (song.body.match(/\[h\]/gi)  || []).length;
+  const closes = (song.body.match(/\[\/h\]/gi) || []).length;
+  if (opens !== closes) {
+    fixes.push({
+      issue: `Unclosed [h] tags (${opens} open / ${closes} close)`,
+      label: 'Remove all [h] / [/h] tags',
+      apply: (s) => ({ ...s, body: s.body.replace(/\[\/?\s*h\s*\]/gi, '') }),
+    });
+  }
+
+  // ── Non-standard sections ──────────────────────────────────────────────────
+  const body = song.body;
+  const spanH    = Array.from(body.matchAll(/<span[^>]*>##?\s*(.*?)<\/span>/gi)).map((m) => m[1].trim());
+  const mdH      = Array.from(body.matchAll(/^#{1,2}\s+(.+)$/gm)).map((m) => m[1].trim());
+  const bracketH = Array.from(body.matchAll(/^\[([A-Za-z][^\]]*)\]$/gm)).map((m) => m[1].trim());
+  const nonStandard = [...spanH, ...mdH, ...bracketH].filter((raw) => {
+    if (looksLikeChord(raw)) return false;
+    const n = normalizeSectionKey(raw);
+    return ![...KNOWN_SECTIONS].some((s) => n === s || n.startsWith(s)) && !!raw;
+  });
+  const seen = new Set<string>();
+  for (const raw of nonStandard) {
+    if (seen.has(raw)) continue;
+    seen.add(raw);
+    const closest = closestSection(raw);
+    if (closest) {
+      // Preserve trailing number if present (e.g. "Pre Chorus 1" → "Pre-Chorus 1")
+      const trailingNum = raw.match(/\s*(\d+)$/)?.[1];
+      const renamed = trailingNum ? `${closest} ${trailingNum}` : closest;
+      fixes.push({
+        issue: `Non-standard section: "${raw}"`,
+        label: `Rename "${raw}" → "${renamed}"`,
+        apply: (s) => ({
+          ...s,
+          body: s.body.replace(
+            new RegExp(`(^|(?<=\\[))${raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\]|$)`, 'gm'),
+            renamed,
+          ),
+        }),
+      });
+    }
+  }
+
+  return fixes;
 }
 
 const EMPTY_META: SongMeta = {
@@ -691,6 +904,70 @@ export default function App() {
   const [fileHandles, setFileHandles]     = useState<Record<string, FsFileHandle>>({});
   const activeTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
+  // ── Quick Edit modal ───────────────────────────────────────────────────────
+  const [quickEditSong,    setQuickEditSong]    = useState<SongRecord | null>(null);
+  const [qeConfirmDelete,  setQeConfirmDelete]  = useState(false);
+  const [qeTitle,       setQeTitle]       = useState('');
+  const [qeArtist,      setQeArtist]      = useState('');
+  const [qeKey,         setQeKey]         = useState('');
+  const [qeIsLead,      setQeIsLead]      = useState(false);
+  const [qeCapo,        setQeCapo]        = useState(false);
+  const [qeCapoFret,    setQeCapoFret]    = useState(1);
+  const [qeBpm,         setQeBpm]         = useState('');
+
+  function openQuickEdit(song: SongRecord) {
+    setQeConfirmDelete(false);
+    setQuickEditSong(song);
+    setQeTitle(song.metadata.title);
+    setQeArtist(song.metadata.artist);
+    setQeKey(song.metadata.display_key || '');
+    setQeIsLead(song.metadata.is_lead_guitar);
+    setQeCapo(Boolean(song.metadata.capo && Number(song.metadata.capo) > 0));
+    setQeCapoFret(Number(song.metadata.capo) || 1);
+    setQeBpm(song.metadata.bpm || '');
+  }
+
+  async function saveQuickEdit() {
+    if (!quickEditSong) return;
+    const updated: SongRecord = {
+      ...quickEditSong,
+      metadata: {
+        ...quickEditSong.metadata,
+        title:          qeTitle.trim(),
+        artist:         qeArtist.trim(),
+        display_key:    qeKey,
+        original_key:   quickEditSong.metadata.original_key || qeKey,
+        is_lead_guitar: qeIsLead,
+        capo:           qeCapo ? String(qeCapoFret) : '',
+        bpm:            qeBpm.trim(),
+      },
+    };
+    const serialized = serializeSong(updated);
+    setIsBusy(true);
+    setStatus('Saving…');
+    try {
+      if (mode === 'cloud') {
+        await CloudLibraryService.uploadMarkdownFile(updated.path, serialized, gcsToken!);
+      } else {
+        const fh = fileHandles[updated.path];
+        if (!fh) throw new Error('No file handle for this song.');
+        const writable = await fh.createWritable();
+        await writable.write(serialized);
+        await writable.close();
+      }
+      setSongs((cur) => cur.map((s) => s.path === updated.path ? parseSong(updated.path, serialized) : s));
+      if (selectedPath === updated.path) {
+        setDraftMeta(updated.metadata);
+      }
+      setStatus(`Saved "${updated.metadata.title}".`);
+      setQuickEditSong(null);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Save failed.');
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   // ── Auth ──────────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -887,6 +1164,70 @@ export default function App() {
     }
   }
 
+  async function applyHealthFix(fix: FixSuggestion, song: SongRecord) {
+    const updated = fix.apply(song);
+    const serialized = serializeSong(updated);
+    setIsBusy(true);
+    setStatus('Applying fix…');
+    try {
+      if (mode === 'cloud') {
+        await CloudLibraryService.uploadMarkdownFile(updated.path, serialized, gcsToken!);
+      } else {
+        const fh = fileHandles[updated.path];
+        if (!fh) throw new Error('No file handle for this song.');
+        const writable = await fh.createWritable();
+        await writable.write(serialized);
+        await writable.close();
+      }
+      setSongs((cur) => cur.map((s) => s.path === updated.path ? parseSong(updated.path, serialized) : s));
+      // If this song is currently open in the editor, sync draft state too
+      if (selectedPath === updated.path) {
+        setDraftMeta(updated.metadata);
+        setDraft(stripLeadingTitle(normalizeMarkdownBody(updated.body), updated.metadata.title));
+      }
+      setStatus(`Fixed "${updated.metadata.title || song.metadata.title}".`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Fix failed.');
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function deleteSong(song: SongRecord) {
+    setIsBusy(true);
+    setStatus('Deleting…');
+    try {
+      if (mode === 'cloud') {
+        await CloudLibraryService.deleteFile(song.path, gcsToken!);
+      } else {
+        // For local mode, remove from in-memory list only (can't delete via File System API without extra permissions)
+      }
+      setSongs((cur) => cur.filter((s) => s.path !== song.path));
+      if (selectedPath === song.path) setSelectedPath('');
+      setQuickEditSong(null);
+      setStatus(`Deleted "${song.metadata.title || 'song'}".`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Delete failed.');
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  function addBlankSong() {
+    const uid = crypto.randomUUID();
+    const path = mode === 'cloud' && user
+      ? `${user.email}/songs/${uid}.md`
+      : `${uid}.md`;
+    const blank: SongRecord = {
+      path,
+      raw: '',
+      body: '',
+      metadata: { title: '', artist: '', display_key: '', original_key: '', is_lead_guitar: false, bpm: '', capo: '' },
+    };
+    setSongs((cur) => [blank, ...cur]);
+    openQuickEdit(blank);
+  }
+
   async function handleCreateSong() {
     if (!createTitle.trim() || !createArtist.trim()) return;
     setIsGenerating(true);
@@ -1070,17 +1411,22 @@ export default function App() {
                 {libraryHandle ? 'Refresh local' : 'Open local folder'}
               </button>
             )}
-            {songs.length > 0 && (
-              <div className="flex items-center justify-between px-1">
-                <span className="text-xs text-[#3C3C43]/45 dark:text-white/30">{songs.length} songs</span>
+            <div className="flex items-center justify-between px-1">
+              <span className="text-xs text-[#3C3C43]/45 dark:text-white/30">{songs.length} songs</span>
+              <div className="flex items-center gap-2">
                 {healthItems.length > 0 && (
                   <button onClick={() => setActiveTab('health')}
                     className="flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 hover:bg-amber-100 dark:bg-amber-500/10 dark:text-amber-400 dark:hover:bg-amber-500/20 transition">
                     <AlertCircle size={11} /> {healthItems.length} issues
                   </button>
                 )}
+                <button onClick={addBlankSong}
+                  title="Add blank song"
+                  className="flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-600 hover:bg-blue-100 dark:bg-blue-500/10 dark:text-blue-400 dark:hover:bg-blue-500/20 transition">
+                  + New
+                </button>
               </div>
-            )}
+            </div>
           </div>
 
           <div className="shrink-0 border-b border-black/[0.06] p-3 dark:border-white/[0.06]">
@@ -1171,44 +1517,52 @@ export default function App() {
               const isUuid     = /^[0-9a-f-]{36}$/i.test(song.metadata.title);
               const issueCount = healthMap[song.path] || 0;
               return (
-                <button key={song.path}
-                  onClick={() => { setSelectedPath(song.path); setActiveTab('editor'); }}
-                  className={`mb-0.5 w-full rounded-xl px-2.5 py-2 text-left transition ${
-                    isSelected
-                      ? 'bg-blue-50 ring-1 ring-blue-300/50 dark:bg-blue-500/10 dark:ring-blue-500/30'
-                      : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <SongCoverTile path={song.path} title={song.metadata.title} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-1">
-                        <span className={`truncate text-sm font-medium leading-tight ${
-                          isUuid ? 'font-mono text-xs text-[#3C3C43]/40 dark:text-white/30'
-                               : isSelected ? 'text-blue-700 dark:text-white' : 'text-[#1C1C1E] dark:text-white'
-                        }`}>
-                          {song.metadata.title || 'Untitled'}
-                        </span>
-                        {issueCount > 0 && <AlertCircle size={12} className="mt-0.5 shrink-0 text-amber-500 dark:text-amber-400" />}
-                      </div>
-                      {!isUuid && (
-                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                          <span className="text-xs text-[#3C3C43]/50 dark:text-white/40">
-                            {song.metadata.artist || <span className="italic text-[#3C3C43]/30 dark:text-white/20">No artist</span>}
+                <div key={song.path} className="group relative mb-0.5">
+                  <button
+                    onClick={() => { setSelectedPath(song.path); setActiveTab('editor'); }}
+                    className={`w-full rounded-xl px-2.5 py-2 text-left transition ${
+                      isSelected
+                        ? 'bg-blue-50 ring-1 ring-blue-300/50 dark:bg-blue-500/10 dark:ring-blue-500/30'
+                        : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <SongCoverTile path={song.path} title={song.metadata.title} />
+                      <div className="min-w-0 flex-1 pr-5">
+                        <div className="flex items-start justify-between gap-1">
+                          <span className={`truncate text-sm font-medium leading-tight ${
+                            isUuid ? 'font-mono text-xs text-[#3C3C43]/40 dark:text-white/30'
+                                 : isSelected ? 'text-blue-700 dark:text-white' : 'text-[#1C1C1E] dark:text-white'
+                          }`}>
+                            {song.metadata.title || 'Untitled'}
                           </span>
-                          {song.metadata.display_key && (
-                            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
-                              {song.metadata.display_key}
-                            </span>
-                          )}
-                          {song.metadata.is_lead_guitar && (
-                            <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">Lead</span>
-                          )}
+                          {issueCount > 0 && <AlertCircle size={12} className="mt-0.5 shrink-0 text-amber-500 dark:text-amber-400" />}
                         </div>
-                      )}
+                        {!isUuid && (
+                          <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                            <span className="text-xs text-[#3C3C43]/50 dark:text-white/40">
+                              {song.metadata.artist || <span className="italic text-[#3C3C43]/30 dark:text-white/20">No artist</span>}
+                            </span>
+                            {song.metadata.display_key && (
+                              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
+                                {song.metadata.display_key}
+                              </span>
+                            )}
+                            {song.metadata.is_lead_guitar && (
+                              <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">Lead</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                </button>
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); openQuickEdit(song); }}
+                    title="Quick edit"
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-[#3C3C43]/30 opacity-0 transition hover:bg-black/[0.06] hover:text-[#3C3C43]/70 group-hover:opacity-100 dark:text-white/20 dark:hover:bg-white/10 dark:hover:text-white/60">
+                    ✏
+                  </button>
+                </div>
               );
             })}
           </div>
@@ -1434,7 +1788,7 @@ export default function App() {
           {/* ── Health tab ── */}
           {activeTab === 'health' && (
             <div className="flex-1 overflow-y-auto p-6">
-              <div className="mb-5 flex items-center gap-3">
+              <div className="mb-5 flex items-center gap-3 flex-wrap">
                 <h2 className="text-base font-semibold text-[#1C1C1E] dark:text-white">Library Health</h2>
                 <span className="text-sm text-[#3C3C43]/40 dark:text-white/30">{songs.length} songs scanned</span>
                 {healthItems.length === 0 ? (
@@ -1446,6 +1800,20 @@ export default function App() {
                     <AlertCircle size={12} /> {healthItems.length} songs with issues
                   </span>
                 )}
+                {healthItems.length > 0 && (() => {
+                  const allFixes = healthItems.flatMap(({ song }) => suggestFixes(song).map((fix) => ({ fix, song })));
+                  if (allFixes.length === 0) return null;
+                  return (
+                    <button
+                      disabled={isBusy}
+                      onClick={async () => {
+                        for (const { fix, song } of allFixes) await applyHealthFix(fix, song);
+                      }}
+                      className="ml-auto flex items-center gap-1.5 rounded-lg bg-blue-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-400 disabled:opacity-40">
+                      <Wand2 size={12} /> Fix all ({allFixes.length})
+                    </button>
+                  );
+                })()}
               </div>
               {healthItems.length === 0 ? (
                 <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-10 text-center dark:border-emerald-500/20 dark:bg-emerald-500/5">
@@ -1454,27 +1822,51 @@ export default function App() {
                   <p className="mt-1 text-sm text-emerald-600/80 dark:text-emerald-500/70">All {songs.length} songs have title, artist, and key.</p>
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {healthItems.map(({ song, issues }) => (
-                    <div key={song.path}
-                      className="flex items-start justify-between gap-4 rounded-2xl border border-black/[0.06] bg-white px-4 py-3 transition hover:border-amber-300/60 hover:bg-amber-50/30 dark:border-white/[0.06] dark:bg-[#1C1C1E] dark:hover:border-amber-500/20 dark:hover:bg-amber-500/[0.03]">
-                      <div className="min-w-0 flex-1">
-                        <button onClick={() => { setSelectedPath(song.path); setActiveTab('editor'); }} className="text-left">
-                          <div className="text-sm font-semibold text-blue-600 hover:underline dark:text-blue-400">
-                            {song.metadata.title || <span className="italic text-[#3C3C43]/35 dark:text-white/30">No title</span>}
+                <div className="space-y-3">
+                  {healthItems.map(({ song, issues }) => {
+                    const fixes = suggestFixes(song);
+                    return (
+                      <div key={song.path}
+                        className="rounded-2xl border border-black/[0.06] bg-white px-4 py-3 dark:border-white/[0.06] dark:bg-[#1C1C1E]">
+                        <div className="flex items-start justify-between gap-4 mb-2.5">
+                          <div className="flex items-center gap-2 min-w-0">
+                          <button onClick={() => { setSelectedPath(song.path); setActiveTab('editor'); }} className="text-left min-w-0">
+                            <div className="text-sm font-semibold text-blue-600 hover:underline dark:text-blue-400 truncate">
+                              {song.metadata.title || <span className="italic text-[#3C3C43]/35 dark:text-white/30">No title</span>}
+                            </div>
+                            <div className="text-xs text-[#3C3C43]/45 dark:text-white/40">{song.metadata.artist || 'No artist'}</div>
+                          </button>
+                          <button
+                            onClick={() => openQuickEdit(song)}
+                            title="Quick edit"
+                            className="shrink-0 flex items-center gap-1 rounded-md border border-black/[0.08] bg-white px-2 py-1 text-[11px] font-medium text-[#3C3C43]/50 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:border-white/[0.08] dark:bg-transparent dark:text-white/30 dark:hover:border-blue-500/40 dark:hover:bg-blue-500/10 dark:hover:text-blue-400">
+                            ✏ Edit
+                          </button>
+                        </div>
+                          <div className="flex flex-wrap justify-end gap-1.5 shrink-0">
+                            {issues.map((issue) => (
+                              <span key={issue} className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-500/10 dark:text-amber-400">
+                                {issue}
+                              </span>
+                            ))}
                           </div>
-                          <div className="text-xs text-[#3C3C43]/45 dark:text-white/40">{song.metadata.artist || 'No artist'}</div>
-                        </button>
+                        </div>
+                        {fixes.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 border-t border-black/[0.05] pt-2.5 dark:border-white/[0.05]">
+                            {fixes.map((fix) => (
+                              <button
+                                key={fix.issue}
+                                disabled={isBusy}
+                                onClick={() => applyHealthFix(fix, song)}
+                                className="flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700 transition hover:bg-blue-100 disabled:opacity-40 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-400 dark:hover:bg-blue-500/20">
+                                <Wand2 size={10} /> {fix.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      <div className="flex flex-wrap justify-end gap-1.5">
-                        {issues.map((issue) => (
-                          <span key={issue} className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-500/10 dark:text-amber-400">
-                            {issue}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1482,6 +1874,128 @@ export default function App() {
         </main>
       </div>
     </div>
+
+    {/* ── Quick Edit modal ── */}
+    {quickEditSong && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+        onClick={(e) => { if (e.target === e.currentTarget) { setQuickEditSong(null); setQeConfirmDelete(false); } }}>
+        <div className="w-full max-w-sm rounded-2xl border border-black/[0.08] bg-white shadow-2xl dark:border-white/[0.10] dark:bg-[#1C1C1E]">
+          {/* Header */}
+          <div className="flex items-center justify-between border-b border-black/[0.06] px-5 py-4 dark:border-white/[0.06]">
+            <h2 className="text-sm font-semibold text-[#1C1C1E] dark:text-white">Quick Edit</h2>
+            <button onClick={() => { setQuickEditSong(null); setQeConfirmDelete(false); }}
+              className="rounded-lg p-1.5 text-[#3C3C43]/40 hover:bg-black/[0.06] hover:text-[#3C3C43]/80 dark:text-white/30 dark:hover:bg-white/10 dark:hover:text-white/70">
+              <X size={15} />
+            </button>
+          </div>
+
+          {qeConfirmDelete ? (
+            /* Delete confirmation */
+            <div className="p-5 text-center">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-red-100 dark:bg-red-500/15">
+                <X size={22} className="text-red-500" />
+              </div>
+              <p className="mb-1 font-semibold text-[#1C1C1E] dark:text-white">Delete from library?</p>
+              <p className="mb-5 text-sm text-[#3C3C43]/50 dark:text-white/40">
+                "{quickEditSong.metadata.title || 'This song'}" will be permanently removed.
+              </p>
+              <div className="flex gap-2">
+                <button onClick={() => setQeConfirmDelete(false)}
+                  className="flex-1 rounded-xl border border-black/[0.10] py-2 text-sm font-medium text-[#3C3C43]/60 transition hover:bg-black/[0.04] dark:border-white/[0.10] dark:text-white/50 dark:hover:bg-white/[0.06]">
+                  Cancel
+                </button>
+                <button onClick={() => deleteSong(quickEditSong)} disabled={isBusy}
+                  className="flex-1 rounded-xl bg-red-500 py-2 text-sm font-semibold text-white transition hover:bg-red-400 disabled:opacity-40">
+                  {isBusy ? 'Deleting…' : 'Delete'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Fields */}
+              <div className="space-y-3 p-5">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-[#3C3C43]/50 dark:text-white/40">Title</label>
+                  <input type="text" value={qeTitle} onChange={(e) => setQeTitle(e.target.value)} placeholder="Song title"
+                    className="w-full rounded-xl border border-black/[0.08] bg-[#F2F2F7] px-3 py-2 text-sm text-[#1C1C1E] outline-none focus:ring-2 focus:ring-blue-400/50 dark:border-white/[0.08] dark:bg-white/[0.06] dark:text-white dark:focus:ring-blue-500/40" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-[#3C3C43]/50 dark:text-white/40">Artist</label>
+                  <input type="text" value={qeArtist} onChange={(e) => setQeArtist(e.target.value)} placeholder="Artist name"
+                    className="w-full rounded-xl border border-black/[0.08] bg-[#F2F2F7] px-3 py-2 text-sm text-[#1C1C1E] outline-none focus:ring-2 focus:ring-blue-400/50 dark:border-white/[0.08] dark:bg-white/[0.06] dark:text-white dark:focus:ring-blue-500/40" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-[#3C3C43]/50 dark:text-white/40">Key</label>
+                  <select value={qeKey} onChange={(e) => setQeKey(e.target.value)}
+                    className="w-full rounded-xl border border-black/[0.08] bg-[#F2F2F7] px-3 py-2 text-sm text-[#1C1C1E] outline-none focus:ring-2 focus:ring-blue-400/50 dark:border-white/[0.08] dark:bg-[#2C2C2E] dark:text-white dark:focus:ring-blue-500/40">
+                    <option value="">— Select key —</option>
+                    {['C','C#','Db','D','D#','Eb','E','F','F#','Gb','G','G#','Ab','A','A#','Bb','B',
+                      'Cm','C#m','Dm','D#m','Ebm','Em','Fm','F#m','Gm','G#m','Am','A#m','Bbm','Bm',
+                    ].map((k) => <option key={k} value={k}>{k}</option>)}
+                  </select>
+                </div>
+                {/* BPM */}
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-[#3C3C43]/50 dark:text-white/40">BPM</label>
+                  <input type="number" min={40} max={300} value={qeBpm} onChange={(e) => setQeBpm(e.target.value)} placeholder="e.g. 120"
+                    className="w-full rounded-xl border border-black/[0.08] bg-[#F2F2F7] px-3 py-2 text-sm text-[#1C1C1E] outline-none focus:ring-2 focus:ring-blue-400/50 dark:border-white/[0.08] dark:bg-white/[0.06] dark:text-white dark:focus:ring-blue-500/40" />
+                </div>
+                {/* Lead guitar toggle */}
+                <button onClick={() => setQeIsLead((v) => !v)}
+                  className="flex w-full items-center justify-between rounded-xl border border-black/[0.06] bg-[#F2F2F7] px-3 py-2.5 dark:border-white/[0.06] dark:bg-white/[0.04]">
+                  <span className="text-sm text-[#1C1C1E] dark:text-white">Lead guitar</span>
+                  <div style={{ width: 51, height: 28, backgroundColor: qeIsLead ? '#22c55e' : '#E5E5EA', flexShrink: 0 }}
+                    className="relative rounded-full transition-colors duration-200">
+                    <span style={{ position: 'absolute', top: 2, left: qeIsLead ? 25 : 2, width: 24, height: 24, transition: 'left 0.2s' }}
+                      className="rounded-full bg-white shadow-md" />
+                  </div>
+                </button>
+                {/* Capo toggle + fret */}
+                <div className="rounded-xl border border-black/[0.06] bg-[#F2F2F7] px-3 py-2.5 dark:border-white/[0.06] dark:bg-white/[0.04]">
+                  <button onClick={() => setQeCapo((v) => !v)} className="flex w-full items-center justify-between">
+                    <span className="text-sm text-[#1C1C1E] dark:text-white">Capo</span>
+                    <div style={{ width: 51, height: 28, backgroundColor: qeCapo ? '#f59e0b' : '#E5E5EA', flexShrink: 0 }}
+                      className="relative rounded-full transition-colors duration-200">
+                      <span style={{ position: 'absolute', top: 2, left: qeCapo ? 25 : 2, width: 24, height: 24, transition: 'left 0.2s' }}
+                        className="rounded-full bg-white shadow-md" />
+                    </div>
+                  </button>
+                  {qeCapo && (
+                    <div className="mt-3 flex items-center gap-3">
+                      <span className="text-xs text-[#3C3C43]/50 dark:text-white/40">Fret</span>
+                      <div className="flex items-center gap-3">
+                        <button onClick={() => setQeCapoFret((f) => Math.max(1, f - 1))}
+                          className="flex h-8 w-8 items-center justify-center rounded-xl border border-black/[0.10] bg-white text-base font-bold text-[#1C1C1E] hover:bg-black/[0.06] dark:border-white/[0.10] dark:bg-white/[0.08] dark:text-white dark:hover:bg-white/[0.14]">−</button>
+                        <span className="w-5 text-center text-lg font-bold text-[#1C1C1E] dark:text-white">{qeCapoFret}</span>
+                        <button onClick={() => setQeCapoFret((f) => Math.min(12, f + 1))}
+                          className="flex h-8 w-8 items-center justify-center rounded-xl border border-black/[0.10] bg-white text-base font-bold text-[#1C1C1E] hover:bg-black/[0.06] dark:border-white/[0.10] dark:bg-white/[0.08] dark:text-white dark:hover:bg-white/[0.14]">+</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {/* Actions */}
+              <div className="flex items-center gap-2 border-t border-black/[0.06] px-5 py-4 dark:border-white/[0.06]">
+                <button onClick={() => setQeConfirmDelete(true)}
+                  className="rounded-xl border border-red-200 px-3 py-2 text-sm font-medium text-red-500 transition hover:bg-red-50 dark:border-red-500/20 dark:text-red-400 dark:hover:bg-red-500/10">
+                  Delete
+                </button>
+                <div className="flex flex-1 gap-2">
+                  <button onClick={() => { setQuickEditSong(null); setQeConfirmDelete(false); }}
+                    className="flex-1 rounded-xl border border-black/[0.10] py-2 text-sm font-medium text-[#3C3C43]/60 transition hover:bg-black/[0.04] dark:border-white/[0.10] dark:text-white/50 dark:hover:bg-white/[0.06]">
+                    Cancel
+                  </button>
+                  <button onClick={saveQuickEdit} disabled={isBusy}
+                    className="flex-1 rounded-xl bg-blue-500 py-2 text-sm font-semibold text-white transition hover:bg-blue-400 disabled:opacity-40">
+                    {isBusy ? 'Saving…' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    )}
 
     {/* ── Performance View modal (always dark) ── */}
     {showPerfView && selectedSong && (

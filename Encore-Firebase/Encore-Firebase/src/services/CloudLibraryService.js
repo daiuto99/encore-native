@@ -99,4 +99,14 @@ export const CloudLibraryService = {
     const path = `${userEmail}/sets/${fileName}`;
     return gcsUpload(path, jsonText, 'application/json; charset=utf-8', token);
   },
+
+  /** Delete a single object by its full GCS path. */
+  async deleteFile(path, token) {
+    const res = await fetch(
+      `${GCS_BASE}/b/${BUCKET}/o/${enc(path)}`,
+      { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }
+    );
+    // 404 is fine — already gone
+    if (!res.ok && res.status !== 404) throw gcsError(res.status, path);
+  },
 };

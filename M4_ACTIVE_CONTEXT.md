@@ -1,10 +1,38 @@
-# Encore Android — M4 Active Context
+# Encore — Active Context (M5 complete → Web Library Management)
 
-## Current Milestone
-Milestone 4 — Sync + Account Behavior
+## Current Work
+**Web Library Management + Library Health Suggested Fixes**
+Branch: `milestone-5/ui-redesign`
 
-## Milestone Goal
-Add cloud-backed account and sync behavior without breaking the offline-first local product.
+### M5 Status: ✅ COMPLETE (committed 2026-04-27, commit `98691f0`)
+See `docs/milestones/M5_SUMMARY.md` for full details.
+
+## Recently Completed
+### Web: Library Health + Quick Edit (2026-04-27)
+- `checkSongHealth`: chord annotations (`[Am]`, `[G7]`) no longer flagged as non-standard sections
+- `normalizeSectionKey`: strips leading `#`, ordinals (`1st`, `2nd`), trailing digits before matching
+- `KNOWN_SECTIONS` expanded: post-chorus, guitar solo, fade out, riff, fill, ending
+- `suggestFixes`: one-click fix buttons per issue — title from filename/body heading, artist from body annotation, key from first chord, unclosed [h] tag removal, section renames with alias map
+- "Fix all (N)" button applies every available fix across all flagged songs in one pass
+- **Quick Edit modal**: title, artist, key (major+minor dropdown), BPM, lead guitar toggle, capo toggle + fret stepper
+  - Opens from ✏ Edit button on health tab rows and sidebar hover pencil
+  - "Delete" button with confirmation screen — removes from GCS + songs list
+  - "+ New" button in sidebar creates blank song and opens Quick Edit
+- `CloudLibraryService.deleteFile(path, token)` — GCS DELETE with 404 tolerance
+- Toggles use inline `style` (not Tailwind classes) to avoid JIT purge of dynamic class names
+
+### Web: Dark/Light Theme + Auth Fix (2026-04-27)
+- Light mode default, Sun/Moon toggle, `darkMode: 'class'`
+- Reconnect button replaces "Session expired" warning
+
+## Next
+- Bulk song upload (drag-drop multiple .md files)
+- Song body editor improvements
+
+---
+
+## Prior Milestone Goal (M4 — COMPLETE)
+Sync + Account Behavior — cloud-backed account and sync without breaking offline-first product.
 
 ---
 

@@ -561,7 +561,7 @@ fun SongListItem(
             title = { Text("\"${song.title}\"") },
             text = {
                 Column {
-                    // Action 1: Remove from Set (only shown when song is in the active set)
+                    // Remove from Set — only shown in set builder context
                     if (activeSetFilter != null && sets.any { it.number == activeSetFilter }) {
                         OutlinedButton(
                             onClick = {
@@ -578,29 +578,30 @@ fun SongListItem(
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
-                        Spacer(modifier = Modifier.padding(top = 8.dp))
                     }
-                    // Action 2: Delete from Library (always shown)
-                    OutlinedButton(
-                        onClick = {
-                            showConfirmDialog = false
-                            onDeleteSong()
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                "Delete from Library",
-                                color = MaterialTheme.colorScheme.error,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                "Permanently removes the song record",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                    // Delete from Library — only available from library, never from set builder
+                    if (activeSetFilter == null) {
+                        OutlinedButton(
+                            onClick = {
+                                showConfirmDialog = false
+                                onDeleteSong()
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    "Delete from Library",
+                                    color = MaterialTheme.colorScheme.error,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    "Permanently removes the song record",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
@@ -617,7 +618,15 @@ fun SongListItem(
 
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
-            value == SwipeToDismissBoxValue.EndToStart || value == SwipeToDismissBoxValue.StartToEnd
+            when (value) {
+                SwipeToDismissBoxValue.EndToStart -> {
+                    // Trigger dialog from gesture only — not from rememberSaveable restoration
+                    showConfirmDialog = true
+                    false // don't commit state; box springs back naturally
+                }
+                SwipeToDismissBoxValue.StartToEnd -> true
+                else -> false
+            }
         },
         positionalThreshold = { totalDistance -> totalDistance * 0.75f }
     )
@@ -625,7 +634,7 @@ fun SongListItem(
     LaunchedEffect(dismissState.currentValue) {
         when (dismissState.currentValue) {
             SwipeToDismissBoxValue.EndToStart -> {
-                showConfirmDialog = true
+                // Only reachable via rememberSaveable state restoration — snap back silently
                 dismissState.snapTo(SwipeToDismissBoxValue.Settled)
             }
             SwipeToDismissBoxValue.StartToEnd -> {

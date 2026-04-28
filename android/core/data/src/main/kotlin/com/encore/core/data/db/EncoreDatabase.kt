@@ -42,7 +42,7 @@ import java.util.UUID
         SetEntity::class,
         SetEntryEntity::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = true
 )
 @TypeConverters(EncoreTypeConverters::class)
@@ -208,6 +208,34 @@ abstract class EncoreDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration from version 9 to 10: Deduplicate songs table.
+         *
+         * If a user's Google-synced library contained songs where the cloud renamed a song's
+         * title/artist to match another existing song, the local DB can end up with duplicate
+         * (user_id, title, artist) rows that violate the UNIQUE index. Remove the older duplicate
+         * (lower updated_at) so subsequent sync updates no longer crash with SQLITE_CONSTRAINT_UNIQUE.
+         */
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("""
+                    DELETE FROM songs
+                    WHERE id NOT IN (
+                        SELECT id FROM songs
+                        GROUP BY user_id, title, artist
+                        HAVING id = (
+                            SELECT id FROM songs s2
+                            WHERE s2.user_id = songs.user_id
+                              AND s2.title   = songs.title
+                              AND s2.artist  = songs.artist
+                            ORDER BY updated_at DESC
+                            LIMIT 1
+                        )
+                    )
+                """.trimIndent())
+            }
+        }
+
+        /**
          * Get singleton database instance.
          *
          * @param context Application context
@@ -220,7 +248,7 @@ abstract class EncoreDatabase : RoomDatabase() {
                     EncoreDatabase::class.java,
                     DATABASE_NAME
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                     .addCallback(DatabaseCallback(context.applicationContext))
                     .build()
                 INSTANCE = instance

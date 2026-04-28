@@ -10,9 +10,9 @@ import com.encore.core.data.sync.FileHashUtils
 import com.encore.core.data.sync.GcpManifest
 import com.encore.core.data.sync.LockResult
 import com.encore.core.data.sync.SyncProvider
+import android.util.Log
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
-
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -395,14 +395,18 @@ class SongRepositoryImpl(
     override suspend fun markSynced(songId: String) {
         val song = songDao.getById(songId) ?: return
         val hash = FileHashUtils.hashMarkdownBody(song.markdownBody)
-        songDao.update(
-            song.copy(
-                lastSyncedHash = hash,
-                isDirty = false,
-                lastSyncedAt = System.currentTimeMillis(),
-                syncStatus = SyncStatus.SYNCED
+        try {
+            songDao.update(
+                song.copy(
+                    lastSyncedHash = hash,
+                    isDirty = false,
+                    lastSyncedAt = System.currentTimeMillis(),
+                    syncStatus = SyncStatus.SYNCED
+                )
             )
-        )
+        } catch (e: Exception) {
+            Log.w(TAG, "markSynced($songId) update failed: ${e.message}")
+        }
     }
 
     override suspend fun requestEditLock(songId: String): LockResult {
@@ -411,14 +415,22 @@ class SongRepositoryImpl(
         } ?: LockResult.Acquired // offline: grant silently so performers aren't blocked
 
         val song = songDao.getById(songId) ?: return result
-        songDao.update(song.copy(isLockedByOther = result is LockResult.LockedBy))
+        try {
+            songDao.update(song.copy(isLockedByOther = result is LockResult.LockedBy))
+        } catch (e: Exception) {
+            Log.w(TAG, "requestEditLock($songId) update failed: ${e.message}")
+        }
         return result
     }
 
     override suspend fun releaseEditLock(songId: String) {
         syncProvider.releaseLock(songId)
         val song = songDao.getById(songId) ?: return
-        songDao.update(song.copy(isLockedByOther = false))
+        try {
+            songDao.update(song.copy(isLockedByOther = false))
+        } catch (e: Exception) {
+            Log.w(TAG, "releaseEditLock($songId) update failed: ${e.message}")
+        }
     }
 
     override suspend fun uploadSongToCloud(userId: String, songId: String): Boolean {
@@ -451,27 +463,36 @@ class SongRepositoryImpl(
         val trimmedBody = markdownBody.trim()
         val hash = FileHashUtils.hashMarkdownBody(trimmedBody)
         val now = System.currentTimeMillis()
-        songDao.update(
-            existing.copy(
-                title          = yaml["title"]?.takeIf { it.isNotBlank() }?.take(200)       ?: existing.title,
-                artist         = yaml["artist"]?.takeIf { it.isNotBlank() }?.take(200)      ?: existing.artist,
-                displayKey     = yaml["display_key"]?.takeIf { it.isNotBlank() }?.take(20)  ?: existing.displayKey,
-                originalKey    = yaml["original_key"]?.takeIf { it.isNotBlank() }?.take(20) ?: existing.originalKey,
-                isLeadGuitar   = yaml["is_lead_guitar"]?.lowercase() == "true",
-                markdownBody   = trimmedBody,
-                isDirty        = false,
-                lastSyncedHash = hash,
-                lastSyncedAt   = now,
-                localUpdatedAt = now,
-                syncStatus     = SyncStatus.SYNCED,
+        return try {
+            songDao.update(
+                existing.copy(
+                    title          = yaml["title"]?.takeIf { it.isNotBlank() }?.take(200)       ?: existing.title,
+                    artist         = yaml["artist"]?.takeIf { it.isNotBlank() }?.take(200)      ?: existing.artist,
+                    displayKey     = yaml["display_key"]?.takeIf { it.isNotBlank() }?.take(20)  ?: existing.displayKey,
+                    originalKey    = yaml["original_key"]?.takeIf { it.isNotBlank() }?.take(20) ?: existing.originalKey,
+                    isLeadGuitar   = yaml["is_lead_guitar"]?.lowercase() == "true",
+                    markdownBody   = trimmedBody,
+                    isDirty        = false,
+                    lastSyncedHash = hash,
+                    lastSyncedAt   = now,
+                    localUpdatedAt = now,
+                    syncStatus     = SyncStatus.SYNCED,
+                )
             )
-        )
-        return true
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "pullSongFromCloud($songId) update failed — possible duplicate title/artist: ${e.message}")
+            false
+        }
     }
 
     override suspend fun markConflict(songId: String) {
         val song = songDao.getById(songId) ?: return
-        songDao.update(song.copy(syncStatus = SyncStatus.CONFLICT))
+        try {
+            songDao.update(song.copy(syncStatus = SyncStatus.CONFLICT))
+        } catch (e: Exception) {
+            Log.w(TAG, "markConflict($songId) update failed: ${e.message}")
+        }
     }
 
     override fun invalidateRemoteCache() = syncProvider.invalidateCache()
@@ -514,5 +535,9 @@ class SongRepositoryImpl(
             key to value
         }.toMap()
         return map to body
+    }
+
+    companion object {
+        private const val TAG = "SongRepository"
     }
 }

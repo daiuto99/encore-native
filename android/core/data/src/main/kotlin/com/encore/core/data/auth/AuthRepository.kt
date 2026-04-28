@@ -69,7 +69,11 @@ class AuthRepositoryImpl(
     private val userPrefs: UserPreferencesRepository
 ) : AuthRepository {
 
-    private val credentialManager = CredentialManager.create(applicationContext)
+    // Deferred to first use — CredentialManager.create() makes a synchronous IPC to
+    // Play Services on construction, which blocks the main thread at startup.
+    private val credentialManager: CredentialManager by lazy {
+        CredentialManager.create(applicationContext)
+    }
     private val repositoryScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     // Starts as Loading — held there until the DataStore read below completes,

@@ -93,6 +93,7 @@ class SyncViewModel(
         val songs = songRepository.getAllSongsOnce()
         for (song in songs) {
             if (song.lastSyncedHash == null) continue
+            if (song.syncStatus == SyncStatus.CONFLICT) continue // skip — needs manual resolution
             val status = songRepository.checkSyncStatus(song.id)
             when (status) {
                 is ContentSyncStatus.RemoteAhead -> songRepository.pullSongFromCloud(userId, song.id)
@@ -104,6 +105,13 @@ class SyncViewModel(
     }
 
     private suspend fun checkAndApplyWebSetChanges(userId: String) {
+        // If a show was just manually loaded, skip this sync pass entirely.
+        // stampAllSetsAsTablet will have written source:"tablet" to the numbered
+        // files, but GCS propagation may still be in flight — the guard covers that.
+        if (ShowLoadGuard.isSuppressed()) {
+            Log.d(TAG, "checkAndApplyWebSetChanges — suppressed (show recently loaded)")
+            return
+        }
         val setlistId = try {
             setlistRepository.getOrCreateSetByNumber(1).setlistId
         } catch (e: Exception) {
@@ -115,12 +123,16 @@ class SyncViewModel(
             try {
                 val json = syncProvider?.downloadSetData(userId, set.number) ?: continue
                 val obj = JSONObject(json)
-                if (obj.optString("source") != "web") continue
+                val source = obj.optString("source")
+                Log.d(TAG, "Set ${set.number}: source=$source updatedAt=${obj.optLong("updatedAt")} songCount=${obj.optJSONArray("songIds")?.length() ?: 0}")
+                if (source != "web") continue
                 val updatedAt = obj.optLong("updatedAt", 0L)
                 if (updatedAt <= (lastSeenSetUpdatedAt[set.number] ?: 0L)) continue
                 val arr = obj.getJSONArray("songIds")
-                val songIds = (0 until arr.length()).map { arr.getString(it) }
-                    .filter { id -> songRepository.getSongById(id) != null }
+                val rawIds = (0 until arr.length()).map { arr.getString(it) }
+                val normalizedIds = rawIds.map { id -> if (id.contains('/')) id.substringAfterLast('/').removeSuffix(".md") else id }
+                val songIds = normalizedIds.filter { id -> songRepository.getSongById(id) != null }
+                Log.d(TAG, "Set ${set.number}: raw=${rawIds.size} normalized=${normalizedIds.size} matched=${songIds.size} first=${rawIds.firstOrNull()}")
                 setlistRepository.replaceSetContents(set.id, songIds)
                 lastSeenSetUpdatedAt[set.number] = updatedAt
                 Log.d(TAG, "Applied web set changes for Set ${set.number}: ${songIds.size} songs")
@@ -154,6 +166,7 @@ class SyncViewModel(
                         consecutiveUploadFailures++
                         if (consecutiveUploadFailures >= 2) {
                             _syncHudState.value = null
+                            checkAndApplyWebSetChanges(userId)
                             return@launch
                         }
                     }
@@ -171,6 +184,10 @@ class SyncViewModel(
             val now = System.currentTimeMillis()
             userPrefs.saveLastSyncTimestamp(now)
             _lastSyncTimestamp.value = now
+
+            // Pull any set changes saved from the web app
+            checkAndApplyWebSetChanges(userId)
+
             _syncHudState.value = SyncHudState.Complete
             delay(3000)
             _syncHudState.value = null

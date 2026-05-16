@@ -91,6 +91,15 @@ interface SyncProvider : EncoreApiService {
      */
     suspend fun deleteSong(userId: String, songId: String)
 
+    /** List all set file names (without .json) under `{userId}/sets/`. */
+    suspend fun listSetFiles(userId: String): List<String>
+
+    /** Download a named set from `{userId}/sets/{setName}.json`. Returns null if not found. */
+    suspend fun downloadNamedSet(userId: String, setName: String): String?
+
+    /** Upload a named set to `{userId}/sets/{setName}.json`. */
+    suspend fun uploadNamedSet(userId: String, setName: String, content: String)
+
     /**
      * Invalidate any in-memory manifest cache so the next [getRemoteHash] call
      * fetches fresh data from the server.

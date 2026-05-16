@@ -131,7 +131,7 @@ interface SongRepository {
      * @param setNumber Set number (1-4)
      * @return Flow of songs ordered by set position
      */
-    fun getSongsInSetOrdered(setNumber: Int): Flow<List<SongEntity>>
+    fun getSongsInSetOrdered(setId: String): Flow<List<SongEntity>>
 
     /**
      * Get all songs as a one-shot list for audit scanning.
@@ -345,8 +345,8 @@ class SongRepositoryImpl(
 
     override suspend fun getSongsWithoutKey(): List<SongEntity> = songDao.getSongsWithoutKey()
 
-    override fun getSongsInSetOrdered(setNumber: Int): Flow<List<SongEntity>> =
-        songDao.getSongsInSetOrdered(setNumber)
+    override fun getSongsInSetOrdered(setId: String): Flow<List<SongEntity>> =
+        songDao.getSongsInSetOrdered(setId)
 
     override suspend fun getAllSongsOnce(): List<SongEntity> = songDao.getAllSongsOnce()
 
@@ -482,6 +482,8 @@ class SongRepositoryImpl(
             true
         } catch (e: Exception) {
             Log.w(TAG, "pullSongFromCloud($songId) update failed — possible duplicate title/artist: ${e.message}")
+            // Mark as CONFLICT so the retry loop stops and the user can resolve manually.
+            try { songDao.update(existing.copy(syncStatus = SyncStatus.CONFLICT)) } catch (_: Exception) {}
             false
         }
     }

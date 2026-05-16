@@ -52,15 +52,15 @@ class LibraryViewModel(
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
-    private val _setFilter = MutableStateFlow<Int?>(null)
-    val setFilter: StateFlow<Int?> = _setFilter.asStateFlow()
+    private val _setFilter = MutableStateFlow<String?>(null)
+    val setFilter: StateFlow<String?> = _setFilter.asStateFlow()
 
     private val _sortOrder = MutableStateFlow(SortOrder.TITLE)
     val sortOrder: StateFlow<SortOrder> = _sortOrder.asStateFlow()
 
     fun updateSearchQuery(query: String) { _searchQuery.value = query }
     fun clearSearch() { _searchQuery.value = "" }
-    fun updateSetFilter(setNumber: Int?) { _setFilter.value = setNumber }
+    fun updateSetFilter(setId: String?) { _setFilter.value = setId }
     fun toggleSort() {
         _sortOrder.value = if (_sortOrder.value == SortOrder.TITLE) SortOrder.ARTIST else SortOrder.TITLE
     }

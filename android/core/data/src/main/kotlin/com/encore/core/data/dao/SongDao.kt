@@ -168,23 +168,22 @@ interface SongDao {
      * Only songs that have actually been scanned AND have errors are included
      * (null validation_errors = unscanned or clean).
      */
-    @Query("SELECT * FROM songs WHERE validation_errors IS NOT NULL ORDER BY title ASC")
+    @Query("SELECT * FROM songs WHERE validation_errors IS NOT NULL OR sync_status = 'CONFLICT' ORDER BY title ASC")
     fun getInvalidSongs(): Flow<List<SongEntity>>
 
     /**
      * Get songs in a specific set ordered by their position within the set.
+     * Filters by set UUID (not number) to avoid matching sets from other setlists.
      * Used when a set filter is active and no search text is present.
      *
-     * @param setNumber Set number (1-4)
+     * @param setId Set UUID
      * @return Flow of songs ordered by position
      */
     @Query("""
         SELECT songs.* FROM songs
         INNER JOIN set_entries ON songs.id = set_entries.song_id
-        INNER JOIN sets ON set_entries.set_id = sets.id
-        WHERE sets.number = :setNumber
-        GROUP BY songs.id
-        ORDER BY MIN(set_entries.position) ASC
+        WHERE set_entries.set_id = :setId
+        ORDER BY set_entries.position ASC
     """)
-    fun getSongsInSetOrdered(setNumber: Int): Flow<List<SongEntity>>
+    fun getSongsInSetOrdered(setId: String): Flow<List<SongEntity>>
 }

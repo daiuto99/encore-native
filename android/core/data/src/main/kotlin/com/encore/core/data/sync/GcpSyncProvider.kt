@@ -461,6 +461,44 @@ class GcpSyncProvider(
     private fun songObjectPath(userId: String, songId: String) = "$userId/songs/$songId.md"
     private fun lockObjectPath(songId: String) = "locks/$songId.lock"
     private fun setObjectPath(userId: String, setNumber: Int) = "$userId/sets/set_$setNumber.json"
+    private fun namedSetPath(userId: String, setName: String) = "$userId/sets/$setName.json"
+
+    override suspend fun listSetFiles(userId: String): List<String> = withContext(Dispatchers.IO) {
+        try {
+            val tok = token()
+            val prefix = "$userId/sets/"
+            val encodedPrefix = URLEncoder.encode(prefix, "UTF-8").replace("+", "%20")
+            val url = "$BASE_URL/b/$BUCKET/o?prefix=$encodedPrefix"
+            val request = Request.Builder().url(url).addHeader("Authorization", "Bearer $tok").get().build()
+            http.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext emptyList()
+                val body = response.body?.string() ?: return@withContext emptyList()
+                val items = org.json.JSONObject(body).optJSONArray("items") ?: return@withContext emptyList()
+                (0 until items.length())
+                    .map { items.getJSONObject(it).getString("name") }
+                    .filter { it.endsWith(".json", ignoreCase = true) }
+                    .map { it.removePrefix(prefix).removeSuffix(".json") }
+                    .filter { it.isNotBlank() }
+                    .sorted()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "listSetFiles failed: ${e.message}")
+            emptyList()
+        }
+    }
+
+    override suspend fun downloadNamedSet(userId: String, setName: String): String? =
+        withContext(Dispatchers.IO) {
+            try { readObject(token(), namedSetPath(userId, setName)) }
+            catch (e: Exception) { Log.e(TAG, "downloadNamedSet($setName) failed: ${e.message}"); null }
+        }
+
+    override suspend fun uploadNamedSet(userId: String, setName: String, content: String) {
+        withContext(Dispatchers.IO) {
+            try { uploadObject(token(), namedSetPath(userId, setName), content, "application/json") }
+            catch (e: Exception) { Log.e(TAG, "uploadNamedSet($setName) failed: ${e.message}"); throw e }
+        }
+    }
 
     override suspend fun uploadSetData(userId: String, setNumber: Int, content: String) {
         withContext(Dispatchers.IO) {

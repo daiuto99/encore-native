@@ -120,6 +120,9 @@ object FakeSyncProvider : SyncProvider {
 
     /** No-op — fake backend has no cloud objects to delete. */
     override suspend fun deleteSong(userId: String, songId: String) = Unit
+    override suspend fun listSetFiles(userId: String): List<String> = emptyList()
+    override suspend fun downloadNamedSet(userId: String, setName: String): String? = null
+    override suspend fun uploadNamedSet(userId: String, setName: String, content: String) = Unit
 
     /** No-op — fake backend has no manifest cache to invalidate. */
     override fun invalidateCache() = Unit

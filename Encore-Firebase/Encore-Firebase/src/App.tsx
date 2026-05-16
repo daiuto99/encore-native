@@ -68,23 +68,32 @@ type SongRecord = {
   metadata: SongMeta;
 };
 
-type SetSong = {
-  title: string;
-  artist: string;
-  displayKey?: string;
-  markdownBody: string;
-};
-
 type Block =
   | { type: 'section'; label: string }
   | { type: 'content'; text: string };
 
 type HealthItem = { song: SongRecord; issues: string[] };
 
+type ImportRow = {
+  set: number;
+  csvTitle: string;
+  csvArtist: string;
+  matched: SongRecord | null;
+  confidence: 'high' | 'fuzzy' | 'none';
+  override: string; // song path, or '' to skip
+};
+
 type FsDirectoryHandle = FileSystemDirectoryHandle & { values(): AsyncIterable<FileSystemHandle> };
 type FsFileHandle = FileSystemFileHandle;
 
 // ── Cover palette ─────────────────────────────────────────────────────────────
+
+const SET_BADGE_COLORS: Record<number, { bg: string; fg: string }> = {
+  1: { bg: 'rgba(59,130,246,0.13)',  fg: '#2563EB' },
+  2: { bg: 'rgba(16,185,129,0.13)',  fg: '#059669' },
+  3: { bg: 'rgba(249,115,22,0.13)',  fg: '#EA580C' },
+  4: { bg: 'rgba(139,92,246,0.13)',  fg: '#7C3AED' },
+};
 
 const SET_COVER_PALETTE = [
   { bg: '#F87171', fg: '#7F1D1D' },
@@ -321,10 +330,6 @@ function buildYaml(meta: SongMeta) {
 
 function serializeSong(record: SongRecord) {
   return `${buildYaml(record.metadata)}\n${normalizeMarkdownBody(record.body)}\n`;
-}
-
-function sanitizeSetFileName(name: string) {
-  return (name || 'Imported Set').replace(/[/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim();
 }
 
 function getInitials(name: string, email?: string | null) {
@@ -746,6 +751,94 @@ async function callChordSidekick(userMessage: string): Promise<string> {
   return data.content.find((b) => b.type === 'text')?.text ?? '';
 }
 
+// ── CSV import + song matching ────────────────────────────────────────────────
+
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  for (const line of text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')) {
+    if (!line.trim()) continue;
+    const fields: string[] = [];
+    let field = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { if (inQ && line[i + 1] === '"') { field += '"'; i++; } else inQ = !inQ; }
+      else if (ch === ',' && !inQ) { fields.push(field.trim()); field = ''; }
+      else field += ch;
+    }
+    fields.push(field.trim());
+    rows.push(fields);
+  }
+  return rows;
+}
+
+/** Returns 1–4 if header looks like a set column name, null otherwise. */
+function headerToSetNumber(header: string): number | null {
+  const h = header.toLowerCase().trim();
+  if (/set\s*(one|1|i)\b/.test(h))           return 1;
+  if (/set\s*(two|2|ii)\b/.test(h))          return 2;
+  if (/set\s*(three|3|iii)\b/.test(h))       return 3;
+  if (/set\s*(four|4|iv)\b/.test(h))         return 4;
+  if (/extra|encore|bonus|late/.test(h))     return 4;
+  return null;
+}
+
+function detectCsvCols(headers: string[]): { setCol: number; titleCol: number; artistCol: number } {
+  const h = headers.map((s) => s.toLowerCase().replace(/[^a-z]/g, ''));
+  return {
+    setCol:    h.findIndex((c) => /^(set|setnumber|setnum|num)$/.test(c)),
+    titleCol:  h.findIndex((c) => /title|song|name/.test(c)),
+    artistCol: h.findIndex((c) => /artist|band|performer/.test(c)),
+  };
+}
+
+function normStr(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\b(the|a|an)\b\s*/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function wordOverlap(a: string, b: string): number {
+  const words = (s: string) => new Set(s.split(' ').filter((w) => w.length > 2));
+  const wa = words(a), wb = words(b);
+  if (!wa.size || !wb.size) return 0;
+  let n = 0; wa.forEach((w) => { if (wb.has(w)) n++; });
+  return n / Math.max(wa.size, wb.size);
+}
+
+function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) => Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+  return dp[m][n];
+}
+
+function matchSong(title: string, artist: string, songs: SongRecord[]): { song: SongRecord; confidence: 'high' | 'fuzzy'; score: number } | null {
+  const ni = normStr(title);
+  const na = artist.toLowerCase().trim();
+  let best: { song: SongRecord; confidence: 'high' | 'fuzzy'; score: number } | null = null;
+  for (const song of songs) {
+    const nt = normStr(song.metadata.title);
+    const nsa = song.metadata.artist.toLowerCase().trim();
+    let score = 0;
+    if (ni === nt)                                                          score = 100;
+    else if (nt.includes(ni) || ni.includes(nt))                           score = 85;
+    else {
+      const ov = wordOverlap(ni, nt);
+      if (ov >= 0.6)                                                        score = 60 + ov * 20;
+      else {
+        const d = levenshtein(ni, nt), maxL = Math.max(ni.length, nt.length);
+        if (d <= 2)                                                         score = 55 - d * 5;
+        else if (maxL > 0 && d / maxL < 0.3)                               score = 40;
+      }
+    }
+    if (score === 0) continue;
+    if (na && nsa && (nsa.includes(na) || na.includes(nsa))) score += 10;
+    const confidence: 'high' | 'fuzzy' = score >= 80 ? 'high' : 'fuzzy';
+    if (!best || score > best.score) best = { song, confidence, score };
+  }
+  return best;
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function SongCoverTile({ path, title }: { path: string; title: string }) {
@@ -885,20 +978,24 @@ export default function App() {
   const [createCapo, setCreateCapo]     = useState('');
   const [createNotes, setCreateNotes]   = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [setName, setSetName]           = useState('Friday Night');
-  const [setSongIds, setSetSongIds]     = useState<string[]>([]);
+  const [liveSets, setLiveSets]         = useState<Record<number, string[]>>({ 1: [], 2: [], 3: [], 4: [] });
+  const [activeSetNumber, setActiveSetNumber] = useState(1);
+  const [setSaveStatus, setSetSaveStatus] = useState('');
+  const [importRows, setImportRows]     = useState<ImportRow[]>([]);
+  const [showImport, setShowImport]     = useState(false);
+  const importRef = useRef<HTMLInputElement>(null);
+  const [currentShowName, setCurrentShowName] = useState('');
+  const [showCloudSetPicker, setShowCloudSetPicker] = useState(false);
+  const [cloudSetFiles, setCloudSetFiles] = useState<{name: string; path: string}[]>([]);
+  const [cloudSetFilesLoading, setCloudSetFilesLoading] = useState(false);
+  const [showSaveShowModal, setShowSaveShowModal] = useState(false);
+  const [saveShowNameInput, setSaveShowNameInput] = useState('');
 
   const dndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  function handleSetDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    if (over && active.id !== over.id) {
-      setSetSongIds((ids) => arrayMove(ids, ids.indexOf(active.id as string), ids.indexOf(over.id as string)));
-    }
-  }
 
   const [libraryHandle, setLibraryHandle] = useState<FsDirectoryHandle | null>(null);
   const [fileHandles, setFileHandles]     = useState<Record<string, FsFileHandle>>({});
@@ -1008,10 +1105,16 @@ export default function App() {
     });
   }, [songs, searchQuery, sortBy]);
 
-  const activeSetSongs = useMemo(
-    () => setSongIds.map((p) => songs.find((s) => s.path === p)).filter((s): s is SongRecord => Boolean(s)),
-    [setSongIds, songs],
-  );
+  const songSetMap = useMemo(() => {
+    const map: Record<string, number[]> = {};
+    ([1, 2, 3, 4] as const).forEach((n) => {
+      (liveSets[n] ?? []).forEach((path) => {
+        if (!map[path]) map[path] = [];
+        map[path].push(n);
+      });
+    });
+    return map;
+  }, [liveSets]);
 
   const blocks = useMemo(() => parseBlocks(draft), [draft]);
 
@@ -1098,6 +1201,15 @@ export default function App() {
       loaded.sort((a, b) => a.metadata.title.toLowerCase().localeCompare(b.metadata.title.toLowerCase()));
       setSongs(loaded);
       setSelectedPath((cur) => cur || loaded[0]?.path || '');
+      // Load sets 1–4 from GCS
+      const sets: Record<number, string[]> = { 1: [], 2: [], 3: [], 4: [] };
+      await Promise.all([1, 2, 3, 4].map(async (n) => {
+        try {
+          const data = await CloudLibraryService.loadSetFile(user.email, n, gcsToken);
+          if (data?.songIds) sets[n] = data.songIds;
+        } catch { /* set doesn't exist yet */ }
+      }));
+      setLiveSets(sets);
       setStatus(`${loaded.length} songs loaded.`);
     } catch (error) {
       setSongs([]);
@@ -1255,35 +1367,165 @@ export default function App() {
     }
   }
 
-  async function exportSet() {
-    const setData: SetSong[] = activeSetSongs.map((s) => ({
-      title: s.metadata.title || inferTitleArtistFromPath(s.path).title,
-      artist: s.metadata.artist || inferTitleArtistFromPath(s.path).artist || 'Unknown Artist',
-      ...(s.metadata.display_key ? { displayKey: s.metadata.display_key } : {}),
-      markdownBody: normalizeMarkdownBody(s.body),
-    }));
-    const payload  = JSON.stringify({ version: 1, name: setName || 'Imported Set', songs: setData }, null, 2);
-    const fileName = `${sanitizeSetFileName(setName || 'Imported Set')}.encore.json`;
-    setIsBusy(true);
-    setStatus('Exporting set…');
-    try {
-      if (mode === 'cloud') {
-        const savedPath = await CloudLibraryService.uploadSetExport(user!.email!, fileName, payload, gcsToken!);
-        setStatus(`Exported to cloud: ${savedPath}`);
-      } else {
-        if (!libraryHandle) throw new Error('Choose a local folder first.');
-        const setsHandle = await libraryHandle.getDirectoryHandle('sets', { create: true });
-        const fh = await setsHandle.getFileHandle(fileName, { create: true });
-        const writable = await fh.createWritable();
-        await writable.write(payload);
-        await writable.close();
-        setStatus(`Exported: sets/${fileName}`);
-      }
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Export failed.');
-    } finally {
-      setIsBusy(false);
+  async function saveSetToCloud(setNumber: number, ids: string[]) {
+    if (mode !== 'cloud' || !user?.email || !gcsToken) return;
+    if (!currentShowName) {
+      // No show loaded — save to numbered fallback silently
+      try { await CloudLibraryService.saveSetFile(user.email, setNumber, ids, gcsToken); } catch { /* ignore */ }
+      return;
     }
+    // Auto-save to the named show file AND the numbered set_N.json file.
+    // The numbered file keeps Android's background sync in sync so it
+    // doesn't restore stale data after a show is loaded on the tablet.
+    const allSets = { ...liveSets, [setNumber]: ids };
+    try {
+      await Promise.all([
+        CloudLibraryService.saveShowFile(user.email, currentShowName, allSets, gcsToken),
+        CloudLibraryService.saveSetFile(user.email, setNumber, ids, gcsToken),
+      ]);
+      setSetSaveStatus('✓ Saved');
+      setTimeout(() => setSetSaveStatus(''), 2000);
+    } catch {
+      setSetSaveStatus('Save failed');
+    }
+  }
+
+  async function openLoadShowPicker() {
+    if (mode !== 'cloud' || !user?.email || !gcsToken) return;
+    setShowCloudSetPicker(true);
+    setCloudSetFilesLoading(true);
+    try {
+      const files = await CloudLibraryService.listSetFiles(user.email, gcsToken);
+      setCloudSetFiles(files);
+    } catch {
+      setCloudSetFiles([]);
+    } finally {
+      setCloudSetFilesLoading(false);
+    }
+  }
+
+  async function handlePickShow(showName: string) {
+    if (!user?.email || !gcsToken) return;
+    setShowCloudSetPicker(false);
+    try {
+      const allSets = await CloudLibraryService.loadShowFile(user.email, showName, gcsToken);
+      if (allSets) {
+        setLiveSets((prev) => ({ ...prev, ...allSets }));
+        setCurrentShowName(showName);
+        setSetSaveStatus(`Loaded "${showName}"`);
+        setTimeout(() => setSetSaveStatus(''), 2500);
+      } else {
+        setSetSaveStatus('Could not load show');
+      }
+    } catch {
+      setSetSaveStatus('Load failed');
+    }
+  }
+
+  async function handleSaveShow(name: string) {
+    if (!user?.email || !gcsToken || !name.trim()) return;
+    setShowSaveShowModal(false);
+    const trimmed = name.trim();
+    try {
+      // Save the named show file (all 4 sets in one JSON)
+      await CloudLibraryService.saveShowFile(user.email, trimmed, liveSets, gcsToken);
+      // Also update the numbered set_N.json files so the Android sync
+      // sees the same data and doesn't overwrite the loaded show
+      await Promise.all(
+        ([1, 2, 3, 4] as const).map((n) =>
+          CloudLibraryService.saveSetFile(user.email, n, liveSets[n] ?? [], gcsToken)
+        )
+      );
+      setCurrentShowName(trimmed);
+      setSetSaveStatus(`Saved "${trimmed}"`);
+      setTimeout(() => setSetSaveStatus(''), 2500);
+    } catch {
+      setSetSaveStatus('Save failed');
+    }
+  }
+
+  function toggleSongInSet(songPath: string) {
+    const current = liveSets[activeSetNumber] ?? [];
+    const newIds = current.includes(songPath)
+      ? current.filter((id) => id !== songPath)
+      : [...current, songPath];
+    setLiveSets((prev) => ({ ...prev, [activeSetNumber]: newIds }));
+    void saveSetToCloud(activeSetNumber, newIds);
+  }
+
+  function removeSongFromSet(songPath: string, setNumber: number) {
+    const newIds = (liveSets[setNumber] ?? []).filter((id) => id !== songPath);
+    setLiveSets((prev) => ({ ...prev, [setNumber]: newIds }));
+    void saveSetToCloud(setNumber, newIds);
+  }
+
+  function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const raw = parseCsv(ev.target?.result as string);
+      if (!raw.length) return;
+      const results: ImportRow[] = [];
+
+      // ── Detect format ──────────────────────────────────────────────────────
+      const firstRow = raw[0];
+      const colSetNums = firstRow.map(headerToSetNumber);
+      const isColumnar = colSetNums.some((n) => n !== null);
+
+      if (isColumnar) {
+        // Each column is a set — songs listed vertically per column
+        for (let rowIdx = 1; rowIdx < raw.length; rowIdx++) {
+          const row = raw[rowIdx];
+          for (let colIdx = 0; colIdx < firstRow.length; colIdx++) {
+            const setNum = colSetNums[colIdx];
+            if (!setNum) continue;
+            const title = row[colIdx]?.trim();
+            if (!title) continue;
+            const m = matchSong(title, '', songs);
+            results.push({ set: setNum, csvTitle: title, csvArtist: '',
+              matched: m?.song ?? null, confidence: m ? m.confidence : 'none',
+              override: m?.song?.path ?? '' });
+          }
+        }
+      } else {
+        // Row-based format: Set, Title, Artist
+        const hasHeader = firstRow.some((c) => /set|title|song|artist|name/i.test(c));
+        const cols = hasHeader ? detectCsvCols(firstRow) : { setCol: 0, titleCol: 1, artistCol: 2 };
+        const data = hasHeader ? raw.slice(1) : raw;
+        for (const row of data) {
+          const setNum = cols.setCol >= 0 ? parseInt(row[cols.setCol] ?? '', 10) : NaN;
+          const title  = cols.titleCol >= 0 ? (row[cols.titleCol] ?? '').trim() : (row[1] ?? '').trim();
+          const artist = cols.artistCol >= 0 ? (row[cols.artistCol] ?? '').trim() : (row[2] ?? '').trim();
+          if (!title || isNaN(setNum) || setNum < 1 || setNum > 4) continue;
+          const m = matchSong(title, artist, songs);
+          results.push({ set: setNum, csvTitle: title, csvArtist: artist,
+            matched: m?.song ?? null, confidence: m ? m.confidence : 'none',
+            override: m?.song?.path ?? '' });
+        }
+      }
+
+      setImportRows(results);
+      setShowImport(true);
+      if (importRef.current) importRef.current.value = '';
+    };
+    reader.readAsText(file);
+  }
+
+  function commitImport() {
+    // Build each set in row order, deduplicating
+    const newSets: Record<number, string[]> = { 1: [], 2: [], 3: [], 4: [] };
+    for (const row of importRows) {
+      if (!row.override || row.set < 1 || row.set > 4) continue;
+      if (!newSets[row.set].includes(row.override)) newSets[row.set].push(row.override);
+    }
+    // Only replace sets that have imported songs; leave empty sets unchanged
+    const merged = { ...liveSets };
+    ([1, 2, 3, 4] as const).forEach((n) => { if (newSets[n].length > 0) merged[n] = newSets[n]; });
+    setLiveSets(merged);
+    ([1, 2, 3, 4] as const).forEach((n) => { if (newSets[n].length > 0) void saveSetToCloud(n, merged[n]); });
+    setShowImport(false);
+    setImportRows([]);
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -1390,7 +1632,7 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden">
 
         {/* ── Sidebar ── */}
-        <aside className="flex w-80 shrink-0 flex-col border-r border-black/[0.08] bg-white dark:border-white/[0.08] dark:bg-[#1C1C1E]">
+        <aside className="flex w-[30%] shrink-0 flex-col border-r border-black/[0.08] bg-white dark:border-white/[0.08] dark:bg-[#1C1C1E]">
 
           <div className="shrink-0 space-y-2 border-b border-black/[0.06] p-3 dark:border-white/[0.06]">
             {mode === 'cloud' ? (
@@ -1513,53 +1755,72 @@ export default function App() {
               </div>
             )}
             {filteredSongs.map((song) => {
-              const isSelected = song.path === selectedPath;
-              const isUuid     = /^[0-9a-f-]{36}$/i.test(song.metadata.title);
-              const issueCount = healthMap[song.path] || 0;
+              const isSelected   = song.path === selectedPath;
+              const isUuid       = /^[0-9a-f-]{36}$/i.test(song.metadata.title);
+              const issueCount   = healthMap[song.path] || 0;
+              const songSets     = songSetMap[song.path] ?? [];
+              const inActiveSet  = songSets.includes(activeSetNumber);
               return (
-                <div key={song.path} className="group relative mb-0.5">
+                <div key={song.path} className="group mb-0.5 flex items-stretch gap-0.5">
                   <button
                     onClick={() => { setSelectedPath(song.path); setActiveTab('editor'); }}
-                    className={`w-full rounded-xl px-2.5 py-2 text-left transition ${
+                    className={`min-w-0 flex-1 rounded-xl px-2.5 py-2 text-left transition ${
                       isSelected
                         ? 'bg-blue-50 ring-1 ring-blue-300/50 dark:bg-blue-500/10 dark:ring-blue-500/30'
                         : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]'
                     }`}
                   >
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-2">
                       <SongCoverTile path={song.path} title={song.metadata.title} />
-                      <div className="min-w-0 flex-1 pr-5">
-                        <div className="flex items-start justify-between gap-1">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1">
                           <span className={`truncate text-sm font-medium leading-tight ${
                             isUuid ? 'font-mono text-xs text-[#3C3C43]/40 dark:text-white/30'
                                  : isSelected ? 'text-blue-700 dark:text-white' : 'text-[#1C1C1E] dark:text-white'
                           }`}>
                             {song.metadata.title || 'Untitled'}
                           </span>
-                          {issueCount > 0 && <AlertCircle size={12} className="mt-0.5 shrink-0 text-amber-500 dark:text-amber-400" />}
+                          {issueCount > 0 && <AlertCircle size={11} className="shrink-0 text-amber-500" />}
                         </div>
                         {!isUuid && (
-                          <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                          <div className="mt-0.5 flex flex-wrap items-center gap-1">
                             <span className="text-xs text-[#3C3C43]/50 dark:text-white/40">
                               {song.metadata.artist || <span className="italic text-[#3C3C43]/30 dark:text-white/20">No artist</span>}
                             </span>
                             {song.metadata.display_key && (
-                              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
+                              <span className="rounded bg-amber-100 px-1 py-px text-[10px] font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
                                 {song.metadata.display_key}
                               </span>
                             )}
-                            {song.metadata.is_lead_guitar && (
-                              <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">Lead</span>
-                            )}
+                            {songSets.map((n) => (
+                              <span key={n} style={{ background: SET_BADGE_COLORS[n].bg, color: SET_BADGE_COLORS[n].fg }}
+                                className="rounded px-1 py-px text-[10px] font-bold">
+                                S{n}
+                              </span>
+                            ))}
                           </div>
                         )}
                       </div>
                     </div>
                   </button>
+
+                  {/* + add to active set */}
+                  {!inActiveSet ? (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleSongInSet(song.path); }}
+                      title={`Add to Set ${activeSetNumber}`}
+                      className="flex shrink-0 items-center rounded-lg px-1.5 text-lg font-light leading-none text-[#3C3C43]/20 opacity-0 transition hover:bg-blue-50 hover:text-blue-600 group-hover:opacity-100 dark:text-white/15 dark:hover:bg-blue-500/10 dark:hover:text-blue-400">
+                      +
+                    </button>
+                  ) : (
+                    <div className="flex shrink-0 items-center px-1.5 text-xs text-emerald-500/60 dark:text-emerald-400/40">✓</div>
+                  )}
+
+                  {/* Quick edit */}
                   <button
                     onClick={(e) => { e.stopPropagation(); openQuickEdit(song); }}
                     title="Quick edit"
-                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-[#3C3C43]/30 opacity-0 transition hover:bg-black/[0.06] hover:text-[#3C3C43]/70 group-hover:opacity-100 dark:text-white/20 dark:hover:bg-white/10 dark:hover:text-white/60">
+                    className="flex shrink-0 items-center rounded-md px-1 text-[#3C3C43]/20 opacity-0 transition hover:bg-black/[0.06] hover:text-[#3C3C43]/70 group-hover:opacity-100 dark:text-white/15 dark:hover:bg-white/10 dark:hover:text-white/60">
                     ✏
                   </button>
                 </div>
@@ -1614,7 +1875,7 @@ export default function App() {
           {/* Tab bar */}
           <div className="shrink-0 flex items-center justify-between border-b border-black/[0.08] bg-white px-4 dark:border-white/[0.08] dark:bg-[#0A0A0B]">
             <div className="flex">
-              {([['editor','Song Editor'],['setlist','Setlist Architect'],['health','Library Health']] as const).map(([tab, label]) => (
+              {([['editor','Song Editor'],['setlist','Sets'],['health','Library Health']] as const).map(([tab, label]) => (
                 <button key={tab} onClick={() => setActiveTab(tab)}
                   className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-medium transition ${
                     activeTab === tab
@@ -1630,11 +1891,8 @@ export default function App() {
                 </button>
               ))}
             </div>
-            {activeTab === 'setlist' && (
-              <button onClick={exportSet} disabled={setSongIds.length === 0 || (mode === 'cloud' && !cloudReady)}
-                className="flex items-center gap-2 rounded-lg bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-400 disabled:opacity-30 transition">
-                <Upload size={12} /> Export set
-              </button>
+            {activeTab === 'setlist' && setSaveStatus && (
+              <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">{setSaveStatus}</span>
             )}
           </div>
 
@@ -1712,75 +1970,141 @@ export default function App() {
             </div>
           )}
 
-          {/* ── Setlist tab ── */}
+          {/* ── Sets tab ── */}
           {activeTab === 'setlist' && (
-            <div className="flex flex-1 flex-col overflow-hidden p-5">
-              <div className="mb-4 flex items-center gap-4">
-                <label className="flex items-center gap-2 text-sm font-medium text-[#1C1C1E]/70 dark:text-white/70">
-                  Set name
-                  <input value={setName} onChange={(e) => setSetName(e.target.value)}
-                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-blue-300 dark:border-white/10 dark:bg-white/5 dark:text-white" />
-                </label>
-                <span className="text-xs text-[#3C3C43]/40 dark:text-white/30">
-                  {activeSetSongs.length} song{activeSetSongs.length !== 1 ? 's' : ''} in set
-                </span>
-              </div>
-              <div className="grid flex-1 grid-cols-2 gap-4 overflow-hidden">
-                {[
-                  { header: <><Music2 size={14} className="text-[#3C3C43]/40 dark:text-white/40" /> All songs</>, count: songs.length, content: (
-                    songs.map((song) => {
-                      const inSet = setSongIds.includes(song.path);
-                      return (
-                        <button key={song.path}
-                          onClick={() => setSetSongIds((cur) => inSet ? cur.filter((id) => id !== song.path) : [...cur, song.path])}
-                          className={`mb-0.5 w-full rounded-xl px-3 py-2 text-left text-sm transition ${
-                            inSet ? 'bg-emerald-50 ring-1 ring-emerald-300/60 dark:bg-emerald-500/10 dark:ring-emerald-500/20'
-                                  : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04]'
-                          }`}>
-                          <div className="flex items-center gap-2.5">
-                            <SongCoverTile path={song.path} title={song.metadata.title} />
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <span className={`truncate font-medium ${inSet ? 'text-emerald-700 dark:text-emerald-400' : 'text-[#1C1C1E] dark:text-white'}`}>
-                                  {song.metadata.title || 'Untitled'}
-                                </span>
-                                {song.metadata.display_key && (
-                                  <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
-                                    {song.metadata.display_key}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-xs text-[#3C3C43]/45 dark:text-white/40">{song.metadata.artist || 'Unknown artist'}</div>
-                            </div>
-                          </div>
+            <div className="flex flex-1 flex-col min-h-0">
+              {/* Active set selector */}
+              <div className="shrink-0 flex items-center gap-3 border-b border-black/[0.08] bg-[#F9F9FB] px-4 py-2.5 dark:border-white/[0.08] dark:bg-[#0A0A0B]">
+                <span className="text-xs font-medium text-[#3C3C43]/40 dark:text-white/30">+ adds to:</span>
+                <div className="flex gap-1">
+                  {[1, 2, 3, 4].map((n) => (
+                    <button
+                      key={n}
+                      onClick={() => setActiveSetNumber(n)}
+                      style={activeSetNumber === n ? { background: SET_BADGE_COLORS[n].bg, color: SET_BADGE_COLORS[n].fg, outline: `1.5px solid ${SET_BADGE_COLORS[n].fg}50` } : {}}
+                      className={`rounded-full px-3.5 py-1 text-xs font-semibold transition ${
+                        activeSetNumber === n
+                          ? 'outline-offset-0'
+                          : 'text-[#3C3C43]/40 hover:bg-black/[0.05] hover:text-[#1C1C1E] dark:text-white/30 dark:hover:bg-white/[0.06] dark:hover:text-white/60'
+                      }`}
+                    >
+                      Set {n}
+                    </button>
+                  ))}
+                </div>
+                <div className="ml-auto flex items-center gap-2">
+                  {currentShowName && (
+                    <span className="text-xs font-medium text-[#3C3C43]/50 dark:text-white/40 max-w-[160px] truncate">{currentShowName}</span>
+                  )}
+                  {setSaveStatus && <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">{setSaveStatus}</span>}
+                  {mode === 'cloud' && (
+                    <>
+                      <button
+                        onClick={openLoadShowPicker}
+                        className="flex items-center gap-1.5 rounded-lg border border-black/[0.08] px-3 py-1 text-xs font-medium text-[#3C3C43]/50 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:border-white/[0.08] dark:text-white/30 dark:hover:border-blue-500/40 dark:hover:bg-blue-500/10 dark:hover:text-blue-400">
+                        <FolderOpen size={11} /> Load Show
+                      </button>
+                      {showSaveShowModal ? (
+                        <form
+                          className="flex items-center gap-1"
+                          onSubmit={(e) => { e.preventDefault(); void handleSaveShow(saveShowNameInput); }}
+                        >
+                          <input
+                            autoFocus
+                            type="text"
+                            placeholder="Show name…"
+                            value={saveShowNameInput}
+                            onChange={(e) => setSaveShowNameInput(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Escape') setShowSaveShowModal(false); }}
+                            onBlur={() => { if (!saveShowNameInput.trim()) setShowSaveShowModal(false); }}
+                            className="w-36 rounded-lg border border-emerald-300 bg-white px-2 py-1 text-xs text-[#1C1C1E] outline-none focus:border-emerald-500 dark:border-emerald-500/40 dark:bg-white/[0.06] dark:text-white"
+                          />
+                          <button type="submit" disabled={!saveShowNameInput.trim()}
+                            className="rounded-lg bg-emerald-500 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-600 disabled:opacity-40">
+                            Save
+                          </button>
+                        </form>
+                      ) : (
+                        <button
+                          onClick={() => { setSaveShowNameInput(currentShowName); setShowSaveShowModal(true); }}
+                          className="flex items-center gap-1.5 rounded-lg border border-black/[0.08] px-3 py-1 text-xs font-medium text-[#3C3C43]/50 transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600 dark:border-white/[0.08] dark:text-white/30 dark:hover:border-emerald-500/40 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-400">
+                          <Save size={11} /> Save Show
                         </button>
-                      );
-                    })
-                  )},
-                  { header: <><FileText size={14} className="text-[#3C3C43]/40 dark:text-white/40" /> {setName || 'Unnamed'}</>, count: activeSetSongs.length, content: (
-                    activeSetSongs.length === 0 ? (
-                      <p className="mt-6 text-center text-sm text-[#3C3C43]/40 dark:text-white/30">Click songs on the left to add them.</p>
-                    ) : (
-                      <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleSetDragEnd}>
-                        <SortableContext items={setSongIds} strategy={verticalListSortingStrategy}>
-                          {activeSetSongs.map((song, i) => (
-                            <SortableSongItem key={song.path} id={song.path} position={i + 1}
-                              title={song.metadata.title} artist={song.metadata.artist} displayKey={song.metadata.display_key}
-                              onRemove={() => setSetSongIds((cur) => cur.filter((id) => id !== song.path))} />
-                          ))}
-                        </SortableContext>
-                      </DndContext>
-                    )
-                  )},
-                ].map((panel, pi) => (
-                  <div key={pi} className="flex flex-col overflow-hidden rounded-2xl border border-black/[0.08] bg-white dark:border-white/[0.08] dark:bg-[#1C1C1E]">
-                    <div className="shrink-0 flex items-center gap-2 border-b border-black/[0.06] px-4 py-3 text-sm font-semibold text-[#1C1C1E]/80 dark:border-white/[0.06] dark:text-white/80">
-                      {panel.header}
-                      <span className="ml-auto text-xs font-normal text-[#3C3C43]/40 dark:text-white/30">{panel.count}</span>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-2">{panel.content}</div>
-                  </div>
-                ))}
+                      )}
+                    </>
+                  )}
+                  <button
+                    onClick={() => importRef.current?.click()}
+                    className="flex items-center gap-1.5 rounded-lg border border-black/[0.08] px-3 py-1 text-xs font-medium text-[#3C3C43]/50 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:border-white/[0.08] dark:text-white/30 dark:hover:border-blue-500/40 dark:hover:bg-blue-500/10 dark:hover:text-blue-400">
+                    <Upload size={11} /> Import CSV
+                  </button>
+                  <input ref={importRef} type="file" accept=".csv,.tsv,text/csv" className="hidden" onChange={handleImportFile} />
+                </div>
+              </div>
+
+              {/* Set cards */}
+              <div className="sets-scroller flex-1 min-h-0 p-4">
+                <div className="flex h-full gap-4">
+                  {[1, 2, 3, 4].map((n) => {
+                    const ids      = liveSets[n] ?? [];
+                    const setSongs = ids.map((p) => songs.find((s) => s.path === p)).filter((s): s is SongRecord => Boolean(s));
+                    const isActive = n === activeSetNumber;
+                    const col      = SET_BADGE_COLORS[n];
+                    return (
+                      <div
+                        key={n}
+                        style={isActive ? { borderColor: col.fg + '55', width: '640px' } : { width: '640px' }}
+                        className={`flex shrink-0 flex-col overflow-hidden rounded-2xl border bg-white dark:bg-[#1C1C1E] ${
+                          isActive ? '' : 'border-black/[0.08] dark:border-white/[0.08]'
+                        }`}
+                      >
+                        {/* Card header */}
+                        <div className="shrink-0 flex items-center gap-2.5 border-b border-black/[0.06] px-4 py-3 dark:border-white/[0.06]">
+                          <span
+                            style={{ background: col.bg, color: col.fg }}
+                            className="rounded-full px-2.5 py-0.5 text-xs font-bold"
+                          >
+                            Set {n}
+                          </span>
+                          {isActive && (
+                            <span className="text-[10px] font-medium text-[#3C3C43]/35 dark:text-white/25">active</span>
+                          )}
+                          <span className="ml-auto text-xs text-[#3C3C43]/40 dark:text-white/30">
+                            {setSongs.length} song{setSongs.length !== 1 ? 's' : ''}
+                          </span>
+                        </div>
+
+                        {/* Songs list */}
+                        <div className="flex-1 overflow-y-auto p-2">
+                          {setSongs.length === 0 ? (
+                            <p className="py-6 text-center text-sm text-[#3C3C43]/30 dark:text-white/20">
+                              Click + next to a song to add it.
+                            </p>
+                          ) : (
+                            <DndContext sensors={dndSensors} collisionDetection={closestCenter}
+                              onDragEnd={(event) => {
+                                const { active, over } = event;
+                                if (!over || active.id === over.id) return;
+                                const current = liveSets[n] ?? [];
+                                const newIds  = arrayMove(current, current.indexOf(active.id as string), current.indexOf(over.id as string));
+                                setLiveSets((prev) => ({ ...prev, [n]: newIds }));
+                                void saveSetToCloud(n, newIds);
+                              }}
+                            >
+                              <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+                                {setSongs.map((song, i) => (
+                                  <SortableSongItem key={song.path} id={song.path} position={i + 1}
+                                    title={song.metadata.title} artist={song.metadata.artist} displayKey={song.metadata.display_key}
+                                    onRemove={() => removeSongFromSet(song.path, n)} />
+                                ))}
+                              </SortableContext>
+                            </DndContext>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           )}
@@ -1874,6 +2198,31 @@ export default function App() {
         </main>
       </div>
     </div>
+
+    {/* ── Load show picker ── */}
+    {showCloudSetPicker && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowCloudSetPicker(false)}>
+        <div className="w-80 rounded-2xl bg-white dark:bg-[#1C1C1E] shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between border-b border-black/[0.08] dark:border-white/[0.08] px-4 py-3">
+            <span className="text-sm font-semibold text-[#1C1C1E] dark:text-white">Load Show</span>
+            <button onClick={() => setShowCloudSetPicker(false)} className="rounded p-1 text-[#3C3C43]/40 hover:bg-black/[0.05] dark:text-white/30 dark:hover:bg-white/[0.06]"><X size={14} /></button>
+          </div>
+          <div className="max-h-72 overflow-y-auto p-2">
+            {cloudSetFilesLoading ? (
+              <p className="py-6 text-center text-sm text-[#3C3C43]/40 dark:text-white/30">Loading…</p>
+            ) : cloudSetFiles.length === 0 ? (
+              <p className="py-6 text-center text-sm text-[#3C3C43]/40 dark:text-white/30">No shows found in cloud.</p>
+            ) : cloudSetFiles.map((f) => (
+              <button key={f.path} onClick={() => handlePickShow(f.name)}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-[#1C1C1E] hover:bg-[#F2F2F7] dark:text-white dark:hover:bg-white/[0.06]">
+                <Cloud size={13} className="shrink-0 text-blue-500" />
+                {f.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    )}
 
     {/* ── Quick Edit modal ── */}
     {quickEditSong && (
@@ -1993,6 +2342,107 @@ export default function App() {
               </div>
             </>
           )}
+        </div>
+      </div>
+    )}
+
+    {/* ── CSV Import modal ── */}
+    {showImport && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-6"
+        onClick={(e) => { if (e.target === e.currentTarget) setShowImport(false); }}>
+        <div className="flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-black/[0.08] bg-white shadow-2xl dark:border-white/10 dark:bg-[#1C1C1E]" style={{ maxHeight: '80vh' }}>
+
+          {/* Header */}
+          <div className="shrink-0 flex items-center justify-between border-b border-black/[0.06] px-5 py-4 dark:border-white/[0.06]">
+            <div>
+              <h2 className="text-sm font-semibold text-[#1C1C1E] dark:text-white">Import Preview</h2>
+              <p className="mt-0.5 text-xs text-[#3C3C43]/50 dark:text-white/40">
+                {importRows.filter((r) => r.confidence === 'high').length} matched ·{' '}
+                {importRows.filter((r) => r.confidence === 'fuzzy').length} fuzzy ·{' '}
+                {importRows.filter((r) => r.confidence === 'none').length} unmatched
+              </p>
+            </div>
+            <button onClick={() => setShowImport(false)}
+              className="rounded-lg p-1.5 text-[#3C3C43]/40 hover:bg-black/[0.06] dark:text-white/30 dark:hover:bg-white/10">
+              <X size={15} />
+            </button>
+          </div>
+
+          {/* Rows */}
+          <div className="flex-1 overflow-y-auto">
+            {/* Column headers */}
+            <div className="sticky top-0 grid grid-cols-[3rem_1fr_1fr_3rem] gap-2 border-b border-black/[0.05] bg-[#F9F9FB] px-5 py-2 text-[10px] font-semibold uppercase tracking-widest text-[#3C3C43]/40 dark:border-white/[0.05] dark:bg-[#0A0A0B] dark:text-white/30">
+              <span>Set</span><span>From sheet</span><span>Matched to</span><span></span>
+            </div>
+
+            {importRows.map((row, idx) => {
+              const isHigh  = row.confidence === 'high';
+              const isFuzzy = row.confidence === 'fuzzy';
+              const isNone  = row.confidence === 'none';
+              return (
+                <div key={idx} className={`grid grid-cols-[3rem_1fr_1fr_3rem] items-center gap-2 border-b border-black/[0.04] px-5 py-2.5 dark:border-white/[0.04] ${
+                  isHigh  ? '' :
+                  isFuzzy ? 'bg-amber-50/60 dark:bg-amber-500/5' :
+                            'bg-red-50/60 dark:bg-red-500/5'
+                }`}>
+                  {/* Set badge */}
+                  <span style={{ background: SET_BADGE_COLORS[row.set]?.bg, color: SET_BADGE_COLORS[row.set]?.fg }}
+                    className="w-fit rounded-full px-2 py-px text-[10px] font-bold">
+                    S{row.set}
+                  </span>
+
+                  {/* Sheet title/artist */}
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium text-[#1C1C1E] dark:text-white">{row.csvTitle}</div>
+                    {row.csvArtist && <div className="truncate text-xs text-[#3C3C43]/45 dark:text-white/35">{row.csvArtist}</div>}
+                  </div>
+
+                  {/* Match / picker */}
+                  {isHigh ? (
+                    <div className="min-w-0">
+                      <div className="truncate text-sm text-emerald-700 dark:text-emerald-400">{row.matched?.metadata.title}</div>
+                      <div className="truncate text-xs text-[#3C3C43]/40 dark:text-white/30">{row.matched?.metadata.artist}</div>
+                    </div>
+                  ) : (
+                    <select
+                      value={row.override}
+                      onChange={(e) => setImportRows((rows) => rows.map((r, i) => i === idx ? { ...r, override: e.target.value } : r))}
+                      className="w-full rounded-lg border border-black/[0.08] bg-white px-2 py-1.5 text-xs text-[#1C1C1E] outline-none focus:ring-2 focus:ring-blue-300 dark:border-white/10 dark:bg-white/5 dark:text-white">
+                      <option value="">— skip —</option>
+                      {songs.map((s) => (
+                        <option key={s.path} value={s.path}>
+                          {s.metadata.title}{s.metadata.artist ? ` — ${s.metadata.artist}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
+                  {/* Indicator */}
+                  <span className={`text-center text-base ${isHigh ? 'text-emerald-500' : isFuzzy ? 'text-amber-400' : 'text-red-400'}`}>
+                    {isHigh ? '✓' : isFuzzy ? '~' : '?'}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Footer */}
+          <div className="shrink-0 flex items-center justify-between border-t border-black/[0.06] px-5 py-4 dark:border-white/[0.06]">
+            <p className="text-xs text-[#3C3C43]/40 dark:text-white/30">
+              {importRows.filter((r) => r.override).length} of {importRows.length} songs will be imported
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setShowImport(false)}
+                className="rounded-xl border border-black/[0.10] px-4 py-2 text-sm font-medium text-[#3C3C43]/60 transition hover:bg-black/[0.04] dark:border-white/10 dark:text-white/50 dark:hover:bg-white/[0.06]">
+                Cancel
+              </button>
+              <button onClick={commitImport}
+                disabled={importRows.filter((r) => r.override).length === 0}
+                className="rounded-xl bg-blue-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-400 disabled:opacity-40">
+                Import {importRows.filter((r) => r.override).length} songs
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     )}

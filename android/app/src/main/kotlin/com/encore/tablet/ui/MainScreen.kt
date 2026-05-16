@@ -1,5 +1,9 @@
 package com.encore.tablet.ui
 
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.CompositionLocalProvider
@@ -295,7 +299,7 @@ fun CommandCenterScreen(
     onEditChart: ((songId: String) -> Unit)? = null,
     onSettingsClick: () -> Unit = {}
 ) {
-    var selectedSetFilter by remember { mutableStateOf<Int?>(null) }
+    var selectedSetFilter by remember { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val importResult by importViewModel.importResult.collectAsState()
@@ -305,7 +309,12 @@ fun CommandCenterScreen(
     var showImportSheet by remember { mutableStateOf(false) }
     var showSaveSetDialog by remember { mutableStateOf(false) }
     var showLoadSetDialog by remember { mutableStateOf(false) }
+    var showCloudSetPicker by remember { mutableStateOf(false) }
+    var showSaveToCloudDialog by remember { mutableStateOf(false) }
     var saveSetName by remember { mutableStateOf("") }
+    var cloudSetName by remember { mutableStateOf("") }
+    val cloudSets by setViewModel.cloudSets.collectAsState()
+    val cloudSetsLoading by setViewModel.cloudSetsLoading.collectAsState()
     val profileSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
 
@@ -504,9 +513,105 @@ fun CommandCenterScreen(
             onDismiss = { showImportSheet = false },
             onSyncFolder = { folderPickerLauncher.launch(null) },
             onImportFiles = { filePickerLauncher.launch("*/*") },
-            onImportSet = { importSetLauncher.launch("application/json") },
+            onImportSet = {
+                showImportSheet = false
+                setViewModel.refreshCloudSets()
+                showCloudSetPicker = true
+            },
             syncProgress = syncProgress,
             connectedFolderUri = connectedFolderUri
+        )
+    }
+
+    // Cloud set picker — lists sets from GCS, user picks to load or save
+    if (showCloudSetPicker) {
+        ModalBottomSheet(onDismissRequest = { showCloudSetPicker = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+                    .padding(bottom = 40.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Load Show",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(vertical = 16.dp)
+                )
+                if (cloudSetsLoading) {
+                    CircularProgressIndicator(modifier = Modifier.padding(24.dp))
+                } else if (cloudSets.isEmpty()) {
+                    Text(
+                        text = "No shows found in cloud library.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(24.dp)
+                    )
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
+                        items(cloudSets) { name ->
+                            androidx.compose.material3.ListItem(
+                                headlineContent = { Text(name) },
+                                trailingContent = {
+                                    Icon(Icons.Default.FileOpen, contentDescription = "Load")
+                                },
+                                modifier = Modifier.clickable {
+                                    setViewModel.loadCloudShow(name)
+                                    showCloudSetPicker = false
+                                }
+                            )
+                            androidx.compose.material3.HorizontalDivider()
+                        }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                OutlinedButton(
+                    onClick = { showCloudSetPicker = false; showSaveToCloudDialog = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Save Show to Cloud…")
+                }
+                TextButton(
+                    onClick = { showCloudSetPicker = false },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Cancel") }
+            }
+        }
+    }
+
+    // Save current set to cloud — prompts for a name
+    if (showSaveToCloudDialog) {
+        AlertDialog(
+            onDismissRequest = { showSaveToCloudDialog = false },
+            title = { Text("Save Show to Cloud") },
+            text = {
+                Column {
+                    Text("Enter a name for this show (saves all sets):", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(8.dp))
+                    androidx.compose.material3.OutlinedTextField(
+                        value = cloudSetName,
+                        onValueChange = { cloudSetName = it },
+                        placeholder = { Text("e.g. Friday Night") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (cloudSetName.isNotBlank()) {
+                            setViewModel.saveCloudShow(cloudSetName.trim())
+                            showSaveToCloudDialog = false
+                            cloudSetName = ""
+                        }
+                    }
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSaveToCloudDialog = false; cloudSetName = "" }) { Text("Cancel") }
+            }
         )
     }
 
@@ -677,20 +782,22 @@ fun CommandCenterScreen(
                         number = set.number,
                         label = "Set ${set.number}",
                         subLabel = null,
-                        isActive = selectedSetFilter == set.number,
+                        isActive = selectedSetFilter == set.id,
                         isDark = encoreColors.isDark,
                         titleTextColor = encoreColors.titleText,
                         onClick = {
-                            selectedSetFilter = if (selectedSetFilter == set.number) null else set.number
+                            selectedSetFilter = if (selectedSetFilter == set.id) null else set.id
                         }
                     )
                 }
             }
 
+            val selectedSetNumber = availableSets.find { it.id == selectedSetFilter }?.number
+
             // ── Section header ────────────────────────────────────────────────
             Text(
                 text = if (selectedSetFilter == null) "All Songs"
-                       else "Set $selectedSetFilter",
+                       else "Set $selectedSetNumber",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = (-0.5).sp,
@@ -704,7 +811,7 @@ fun CommandCenterScreen(
                 syncViewModel = syncViewModel,
                 importViewModel = importViewModel,
                 setViewModel = setViewModel,
-                onSongClick = { songId -> onSongClick(songId, selectedSetFilter) },
+                onSongClick = { songId -> onSongClick(songId, selectedSetNumber) },
                 onEditChart = onEditChart,
                 modifier = Modifier.weight(1f)
             )

@@ -59,7 +59,67 @@ class SetViewModel(
     private val _statusMessage = MutableStateFlow<String?>(null)
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
 
+    private val _cloudSets = MutableStateFlow<List<String>>(emptyList())
+    val cloudSets: StateFlow<List<String>> = _cloudSets.asStateFlow()
+
+    private val _cloudSetsLoading = MutableStateFlow(false)
+    val cloudSetsLoading: StateFlow<Boolean> = _cloudSetsLoading.asStateFlow()
+
     fun clearStatusMessage() { _statusMessage.value = null }
+
+    fun refreshCloudSets() {
+        viewModelScope.launch {
+            _cloudSetsLoading.value = true
+            val userId = userPrefs.persistedUser.first()?.googleAccountId ?: run {
+                _cloudSetsLoading.value = false
+                return@launch
+            }
+            _cloudSets.value = setlistRepository.listCloudSets(userId)
+            _cloudSetsLoading.value = false
+        }
+    }
+
+    fun loadCloudShow(showName: String) {
+        viewModelScope.launch {
+            // Suppress checkAndApplyWebSetChanges for 60s so it cannot race
+            // this load and restore stale set_N.json data over the show.
+            ShowLoadGuard.markLoaded()
+            val userId = userPrefs.persistedUser.first()?.googleAccountId ?: return@launch
+            val allSets = setlistRepository.loadCloudShow(userId, showName)
+            if (allSets == null) {
+                _statusMessage.value = "Could not load \"$showName\""
+                return@launch
+            }
+            // Clear all 4 sets first so stale local songs don't persist
+            for (n in 1..4) {
+                val set = setlistRepository.getOrCreateSetByNumber(n)
+                setlistRepository.replaceSetContents(set.id, emptyList())
+            }
+            // Load show data into the appropriate sets
+            var totalSongs = 0
+            for ((setNumber, songIds) in allSets) {
+                val targetSet = setlistRepository.getOrCreateSetByNumber(setNumber)
+                setlistRepository.replaceSetContents(targetSet.id, songIds)
+                totalSongs += songIds.size
+            }
+            // Write ALL 4 numbered set_N.json files (including empty ones) with
+            // source:"tablet" so checkAndApplyWebSetChanges skips them and cannot
+            // restore stale web set data over what we just loaded.
+            setlistRepository.stampAllSetsAsTablet(userId)
+            _statusMessage.value = if (totalSongs > 0)
+                "Loaded \"$showName\" ($totalSongs songs)"
+            else
+                "Loaded \"$showName\" — songs not yet synced locally"
+        }
+    }
+
+    fun saveCloudShow(showName: String) {
+        viewModelScope.launch {
+            val userId = userPrefs.persistedUser.first()?.googleAccountId ?: return@launch
+            setlistRepository.saveCloudShow(userId, showName)
+            _statusMessage.value = "Saved \"$showName\" to cloud"
+        }
+    }
 
     init {
         initPerformSet()

@@ -14,6 +14,7 @@ import com.encore.core.data.relations.SetEntryWithSong
 import com.encore.core.data.relations.SetlistWithSets
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import org.json.JSONObject
 import java.util.UUID
 
 /**
@@ -228,6 +229,29 @@ interface SetlistRepository {
      * @param setNumber Set number (1–4)
      */
     suspend fun uploadSet(userId: String, setNumber: Int)
+
+    /** List named set/show files available in the cloud for [userId]. */
+    suspend fun listCloudSets(userId: String): List<String>
+
+    /**
+     * Download a show from cloud and return a map of setNumber → ordered song UUIDs
+     * (filtered to songs that exist locally).
+     * Handles both v2 show format (sets object) and v1 single-set format (songIds → set 1).
+     * Returns null on error, empty map if file exists but has no matching songs.
+     */
+    suspend fun loadCloudShow(userId: String, showName: String): Map<Int, List<String>>?
+
+    /**
+     * Save all numbered sets to cloud as a v2 show file under `{userId}/sets/{showName}.json`.
+     * The file contains all sets in {"sets": {"1": [...], "2": [...], ...}} format.
+     */
+    suspend fun saveCloudShow(userId: String, showName: String)
+
+    /**
+     * Write all 4 numbered set_N.json files (even empty ones) with source:"tablet"
+     * so the background sync skips them after a show load.
+     */
+    suspend fun stampAllSetsAsTablet(userId: String)
 }
 
 /**
@@ -598,12 +622,95 @@ class SetlistRepositoryImpl(
         )
     }
 
+    override suspend fun listCloudSets(userId: String): List<String> =
+        syncProvider?.listSetFiles(userId) ?: emptyList()
+
+    override suspend fun loadCloudShow(userId: String, showName: String): Map<Int, List<String>>? {
+        val provider = syncProvider ?: return null
+        return try {
+            val json = provider.downloadNamedSet(userId, showName)
+            if (json == null) {
+                android.util.Log.w("SetlistRepository", "loadCloudShow($showName): file not found")
+                return null
+            }
+            val obj = JSONObject(json)
+
+            fun normaliseId(id: String): String =
+                (if (id.contains('/')) id.substringAfterLast('/') else id).removeSuffix(".md")
+
+            // v2 format: {"sets": {"1": [...], "2": [...], ...}}
+            val setsObj = obj.optJSONObject("sets")
+            if (setsObj != null) {
+                val result = mutableMapOf<Int, List<String>>()
+                for (key in setsObj.keys()) {
+                    val n = key.toIntOrNull() ?: continue
+                    val arr = setsObj.optJSONArray(key) ?: continue
+                    val raw = (0 until arr.length()).map { normaliseId(arr.getString(it)) }
+                    val matched = raw.filter { songDao.getById(it) != null }
+                    android.util.Log.d("SetlistRepository", "loadCloudShow set $n: ${raw.size} in file, ${matched.size} matched locally")
+                    result[n] = matched
+                }
+                return result
+            }
+
+            // v1 format: {"songIds": [...]} — treat as set 1
+            val arr = obj.optJSONArray("songIds") ?: return emptyMap()
+            val raw = (0 until arr.length()).map { normaliseId(arr.getString(it)) }
+            val matched = raw.filter { songDao.getById(it) != null }
+            android.util.Log.d("SetlistRepository", "loadCloudShow($showName) v1: ${raw.size} in file, ${matched.size} matched locally")
+            mapOf(1 to matched)
+        } catch (e: Exception) {
+            android.util.Log.w("SetlistRepository", "loadCloudShow($showName) failed: ${e.message}")
+            null
+        }
+    }
+
+    override suspend fun saveCloudShow(userId: String, showName: String) {
+        val provider = syncProvider ?: return
+        val now = System.currentTimeMillis()
+        val setsJson = StringBuilder()
+        setsJson.append("{")
+        for (n in 1..4) {
+            val set = try { getOrCreateSetByNumber(n) } catch (e: Exception) { continue }
+            val entries = setEntryDao.getEntriesForSetList(set.id)
+            val ids = entries.map { "\"${it.songId}\"" }.joinToString(",")
+            if (setsJson.length > 1) setsJson.append(",")
+            setsJson.append("\"$n\":[$ids]")
+        }
+        setsJson.append("}")
+        val escapedName = showName.replace("\"", "'")
+        val json = """{"version":2,"name":"$escapedName","updatedAt":$now,"source":"tablet","sets":$setsJson}"""
+        provider.uploadNamedSet(userId, showName, json)
+    }
+
+    override suspend fun stampAllSetsAsTablet(userId: String) {
+        val provider = syncProvider ?: return
+        val now = System.currentTimeMillis()
+        for (n in 1..4) {
+            try {
+                val set = getOrCreateSetByNumber(n)
+                val entries = setEntryDao.getEntriesForSetList(set.id)
+                val songIdsJson = entries.map { "\"${it.songId}\"" }.joinToString(",")
+                val json = """{"version":1,"updatedAt":$now,"source":"tablet","songIds":[$songIdsJson]}"""
+                provider.uploadSetData(userId, n, json)
+                android.util.Log.d("SetlistRepository", "stampAllSetsAsTablet set=$n (${entries.size} songs)")
+            } catch (e: Exception) {
+                android.util.Log.w("SetlistRepository", "stampAllSetsAsTablet set=$n failed: ${e.message}")
+            }
+        }
+    }
+
     override suspend fun uploadSet(userId: String, setNumber: Int) {
         val provider = syncProvider ?: return
         try {
             val set = getOrCreateSetByNumber(setNumber)
             val entries = setEntryDao.getEntriesForSetList(set.id)
             val songIds = entries.map { it.songId }
+            // Don't upload empty sets — they would overwrite web-app sets with empty content.
+            if (songIds.isEmpty()) {
+                android.util.Log.d("SetlistRepository", "uploadSet(set=$setNumber) — skipped, no songs")
+                return
+            }
             val now = System.currentTimeMillis()
             val songIdsJson = songIds.joinToString(",") { "\"$it\"" }
             val json = """{"version":1,"updatedAt":$now,"source":"tablet","songIds":[$songIdsJson]}"""

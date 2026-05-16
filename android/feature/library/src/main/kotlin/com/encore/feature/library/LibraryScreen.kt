@@ -135,13 +135,11 @@ fun LibraryScreen(
     val isImporting by importViewModel.isImporting.collectAsState()
     val importResult by importViewModel.importResult.collectAsState()
     val statusMessage by setViewModel.statusMessage.collectAsState()
-    val activeSetFilter by viewModel.setFilter.collectAsState()
+    val activeSetFilter: Int? = setFilter
     val sortOrder by viewModel.sortOrder.collectAsState()
     val conflictToResolve by syncViewModel.conflictToResolve.collectAsState()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
-
-    LaunchedEffect(setFilter) { viewModel.updateSetFilter(setFilter) }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
@@ -266,7 +264,9 @@ fun LibraryListContent(
     val isImporting by importViewModel.isImporting.collectAsState()
     val importResult by importViewModel.importResult.collectAsState()
     val statusMessage by setViewModel.statusMessage.collectAsState()
-    val activeSetFilter by viewModel.setFilter.collectAsState()
+    val setFilterId by viewModel.setFilter.collectAsState()
+    val allAvailableSets by setViewModel.availableSets.collectAsState()
+    val activeSetFilter: Int? = allAvailableSets.find { it.id == setFilterId }?.number
     val sortOrder by viewModel.sortOrder.collectAsState()
     val conflictToResolve by syncViewModel.conflictToResolve.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }

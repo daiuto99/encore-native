@@ -198,12 +198,20 @@ class SyncViewModel(
 
     /**
      * Fetch the remote markdown body for [songId] and open ConflictResolutionDialog.
+     *
+     * If the server can't be reached (offline) or the user isn't signed in, [onUnavailable]
+     * runs instead — callers wire this to open the song's local copy in performance mode so a
+     * conflicted song is never a dead end on stage. Viewing the local copy is read-only; it
+     * never overwrites either side of the conflict, so the conflict survives for later online
+     * resolution.
      */
-    fun prepareConflictResolution(songId: String) {
+    fun prepareConflictResolution(songId: String, onUnavailable: () -> Unit = {}) {
         viewModelScope.launch {
-            val userId = userPrefs.persistedUser.first()?.googleAccountId ?: return@launch
-            val song = songRepository.getSongById(songId) ?: return@launch
-            val remoteBody = songRepository.fetchRemoteMarkdownBody(userId, songId) ?: return@launch
+            val userId = userPrefs.persistedUser.first()?.googleAccountId
+            if (userId == null) { onUnavailable(); return@launch }
+            val song = songRepository.getSongById(songId) ?: run { onUnavailable(); return@launch }
+            val remoteBody = songRepository.fetchRemoteMarkdownBody(userId, songId)
+            if (remoteBody == null) { onUnavailable(); return@launch }
             _conflictToResolve.value = ConflictResolutionState(
                 songId = songId,
                 songTitle = song.title,

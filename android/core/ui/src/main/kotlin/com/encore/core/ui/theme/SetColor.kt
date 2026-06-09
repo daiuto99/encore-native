@@ -24,9 +24,15 @@ val SET_COVER_PALETTE = listOf(
     SetCoverColors(Color(0xFF94A3B8), Color(0xFF0F172A)), // graphite
 )
 
-/** Returns the cover color pair for a set number (cycles every 10). */
+/**
+ * Returns the cover color pair for a set number (cycles every 10).
+ *
+ * Uses floorMod so non-positive set numbers (e.g. -1 for a song opened with no
+ * set context, as from performance-mode quick search) wrap into range instead of
+ * producing a negative index and crashing.
+ */
 fun setCoverColors(setNumber: Int): SetCoverColors =
-    SET_COVER_PALETTE[(setNumber - 1) % SET_COVER_PALETTE.size]
+    SET_COVER_PALETTE[Math.floorMod(setNumber - 1, SET_COVER_PALETTE.size)]
 
 /**
  * Stable hash-derived cover for songs not in a set.

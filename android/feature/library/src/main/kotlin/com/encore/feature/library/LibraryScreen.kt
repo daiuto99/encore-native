@@ -110,8 +110,8 @@ import com.encore.core.data.entities.SongEntity
 import com.encore.core.data.entities.SyncStatus
 import com.encore.core.ui.theme.LocalEncoreColors
 import com.encore.core.ui.theme.SetColor
+import com.encore.core.ui.theme.SetCoverColors
 import com.encore.core.ui.theme.setCoverColors
-import com.encore.core.ui.theme.songCoverColors
 import kotlin.math.roundToInt
 
 /**
@@ -237,7 +237,11 @@ fun LibraryScreen(
                     onRemoveFromSet = { songId, setNum -> setViewModel.removeSongFromSetNumber(songId, setNum) },
                     onAddToSet = { /* handled inside SongListItem via set picker dialog */ },
                     onReorder = { songId, toIdx -> activeSetFilter?.let { setViewModel.reorderSong(songId, toIdx, it) } },
-                    onConflictClick = { songId -> syncViewModel.prepareConflictResolution(songId) },
+                    onConflictClick = { songId ->
+                        // Offline / server unreachable → fall back to performing the local copy
+                        // so a conflicted song is never a dead end on stage.
+                        syncViewModel.prepareConflictResolution(songId) { onSongClick(songId) }
+                    },
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -343,7 +347,11 @@ fun LibraryListContent(
                     onRemoveFromSet = { songId, setNum -> setViewModel.removeSongFromSetNumber(songId, setNum) },
                     onAddToSet = { songId -> setViewModel.addToPerformSet(songId) },
                     onReorder = { songId, toIdx -> activeSetFilter?.let { setViewModel.reorderSong(songId, toIdx, it) } },
-                    onConflictClick = { songId -> syncViewModel.prepareConflictResolution(songId) },
+                    onConflictClick = { songId ->
+                        // Offline / server unreachable → fall back to performing the local copy
+                        // so a conflicted song is never a dead end on stage.
+                        syncViewModel.prepareConflictResolution(songId) { onSongClick(songId) }
+                    },
                     onEditChart = onEditChart,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -489,7 +497,16 @@ private fun SongTile(
     setNumber: Int?,
     modifier: Modifier = Modifier
 ) {
-    val cover = if (setNumber != null) setCoverColors(setNumber) else songCoverColors(song.id)
+    // Initials take the set's color when the song is in a set; neutral gray otherwise.
+    val isDark = LocalEncoreColors.current.isDark
+    val cover = if (setNumber != null) {
+        setCoverColors(setNumber)
+    } else {
+        SetCoverColors(
+            bg = if (isDark) Color(0xFF3A3A3C) else Color(0xFFE5E5EA),
+            fg = if (isDark) Color.White else Color(0xFF1C1C1E)
+        )
+    }
     val glyph = remember(song.title) {
         song.title.split("\\s+".toRegex())
             .take(2)
@@ -685,10 +702,19 @@ fun SongListItem(
             .clip(RoundedCornerShape(12.dp))
             .let { if (isDragging) it.padding(horizontal = 4.dp) else it }
     ) {
+        // Outlined pill: set color when in a set, dark gray otherwise. Opaque fill
+        // (page background) so the red swipe-delete layer never bleeds through at rest.
+        val pillOutline = if (primarySetNumber != null) {
+            setCoverColors(primarySetNumber).bg
+        } else {
+            encoreColors.titleText.copy(alpha = 0.35f)
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
+                .background(encoreColors.screenBackground)
+                .border(1.5.dp, pillOutline, RoundedCornerShape(12.dp))
                 .clickable {
                     if (song.syncStatus == SyncStatus.CONFLICT) {
                         onConflictClick(song.id)

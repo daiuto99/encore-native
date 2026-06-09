@@ -98,6 +98,9 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.painterResource
+import androidx.compose.foundation.Image
+import com.encore.core.data.sync.SyncHudState
+import kotlinx.coroutines.delay
 import com.encore.tablet.R
 import com.encore.tablet.audit.LibraryAuditViewModel
 import com.encore.tablet.preferences.AppPreferencesViewModel
@@ -166,6 +169,7 @@ fun MainScreen(
             }
         )
     }
+    Box(modifier = Modifier.fillMaxSize()) {
     NavHost(
         navController = navController,
         startDestination = "command_center",
@@ -273,9 +277,111 @@ fun MainScreen(
                 syncHudState = syncHudState
             )
         }
-    }
+    } // end NavHost
+
+        // Full-screen launch loader — logo + progress bar while the first sync runs.
+        // Gated to app launch only; background polls keep the small in-bar HUD.
+        SyncLaunchLoader(syncHudState = syncHudState)
+    } // end Box
     } // end CompositionLocalProvider
 }
+
+/**
+ * Full-screen branded loading overlay shown only during the initial app-launch sync.
+ *
+ * State machine (one-time): WAITING → SHOWING → DONE.
+ *  - WAITING: shown immediately on launch with an indeterminate bar. If no sync starts
+ *    within a short grace window (e.g. library synced recently, so startup sync is skipped),
+ *    it dismisses on its own.
+ *  - SHOWING: a sync started — show determinate progress (current / total).
+ *  - DONE: first sync finished (or nothing to sync) — overlay never returns, so the
+ *    2-minute background poller never covers the UI.
+ */
+@Composable
+private fun SyncLaunchLoader(syncHudState: SyncHudState?) {
+    val encoreColors = LocalEncoreColors.current
+    // 0 = waiting, 1 = showing, 2 = done
+    var phase by remember { mutableStateOf(0) }
+
+    LaunchedEffect(syncHudState, phase) {
+        when (phase) {
+            0 -> if (syncHudState is SyncHudState.InProgress) phase = 1
+            1 -> if (syncHudState is SyncHudState.Complete || syncHudState == null) phase = 2
+        }
+    }
+    // Grace window: if the startup sync never begins, stop waiting and reveal the app.
+    LaunchedEffect(Unit) {
+        delay(2500)
+        if (phase == 0) phase = 2
+    }
+    // Absolute safety cap — the loader can NEVER block the app for more than this, even if
+    // sync stalls (e.g. offline at a venue, where each remote check may time out slowly).
+    // Whatever sync remains continues in the background under the small in-bar HUD.
+    LaunchedEffect(Unit) {
+        delay(LAUNCH_LOADER_MAX_MS)
+        phase = 2
+    }
+
+    if (phase == 2) return
+
+    val inProgress = syncHudState as? SyncHudState.InProgress
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(encoreColors.screenBackground)
+            // Tap anywhere to skip straight into the library (offline / in a hurry).
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { phase = 2 },
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Image(
+                painter = painterResource(R.drawable.encore_logo_full),
+                contentDescription = "Encore",
+                modifier = Modifier.size(132.dp)
+            )
+            Spacer(modifier = Modifier.height(40.dp))
+            if (inProgress != null && inProgress.total > 0) {
+                val fraction = inProgress.current.toFloat() / inProgress.total
+                LinearProgressIndicator(
+                    progress = { fraction },
+                    modifier = Modifier.width(220.dp),
+                    color = encoreColors.titleText,
+                    trackColor = encoreColors.titleText.copy(alpha = 0.15f)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Syncing ${inProgress.current} of ${inProgress.total}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = encoreColors.subtleText
+                )
+            } else {
+                LinearProgressIndicator(
+                    modifier = Modifier.width(220.dp),
+                    color = encoreColors.titleText,
+                    trackColor = encoreColors.titleText.copy(alpha = 0.15f)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Loading your library…",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = encoreColors.subtleText
+                )
+            }
+            Spacer(modifier = Modifier.height(28.dp))
+            Text(
+                text = "Tap to skip",
+                style = MaterialTheme.typography.labelMedium,
+                color = encoreColors.subtleText.copy(alpha = 0.6f)
+            )
+        }
+    }
+}
+
+/** Hard ceiling on the launch loader so a stalled/offline sync can never block entry. */
+private const val LAUNCH_LOADER_MAX_MS = 10_000L
 
 
 /**

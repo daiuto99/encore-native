@@ -128,21 +128,23 @@ data class SectionStyle(
  * Keys are lowercase, stripped of trailing numbers (see [normalizeSectionName]).
  * Aliases handle common spelling variations (e.g. "prechorus" / "pre-chorus").
  */
+// Header sizes are 25% smaller than the original 20sp baseline (→ 15sp) per
+// performance-mode readability tuning: shrink section labels, grow body/chords.
 val DEFAULT_SECTION_STYLES: Map<String, SectionStyle> = mapOf(
-    "intro"         to SectionStyle(Color(0xFF60A5FA), 20.sp),  // Blue-400
-    "verse"         to SectionStyle(Color(0xFFFB923C), 20.sp),  // Orange-400
-    "pre-chorus"    to SectionStyle(Color(0xFFFACC15), 20.sp),  // Yellow-400
-    "prechorus"     to SectionStyle(Color(0xFFFACC15), 20.sp),  // alias
-    "chorus"        to SectionStyle(Color(0xFFF87171), 20.sp),  // Red-400
-    "post-chorus"   to SectionStyle(Color(0xFFF472B6), 20.sp),  // Pink-400
-    "bridge"        to SectionStyle(Color(0xFFA78BFA), 20.sp),  // Purple-400
-    "outro"         to SectionStyle(Color(0xFF9CA3AF), 20.sp),  // Gray-400
-    "tag"           to SectionStyle(Color(0xFF34D399), 20.sp),  // Emerald-400
-    "interlude"     to SectionStyle(Color(0xFF22D3EE), 20.sp),  // Cyan-400
-    "instrumental"  to SectionStyle(Color(0xFF4ADE80), 20.sp),  // Green-400
-    "solo"          to SectionStyle(Color(0xFFFBBF24), 20.sp),  // Amber-400
-    "breakdown"     to SectionStyle(Color(0xFFFF6B6B), 20.sp),  // Coral
-    "coda"          to SectionStyle(Color(0xFF9CA3AF), 20.sp),  // Gray-400
+    "intro"         to SectionStyle(Color(0xFF60A5FA), 15.sp),  // Blue-400
+    "verse"         to SectionStyle(Color(0xFFFB923C), 15.sp),  // Orange-400
+    "pre-chorus"    to SectionStyle(Color(0xFFFACC15), 15.sp),  // Yellow-400
+    "prechorus"     to SectionStyle(Color(0xFFFACC15), 15.sp),  // alias
+    "chorus"        to SectionStyle(Color(0xFFF87171), 15.sp),  // Red-400
+    "post-chorus"   to SectionStyle(Color(0xFFF472B6), 15.sp),  // Pink-400
+    "bridge"        to SectionStyle(Color(0xFFA78BFA), 15.sp),  // Purple-400
+    "outro"         to SectionStyle(Color(0xFF9CA3AF), 15.sp),  // Gray-400
+    "tag"           to SectionStyle(Color(0xFF34D399), 15.sp),  // Emerald-400
+    "interlude"     to SectionStyle(Color(0xFF22D3EE), 15.sp),  // Cyan-400
+    "instrumental"  to SectionStyle(Color(0xFF4ADE80), 15.sp),  // Green-400
+    "solo"          to SectionStyle(Color(0xFFFBBF24), 15.sp),  // Amber-400
+    "breakdown"     to SectionStyle(Color(0xFFFF6B6B), 15.sp),  // Coral
+    "coda"          to SectionStyle(Color(0xFF9CA3AF), 15.sp),  // Gray-400
 )
 
 /**
@@ -153,14 +155,16 @@ val DEFAULT_SECTION_STYLES: Map<String, SectionStyle> = mapOf(
  * instance with `remember { ViewerPreferences() }` to get the defaults.
  */
 data class ViewerPreferences(
-    // Body text
-    val bodyFontSizeSp: Float = 14f,
-    val lineHeightSp: Float = 21f,
-    val lyricAlpha: Float = 0.85f,
-    // Section headers (used when section name is not in [sectionStyles])
-    val h1FontSizeSp: Float = 28f,
-    val h2FontSizeSp: Float = 24f,
-    val hnFontSizeSp: Float = 20f,
+    // Body text — lyrics + chords. ~21.5% larger than the original 14sp baseline
+    // (bumped to +35%, then trimmed 10% for comfortable on-stage reading).
+    // lyricAlpha is full-strength (1.0) so lyrics stay crisp/high-contrast on stage.
+    val bodyFontSizeSp: Float = 17.01f,
+    val lineHeightSp: Float = 25.515f,
+    val lyricAlpha: Float = 1.0f,
+    // Section headers (used when section name is not in [sectionStyles]) — 25% smaller
+    val h1FontSizeSp: Float = 21f,
+    val h2FontSizeSp: Float = 18f,
+    val hnFontSizeSp: Float = 15f,
     val sectionTopPaddingDp: Float = 20f,
     val sectionBottomPaddingDp: Float = 4f,
     // Key badge
@@ -2329,7 +2333,7 @@ private fun buildChordLine(
     // Entire line is a legacy bare chord line → colour it whole
     if (isBareChordLine(line)) {
         return buildAnnotatedString {
-            withStyle(SpanStyle(color = effectiveChordColor)) { append(line) }
+            withStyle(SpanStyle(color = effectiveChordColor, fontWeight = FontWeight.Bold)) { append(line) }
         }
     }
 
@@ -2376,7 +2380,7 @@ private fun buildChordLine(
                 }
             }
             when (span.type) {
-                SpanType.CHORD -> withStyle(SpanStyle(color = effectiveChordColor)) {
+                SpanType.CHORD -> withStyle(SpanStyle(color = effectiveChordColor, fontWeight = FontWeight.Bold)) {
                     append("[${span.text}]")
                 }
                 SpanType.HARMONY -> withStyle(

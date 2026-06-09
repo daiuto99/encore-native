@@ -43,8 +43,8 @@ data class AppPreferences(
     val lightBgColor: String = "#F2F2F7",
 
     // ── Dual-theme body text colors ───────────────────────────────────────────
-    val darkLyricColor: String = "#D1D1D6",   // Midnight Mainstage default
-    val lightLyricColor: String = "#1C1C1E",  // Studio Daylight default
+    val darkLyricColor: String = "#FFFFFF",   // Max-contrast white for stage readability
+    val lightLyricColor: String = "#000000",  // Max-contrast black for stage readability
     val darkChordColor: String = "#FFD60A",
     val lightChordColor: String = "#007AFF",
     val darkHarmonyColor: String = "#FF9F0A",

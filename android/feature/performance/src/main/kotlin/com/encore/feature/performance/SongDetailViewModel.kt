@@ -185,9 +185,13 @@ class SongDetailViewModel(
                     val songsInSet = setlistRepository.getSongsInSet(setEntity.id).first()
                         .map { it.song }
                     _performSongIds.value = songsInSet.map { it.id }
-                    // Seed cache with first 3 songs for instant pager previews
+                    // Seed cache with a window around the current song (±2) so the first
+                    // swipe in either direction lands on already-loaded content, no spinner.
                     val seedCache = _songCache.value.toMutableMap()
-                    songsInSet.take(3).forEach { s -> seedCache[s.id] = s }
+                    val curIdx = songsInSet.indexOfFirst { it.id == songId }.coerceAtLeast(0)
+                    val from = (curIdx - 2).coerceAtLeast(0)
+                    val to = (curIdx + 2).coerceAtMost(songsInSet.lastIndex)
+                    for (i in from..to) { val s = songsInSet[i]; seedCache[s.id] = s }
                     _songCache.value = seedCache
                     val idx = songsInSet.indexOfFirst { it.id == songId }
                     _prevSongId.value = if (idx > 0) songsInSet[idx - 1].id else null

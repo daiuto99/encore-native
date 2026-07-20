@@ -247,7 +247,6 @@ fun SongDetailScreen(
     val saveSuccess by viewModel.saveSuccess.collectAsState()
     val pagerResetTrigger by viewModel.pagerResetTrigger.collectAsState()
 
-    var showControls by remember { mutableStateOf(false) }
     var showPageIndicator by remember { mutableStateOf(false) }
     var showQuickSearch by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -266,14 +265,6 @@ fun SongDetailScreen(
 
     LaunchedEffect(songId) {
         viewModel.loadSong(songId, setNumber)
-    }
-
-    // Auto-hide zoom controls after 3 seconds
-    LaunchedEffect(showControls) {
-        if (showControls) {
-            delay(3000)
-            showControls = false
-        }
     }
 
     BackHandler { onNavigateBack() }
@@ -342,7 +333,10 @@ fun SongDetailScreen(
             // ── HorizontalPager — one page per song in the set ───────────────
             HorizontalPager(
                 state = pagerState,
-                beyondBoundsPageCount = 1,
+                // Preload both neighbours so a swipe lands on already-composed content
+                // (no spinner flash). Content is rendered directly — no Crossfade — so the
+                // only motion is the pager's own clean horizontal slide.
+                beyondBoundsPageCount = 2,
                 modifier = Modifier.fillMaxSize()
             ) { page ->
                 val pageSongId = effectiveSongIds.getOrNull(page) ?: songId
@@ -350,50 +344,56 @@ fun SongDetailScreen(
                 val pageScrollState = rememberScrollState()
                 val isActivePage = page == pagerState.currentPage
 
-                Crossfade(
-                    targetState = pageSong?.id,
-                    animationSpec = tween(250)
-                ) { _ ->
-                    val currentSong = pageSong
-                    if (currentSong != null) {
-                        // Use currentSong.id (concrete DB identity) — not pageSongId (pager slot).
-                        // This locks every gesture closure to the exact song being displayed,
-                        // immune to slot reuse during mid-swipe beyondBoundsPageCount rendering.
-                        val concreteSongId = currentSong.id
-                        val effectiveZoom = zoomPerSong[concreteSongId] ?: currentSong.lastZoomLevel
-                        SongContent(
-                            song = currentSong,
-                            scrollState = pageScrollState,
-                            textSizeMultiplier = effectiveZoom,
-                            chordAccentColor = chordAccentColor,
-                            appPreferences = appPreferences,
-                            onZoomChange = { zoom ->
-                                zoomPerSong[concreteSongId] = zoom
-                                if (isActivePage) viewModel.updateTextSize(zoom)
-                            },
-                            onSingleTap = { showControls = !showControls },
-                            onDoubleTap = {
-                                // Map write is unconditional — the key is song-specific so it's
-                                // always safe. ViewModel reset only fires for the active page.
-                                zoomPerSong[concreteSongId] = 1.0f
-                                if (isActivePage) {
-                                    viewModel.resetTextSize()
-                                    showControls = true
-                                }
-                            }
-                        )
-                    } else {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(color = Color.White)
+                val pageCurrentSong = pageSong
+                if (pageCurrentSong != null) {
+                    // Use currentSong.id (concrete DB identity) — not pageSongId (pager slot).
+                    // This locks every gesture closure to the exact song being displayed,
+                    // immune to slot reuse during mid-swipe beyondBoundsPageCount rendering.
+                    val concreteSongId = pageCurrentSong.id
+                    val effectiveZoom = zoomPerSong[concreteSongId] ?: pageCurrentSong.lastZoomLevel
+                    SongContent(
+                        song = pageCurrentSong,
+                        scrollState = pageScrollState,
+                        textSizeMultiplier = effectiveZoom,
+                        chordAccentColor = chordAccentColor,
+                        appPreferences = appPreferences,
+                        onZoomChange = { zoom ->
+                            zoomPerSong[concreteSongId] = zoom
+                            if (isActivePage) viewModel.updateTextSize(zoom)
+                        },
+                        onDoubleTap = {
+                            // Map write is unconditional — the key is song-specific so it's
+                            // always safe. ViewModel reset only fires for the active page.
+                            zoomPerSong[concreteSongId] = 1.0f
+                            if (isActivePage) viewModel.resetTextSize()
                         }
+                    )
+                } else {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = Color.White)
                     }
                 }
             }
+
+            // Active-page zoom, shared by the title zoom control in the PerformanceBar.
+            val activeSongId = effectiveSongIds.getOrNull(pagerState.currentPage) ?: songId
+            val activeZoom = zoomPerSong[activeSongId] ?: textSizeMultiplier
 
             // ── Consolidated Performance Bar (pinned, full-width) ────────
             PerformanceBar(
                 song = currentSong,
                 setNumber = setNumber,
+                currentZoom = activeZoom,
+                onZoomIn = {
+                    val newZoom = (activeZoom + 0.1f).coerceIn(0.5f, 3.0f)
+                    zoomPerSong[activeSongId] = newZoom
+                    viewModel.updateTextSize(newZoom)
+                },
+                onZoomOut = {
+                    val newZoom = (activeZoom - 0.1f).coerceIn(0.5f, 3.0f)
+                    zoomPerSong[activeSongId] = newZoom
+                    viewModel.updateTextSize(newZoom)
+                },
                 availableSetNumbers = availableSetNumbers,
                 harmonyColor = parseColorSafe(
                     if (encoreColors.isDark) appPreferences.darkHarmonyColor
@@ -502,33 +502,6 @@ fun SongDetailScreen(
                 }
             }
 
-            // ── Floating zoom HUD ────────────────────────────────────────────
-            AnimatedVisibility(
-                visible = showControls,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(16.dp)
-            ) {
-                val activeSongId = effectiveSongIds.getOrNull(pagerState.currentPage) ?: songId
-                val activeZoom = zoomPerSong[activeSongId] ?: textSizeMultiplier
-                FloatingZoomControls(
-                    currentZoom = activeZoom,
-                    onZoomIn = {
-                        val newZoom = (activeZoom + 0.1f).coerceIn(0.5f, 3.0f)
-                        zoomPerSong[activeSongId] = newZoom
-                        viewModel.updateTextSize(newZoom)
-                        showControls = true
-                    },
-                    onZoomOut = {
-                        val newZoom = (activeZoom - 0.1f).coerceIn(0.5f, 3.0f)
-                        zoomPerSong[activeSongId] = newZoom
-                        viewModel.updateTextSize(newZoom)
-                        showControls = true
-                    }
-                )
-            }
         }
     }
 
@@ -568,7 +541,6 @@ fun SongContent(
     textSizeMultiplier: Float,
     chordAccentColor: Color?,
     onZoomChange: (Float) -> Unit,
-    onSingleTap: () -> Unit,
     onDoubleTap: () -> Unit,
     appPreferences: AppPreferences = AppPreferences(),
     modifier: Modifier = Modifier
@@ -614,8 +586,9 @@ fun SongContent(
                 }
             }
             .pointerInput("tap") {
-                // Use Initial pass so double-tap is detected before HorizontalPager's
-                // scroll handler on Main pass can consume the pointer events.
+                // Double-tap only → reset zoom. A single tap does nothing, so a swipe's
+                // finger-release can never toggle UI (the old source of the "wonky" HUD).
+                // Initial pass so the taps are seen before HorizontalPager's scroll handler.
                 awaitEachGesture {
                     val down = awaitPointerEvent(PointerEventPass.Initial)
                     if (down.changes.size != 1 || !down.changes[0].pressed) return@awaitEachGesture
@@ -632,7 +605,7 @@ fun SongContent(
                         second.changes.size == 1 && second.changes[0].pressed
                     } ?: false
 
-                    if (isDoubleTap) onDoubleTap() else onSingleTap()
+                    if (isDoubleTap) onDoubleTap()
                 }
             }
             .verticalScroll(scrollState)
@@ -839,10 +812,33 @@ private fun SectionBodyLines(
  * Row 1 (40dp): SET tabs | live clock | 🔍 | ··· overflow (dark/light, save, load) | ✕
  * Row 2 (60dp): ← prev | key anchor | SONG TITLE (large) | status pill | → next
  */
+/** Round text-size stepper used as the title-bar zoom control. 44dp touch target. */
+@Composable
+private fun ZoomStepButton(symbol: String, onClick: () -> Unit, color: Color) {
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = symbol,
+            color = color,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.Default
+        )
+    }
+}
+
 @Composable
 private fun PerformanceBar(
     song: SongEntity,
     setNumber: Int,
+    currentZoom: Float,
+    onZoomIn: () -> Unit,
+    onZoomOut: () -> Unit,
     availableSetNumbers: List<Int>,
     harmonyColor: Color,
     setColor: Color,
@@ -941,6 +937,20 @@ private fun PerformanceBar(
                             )
                         }
                     }
+
+                    // Zoom control — sits right after the last SET tab
+                    Spacer(modifier = Modifier.width(4.dp))
+                    ZoomStepButton(symbol = "A−", onClick = onZoomOut, color = encoreColors.titleText.copy(alpha = 0.6f))
+                    if (currentZoom < 0.99f || currentZoom > 1.01f) {
+                        Text(
+                            text = "${Math.round(currentZoom * 100)}%",
+                            color = encoreColors.titleText.copy(alpha = 0.45f),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                    ZoomStepButton(symbol = "A+", onClick = onZoomIn, color = encoreColors.titleText.copy(alpha = 0.6f))
                 }
 
                 Spacer(modifier = Modifier.width(8.dp))

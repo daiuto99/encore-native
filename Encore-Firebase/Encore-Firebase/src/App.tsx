@@ -3,23 +3,29 @@ import {
   AlertCircle,
   CheckCircle2,
   ChevronDown,
+  ClipboardPaste,
   Cloud,
+  Copy,
   FileText,
   FolderOpen,
   GripVertical,
   Guitar,
   Hash,
+  ListMusic,
   LogIn,
   LogOut,
   Moon,
   Music2,
   Maximize2,
+  Pencil,
+  Plus,
   RefreshCw,
   Save,
   Search,
   Sparkles,
   Sun,
   Tag,
+  Trash2,
   Upload,
   Wand2,
   X,
@@ -49,7 +55,10 @@ import encoreMark from './assets/encore_mark.png';
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type AppMode = 'cloud' | 'local';
-type AppTab  = 'editor' | 'setlist' | 'health';
+type AppTab  = 'editor' | 'setlist' | 'shows' | 'health';
+type AddTab  = 'paste' | 'blank' | 'ai';
+
+type ShowSummary = { name: string; path: string; counts: number[]; total: number };
 
 type SongMeta = {
   title: string;
@@ -971,13 +980,29 @@ export default function App() {
   const [searchQuery, setSearchQuery]   = useState('');
   const [sortBy, setSortBy]             = useState<'title' | 'artist' | 'key'>('title');
   const [showPerfView, setShowPerfView] = useState(false);
-  const [showCreatePanel, setShowCreatePanel] = useState(false);
-  const [createTitle, setCreateTitle]   = useState('');
-  const [createArtist, setCreateArtist] = useState('');
-  const [createKey, setCreateKey]       = useState('G');
-  const [createCapo, setCreateCapo]     = useState('');
-  const [createNotes, setCreateNotes]   = useState('');
+  // ── Add Song modal (paste / blank / AI) ──
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addTab, setAddTab]             = useState<AddTab>('paste');
+  const [addTitle, setAddTitle]         = useState('');
+  const [addArtist, setAddArtist]       = useState('');
+  const [addKey, setAddKey]             = useState('G');
+  const [addCapo, setAddCapo]           = useState('');
+  const [addBody, setAddBody]           = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const mdFileRef = useRef<HTMLInputElement>(null);
+  const dragDepth = useRef(0);
+  // ── Bulk .md import ──
+  const [bulkRows, setBulkRows]   = useState<{ name: string; meta: SongMeta; body: string; include: boolean }[]>([]);
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkBusy, setBulkBusy]   = useState(false);
+  const [bulkProgress, setBulkProgress] = useState('');
+  // ── Shows browser ──
+  const [showsList, setShowsList]       = useState<ShowSummary[]>([]);
+  const [showsLoading, setShowsLoading] = useState(false);
+  const [renamingShow, setRenamingShow] = useState<string | null>(null);
+  const [renameInput, setRenameInput]   = useState('');
+  const [confirmDeleteShow, setConfirmDeleteShow] = useState<string | null>(null);
   const [liveSets, setLiveSets]         = useState<Record<number, string[]>>({ 1: [], 2: [], 3: [], 4: [] });
   const [activeSetNumber, setActiveSetNumber] = useState(1);
   const [setSaveStatus, setSetSaveStatus] = useState('');
@@ -1080,6 +1105,40 @@ export default function App() {
     if (mode !== 'cloud' || !authReady || !user || !gcsToken) return;
     void refreshCloudLibrary();
   }, [mode, authReady, user, gcsToken]);
+
+  useEffect(() => {
+    if (activeTab === 'shows' && mode === 'cloud' && authReady && user && gcsToken) {
+      void refreshShows();
+    }
+  }, [activeTab, mode, authReady, user, gcsToken]);
+
+  // Drag a .md file anywhere in the window to start a new song from it.
+  useEffect(() => {
+    const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+    const onEnter = (e: DragEvent) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth.current++; setIsDraggingFile(true); };
+    const onOver  = (e: DragEvent) => { if (hasFiles(e)) e.preventDefault(); };
+    const onLeave = (e: DragEvent) => { if (!hasFiles(e)) return; dragDepth.current = Math.max(0, dragDepth.current - 1); if (dragDepth.current === 0) setIsDraggingFile(false); };
+    const onDrop  = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      dragDepth.current = 0;
+      setIsDraggingFile(false);
+      const mds = Array.from(e.dataTransfer?.files ?? []).filter((f) => /\.(md|markdown|txt)$/i.test(f.name));
+      if (mds.length === 0) setStatus('Only .md files can be dropped in.');
+      else if (mds.length === 1) void loadMdFile(mds[0]);
+      else void openBulkImport(mds);
+    };
+    window.addEventListener('dragenter', onEnter);
+    window.addEventListener('dragover',  onOver);
+    window.addEventListener('dragleave', onLeave);
+    window.addEventListener('drop',      onDrop);
+    return () => {
+      window.removeEventListener('dragenter', onEnter);
+      window.removeEventListener('dragover',  onOver);
+      window.removeEventListener('dragleave', onLeave);
+      window.removeEventListener('drop',      onDrop);
+    };
+  }, []);
 
   // ── Derived state ─────────────────────────────────────────────────────────
 
@@ -1325,43 +1384,201 @@ export default function App() {
     }
   }
 
-  function addBlankSong() {
-    const uid = crypto.randomUUID();
-    const path = mode === 'cloud' && user
-      ? `${user.email}/songs/${uid}.md`
-      : `${uid}.md`;
-    const blank: SongRecord = {
-      path,
-      raw: '',
-      body: '',
-      metadata: { title: '', artist: '', display_key: '', original_key: '', is_lead_guitar: false, bpm: '', capo: '' },
-    };
-    setSongs((cur) => [blank, ...cur]);
-    openQuickEdit(blank);
+  // ── Add Song ──────────────────────────────────────────────────────────────
+  //
+  // Every add path funnels through createAndSaveSong, which UPLOADS to the cloud
+  // (or writes the local file) BEFORE touching UI state — so a new song can never
+  // be lost by navigating away or refreshing, unlike the old in-memory-only flow.
+
+  function openAddModal(tab: AddTab = 'paste') {
+    setAddTitle(''); setAddArtist(''); setAddKey('G'); setAddCapo(''); setAddBody('');
+    setAddTab(tab);
+    setShowAddModal(true);
   }
 
-  async function handleCreateSong() {
-    if (!createTitle.trim() || !createArtist.trim()) return;
+  function closeAddModal() {
+    setShowAddModal(false);
+    setAddTitle(''); setAddArtist(''); setAddKey('G'); setAddCapo(''); setAddBody('');
+  }
+
+  /** Upload one song (cloud or local) and return the parsed record. No UI-state side
+   *  effects beyond registering a local file handle — callers decide what to select. */
+  async function persistSong(meta: SongMeta, body: string): Promise<SongRecord> {
+    const uid  = crypto.randomUUID();
+    const path = mode === 'cloud' && user
+      ? `${user.email}/songs/${uid}.md`
+      : `${(meta.title || 'untitled').trim()} - ${(meta.artist || '').trim()}`.replace(/[/:*?"<>|]+/g, '-') + '.md';
+    const serialized = serializeSong({ path, raw: '', body, metadata: meta });
+    if (mode === 'cloud') {
+      await CloudLibraryService.uploadMarkdownFile(path, serialized, gcsToken!);
+    } else {
+      if (!libraryHandle) throw new Error('Open a local folder first.');
+      const fh = await libraryHandle.getFileHandle(path, { create: true });
+      const writable = await fh.createWritable();
+      await writable.write(serialized);
+      await writable.close();
+      setFileHandles((cur) => ({ ...cur, [path]: fh }));
+    }
+    return parseSong(path, serialized);
+  }
+
+  /** Build a SongRecord, persist it, then open it in the editor. Returns success. */
+  async function createAndSaveSong(meta: SongMeta, body: string): Promise<boolean> {
+    if (mode === 'cloud' && (!user?.email || !gcsToken)) { setStatus('Sign in first.'); return false; }
+    setIsBusy(true);
+    setStatus('Saving…');
+    try {
+      const saved = await persistSong(meta, body);
+      setSongs((cur) => [saved, ...cur]);
+      setSelectedPath(saved.path);
+      setActiveTab('editor');
+      setStatus(`Added "${saved.metadata.title || 'song'}".`);
+      return true;
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Save failed.');
+      return false;
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  /** Load a dropped/browsed .md file into the Add modal: pre-fill metadata from its
+   *  front matter (and filename) for review, keep the full text in the body so nothing
+   *  is lost, then it saves to the cloud on Add like any other paste. */
+  async function loadMdFile(file: File) {
+    try {
+      const text   = await file.text();
+      const parsed = parseSong(file.name, text);
+      setAddTitle(parsed.metadata.title);
+      setAddArtist(parsed.metadata.artist);
+      setAddKey(parsed.metadata.display_key || 'G');
+      setAddCapo(parsed.metadata.capo || '');
+      setAddBody(text);
+      setAddTab('paste');
+      setShowAddModal(true);
+      setStatus(`Loaded "${file.name}" — review metadata, then Add.`);
+    } catch {
+      setStatus('Could not read that file.');
+    }
+  }
+
+  /** Multiple .md files dropped/selected: parse each and open the bulk review modal. */
+  async function openBulkImport(files: File[]) {
+    try {
+      const rows = await Promise.all(files.map(async (f) => {
+        const parsed = parseSong(f.name, await f.text());
+        return { name: f.name, meta: parsed.metadata, body: parsed.body, include: true };
+      }));
+      setBulkRows(rows);
+      setBulkProgress('');
+      setShowBulkModal(true);
+    } catch {
+      setStatus('Could not read those files.');
+    }
+  }
+
+  /** Import all checked rows to the cloud, one after another, then refresh the list. */
+  async function commitBulkImport() {
+    if (mode === 'cloud' && (!user?.email || !gcsToken)) { setStatus('Sign in first.'); return; }
+    const rows = bulkRows.filter((r) => r.include);
+    if (rows.length === 0) return;
+    setBulkBusy(true);
+    const added: SongRecord[] = [];
+    let ok = 0, fail = 0;
+    for (let i = 0; i < rows.length; i++) {
+      setBulkProgress(`Importing ${i + 1} / ${rows.length}…`);
+      try {
+        added.push(await persistSong(rows[i].meta, rows[i].body));
+        ok++;
+      } catch {
+        fail++;
+      }
+    }
+    if (added.length) {
+      setSongs((cur) => {
+        const map = new Map(cur.map((s) => [s.path, s]));
+        added.forEach((s) => map.set(s.path, s));
+        return Array.from(map.values()).sort((a, b) =>
+          a.metadata.title.toLowerCase().localeCompare(b.metadata.title.toLowerCase()));
+      });
+    }
+    setBulkBusy(false);
+    setBulkProgress('');
+    setShowBulkModal(false);
+    setBulkRows([]);
+    setStatus(`Imported ${ok} song${ok !== 1 ? 's' : ''}${fail ? `, ${fail} failed` : ''}.`);
+  }
+
+  /** Paste tab: parseSong first so a full .md (with front matter) is handled gracefully;
+   *  entered fields override anything the paste already carried. */
+  async function handleAddPaste() {
+    const parsed = parseSong('paste.md', addBody);
+    const meta: SongMeta = {
+      ...parsed.metadata,
+      title:        addTitle.trim()  || parsed.metadata.title,
+      artist:       addArtist.trim() || parsed.metadata.artist,
+      display_key:  addKey           || parsed.metadata.display_key,
+      original_key: parsed.metadata.original_key || addKey || parsed.metadata.display_key,
+      capo:         addCapo          || parsed.metadata.capo,
+    };
+    if (await createAndSaveSong(meta, parsed.body)) closeAddModal();
+  }
+
+  /** Blank tab: metadata only, empty body — saved immediately, then editable. */
+  async function handleAddBlank() {
+    const meta: SongMeta = {
+      ...EMPTY_META,
+      title: addTitle.trim(), artist: addArtist.trim(),
+      display_key: addKey, original_key: addKey, capo: addCapo,
+    };
+    if (await createAndSaveSong(meta, '')) closeAddModal();
+  }
+
+  /** AI tab: ChordSidekick generates a full chart, then it persists immediately. */
+  async function handleGenerateAI() {
+    if (!addTitle.trim() || !addArtist.trim()) return;
     setIsGenerating(true);
     setStatus('ChordSidekick is writing your chart…');
     try {
-      const userMsg = [`Title: ${createTitle.trim()}`, `Artist: ${createArtist.trim()}`, `Key: ${createKey}`,
-        createCapo ? `Capo: ${createCapo}` : '', createNotes.trim() ? `\nAdditional notes / existing lyrics:\n${createNotes.trim()}` : '']
+      const userMsg = [`Title: ${addTitle.trim()}`, `Artist: ${addArtist.trim()}`, `Key: ${addKey}`,
+        addCapo ? `Capo: ${addCapo}` : '', addBody.trim() ? `\nAdditional notes / existing lyrics:\n${addBody.trim()}` : '']
         .filter(Boolean).join('\n');
       const generated = await callChordSidekick(userMsg);
-      const uid = crypto.randomUUID();
-      const newPath = mode === 'cloud' && user
-        ? `${user.email}/songs/${uid}.md`
-        : `${createTitle.trim()} - ${createArtist.trim()}`.replace(/[/:*?"<>|]+/g, '-') + '.md';
-      const newRecord = parseSong(newPath, generated);
-      setSongs((cur) => [newRecord, ...cur]);
-      setSelectedPath(newPath);
-      setActiveTab('editor');
-      setShowCreatePanel(false);
-      setCreateTitle(''); setCreateArtist(''); setCreateKey('G'); setCreateCapo(''); setCreateNotes('');
-      setStatus(`"${newRecord.metadata.title}" created — review and Save to keep it.`);
+      const parsed = parseSong('gen.md', generated);
+      const meta: SongMeta = {
+        ...parsed.metadata,
+        title:        parsed.metadata.title  || addTitle.trim(),
+        artist:       parsed.metadata.artist || addArtist.trim(),
+        display_key:  parsed.metadata.display_key || addKey,
+        original_key: parsed.metadata.original_key || addKey,
+        capo:         addCapo || parsed.metadata.capo,
+      };
+      if (await createAndSaveSong(meta, parsed.body)) closeAddModal();
     } catch (err) {
       setStatus(err instanceof Error ? err.message : 'Generation failed.');
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  /** Paste tab helper: reformat the pasted sheet into Encore format via ChordSidekick. */
+  async function handleCleanupPaste() {
+    if (!addBody.trim()) return;
+    setIsGenerating(true);
+    setStatus('ChordSidekick is cleaning up…');
+    try {
+      const msg = [
+        'Re-format this existing chord sheet into Encore format. Keep every section,',
+        'lyric, and chord exactly as given — only fix the formatting.',
+        '',
+        `Title: ${addTitle.trim()}`, `Artist: ${addArtist.trim()}`, `Key: ${addKey}`,
+        '', addBody,
+      ].join('\n');
+      const cleaned = await callChordSidekick(msg);
+      setAddBody(cleaned);
+      setStatus('Cleaned up — review, then Add.');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : 'Cleanup failed.');
     } finally {
       setIsGenerating(false);
     }
@@ -1395,7 +1612,7 @@ export default function App() {
     setShowCloudSetPicker(true);
     setCloudSetFilesLoading(true);
     try {
-      const files = await CloudLibraryService.listSetFiles(user.email, gcsToken);
+      const files = await CloudLibraryService.listShowFiles(user.email, gcsToken);
       setCloudSetFiles(files);
     } catch {
       setCloudSetFiles([]);
@@ -1441,6 +1658,79 @@ export default function App() {
       setTimeout(() => setSetSaveStatus(''), 2500);
     } catch {
       setSetSaveStatus('Save failed');
+    }
+  }
+
+  // ── Shows browser ───────────────────────────────────────────────────────────
+
+  async function refreshShows() {
+    if (mode !== 'cloud' || !user?.email || !gcsToken) return;
+    setShowsLoading(true);
+    try {
+      const files = await CloudLibraryService.listShowFiles(user.email, gcsToken);
+      const withCounts = await Promise.all((files as { name: string; path: string }[]).map(async (f) => {
+        try {
+          const sets   = await CloudLibraryService.loadShowFile(user.email!, f.name, gcsToken) as Record<number, string[]> | null;
+          const counts = [1, 2, 3, 4].map((n) => sets?.[n]?.length ?? 0);
+          return { name: f.name, path: f.path, counts, total: counts.reduce((a, b) => a + b, 0) };
+        } catch {
+          return { name: f.name, path: f.path, counts: [0, 0, 0, 0], total: 0 };
+        }
+      }));
+      withCounts.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+      setShowsList(withCounts);
+    } catch {
+      setShowsList([]);
+    } finally {
+      setShowsLoading(false);
+    }
+  }
+
+  async function handleLoadShowFromTab(name: string) {
+    await handlePickShow(name);
+    setActiveTab('setlist');
+  }
+
+  async function handleDuplicateShow(name: string) {
+    if (!user?.email || !gcsToken) return;
+    try {
+      const sets = await CloudLibraryService.loadShowFile(user.email, name, gcsToken);
+      if (!sets) return;
+      const existing = new Set(showsList.map((s) => s.name));
+      let copyName = `${name} copy`, i = 2;
+      while (existing.has(copyName)) copyName = `${name} copy ${i++}`;
+      await CloudLibraryService.saveShowFile(user.email, copyName, sets, gcsToken);
+      await refreshShows();
+    } catch {
+      setStatus('Duplicate failed.');
+    }
+  }
+
+  async function handleRenameShow(oldName: string, newName: string) {
+    const trimmed = newName.trim();
+    setRenamingShow(null);
+    if (!user?.email || !gcsToken || !trimmed || trimmed === oldName) return;
+    try {
+      const sets = await CloudLibraryService.loadShowFile(user.email, oldName, gcsToken);
+      if (!sets) return;
+      await CloudLibraryService.saveShowFile(user.email, trimmed, sets, gcsToken);
+      await CloudLibraryService.deleteFile(`${user.email}/sets/${oldName}.json`, gcsToken);
+      if (currentShowName === oldName) setCurrentShowName(trimmed);
+      await refreshShows();
+    } catch {
+      setStatus('Rename failed.');
+    }
+  }
+
+  async function handleDeleteShow(name: string) {
+    if (!user?.email || !gcsToken) return;
+    setConfirmDeleteShow(null);
+    try {
+      await CloudLibraryService.deleteFile(`${user.email}/sets/${name}.json`, gcsToken);
+      if (currentShowName === name) setCurrentShowName('');
+      await refreshShows();
+    } catch {
+      setStatus('Delete failed.');
     }
   }
 
@@ -1532,6 +1822,15 @@ export default function App() {
 
   return (
     <>
+    {isDraggingFile && (
+      <div className="pointer-events-none fixed inset-0 z-[70] flex items-center justify-center bg-blue-500/10 backdrop-blur-sm">
+        <div className="rounded-3xl border-2 border-dashed border-blue-400 bg-white/95 px-12 py-10 text-center shadow-2xl dark:bg-[#1C1C1E]/95">
+          <FileText size={40} className="mx-auto mb-3 text-blue-500" />
+          <p className="text-lg font-semibold text-[#1C1C1E] dark:text-white">Drop .md files to add songs</p>
+          <p className="mt-1 text-sm text-[#3C3C43]/55 dark:text-white/40">One file opens for review; several import together.</p>
+        </div>
+      </div>
+    )}
     <div className={`flex h-screen flex-col overflow-hidden bg-[#F2F2F7] text-[#1C1C1E] dark:bg-black dark:text-white${isDark ? ' dark' : ''}`}>
 
       {/* ── Header ── */}
@@ -1662,10 +1961,10 @@ export default function App() {
                     <AlertCircle size={11} /> {healthItems.length} issues
                   </button>
                 )}
-                <button onClick={addBlankSong}
-                  title="Add blank song"
-                  className="flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-600 hover:bg-blue-100 dark:bg-blue-500/10 dark:text-blue-400 dark:hover:bg-blue-500/20 transition">
-                  + New
+                <button onClick={() => openAddModal('paste')}
+                  title="Add a song — paste, blank, or AI"
+                  className="flex items-center gap-1 rounded-full bg-blue-500 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-400 transition">
+                  <Plus size={12} /> Add Song
                 </button>
               </div>
             </div>
@@ -1689,13 +1988,9 @@ export default function App() {
                 )}
               </div>
               <button
-                onClick={() => setShowCreatePanel((v) => !v)}
+                onClick={() => openAddModal('ai')}
                 title="Create a new song with AI"
-                className={`flex shrink-0 items-center gap-1 rounded-xl border px-2.5 py-2 text-xs font-medium transition ${
-                  showCreatePanel
-                    ? 'border-purple-400 bg-purple-50 text-purple-700 dark:border-purple-500/40 dark:bg-purple-500/10 dark:text-purple-400'
-                    : 'border-black/[0.08] bg-transparent text-[#3C3C43]/50 hover:border-purple-400 hover:text-purple-700 dark:border-white/10 dark:text-white/40 dark:hover:border-purple-500/30 dark:hover:text-purple-400'
-                }`}
+                className="flex shrink-0 items-center gap-1 rounded-xl border border-black/[0.08] bg-transparent px-2.5 py-2 text-xs font-medium text-[#3C3C43]/50 transition hover:border-purple-400 hover:text-purple-700 dark:border-white/10 dark:text-white/40 dark:hover:border-purple-500/30 dark:hover:text-purple-400"
               >
                 <Sparkles size={13} />
               </button>
@@ -1715,37 +2010,6 @@ export default function App() {
               ))}
             </div>
 
-            {showCreatePanel && (
-              <div className="mt-3 rounded-xl border border-purple-200 bg-purple-50 p-3 dark:border-purple-500/20 dark:bg-purple-500/5">
-                <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-purple-700 dark:text-purple-400">
-                  <Sparkles size={11} /> ChordSidekick — Create Song
-                </p>
-                <div className="space-y-2">
-                  {[
-                    { ph: 'Song title *', val: createTitle, set: setCreateTitle },
-                    { ph: 'Artist *',     val: createArtist, set: setCreateArtist },
-                  ].map(({ ph, val, set }) => (
-                    <input key={ph} placeholder={ph} value={val} onChange={(e) => set(e.target.value)}
-                      className="w-full rounded-lg border border-purple-200 bg-white px-2.5 py-1.5 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-purple-300 placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/30 dark:focus:ring-purple-500/30" />
-                  ))}
-                  <div className="flex gap-2">
-                    <select value={createKey} onChange={(e) => setCreateKey(e.target.value)}
-                      className="flex-1 rounded-lg border border-purple-200 bg-white px-2 py-1.5 text-sm text-slate-800 outline-none dark:border-white/10 dark:bg-[#2C2C2E] dark:text-white">
-                      {ALL_KEYS.map((k) => <option key={k} value={k}>{k}</option>)}
-                    </select>
-                    <input placeholder="Capo" type="number" min={1} max={12} value={createCapo} onChange={(e) => setCreateCapo(e.target.value)}
-                      className="w-16 rounded-lg border border-purple-200 bg-white px-2 py-1.5 text-sm text-slate-800 outline-none placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/30" />
-                  </div>
-                  <textarea placeholder="Paste existing chords/lyrics, or leave blank for AI to generate…"
-                    value={createNotes} onChange={(e) => setCreateNotes(e.target.value)} rows={3}
-                    className="w-full resize-none rounded-lg border border-purple-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-purple-300 placeholder:text-slate-400 dark:border-white/10 dark:bg-white/5 dark:text-white/80 dark:placeholder:text-white/30 dark:focus:ring-purple-500/30" />
-                  <button onClick={handleCreateSong} disabled={isGenerating || !createTitle.trim() || !createArtist.trim()}
-                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-purple-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-purple-500 disabled:opacity-40 transition">
-                    {isGenerating ? <><RefreshCw size={13} className="animate-spin" /> Generating…</> : <><Sparkles size={13} /> Generate Chart</>}
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
 
           <div className="flex-1 overflow-y-auto p-2">
@@ -1875,7 +2139,7 @@ export default function App() {
           {/* Tab bar */}
           <div className="shrink-0 flex items-center justify-between border-b border-black/[0.08] bg-white px-4 dark:border-white/[0.08] dark:bg-[#0A0A0B]">
             <div className="flex">
-              {([['editor','Song Editor'],['setlist','Sets'],['health','Library Health']] as const).map(([tab, label]) => (
+              {([['editor','Song Editor'],['setlist','Sets'],['shows','Shows'],['health','Library Health']] as const).map(([tab, label]) => (
                 <button key={tab} onClick={() => setActiveTab(tab)}
                   className={`flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-medium transition ${
                     activeTab === tab
@@ -2109,6 +2373,131 @@ export default function App() {
             </div>
           )}
 
+          {/* ── Shows tab ── */}
+          {activeTab === 'shows' && (
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="mb-5 flex flex-wrap items-center gap-3">
+                <h2 className="text-base font-semibold text-[#1C1C1E] dark:text-white">Saved Shows</h2>
+                <span className="text-sm text-[#3C3C43]/40 dark:text-white/30">
+                  {showsList.length} saved
+                </span>
+                {currentShowName && (
+                  <span className="flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
+                    <Cloud size={11} /> Loaded: {currentShowName}
+                  </span>
+                )}
+                <button onClick={() => void refreshShows()} disabled={showsLoading || mode !== 'cloud'}
+                  className="ml-auto flex items-center gap-1.5 rounded-lg border border-black/[0.08] px-3 py-1.5 text-xs font-medium text-[#3C3C43]/50 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 disabled:opacity-40 dark:border-white/[0.08] dark:text-white/30 dark:hover:border-blue-500/40 dark:hover:bg-blue-500/10 dark:hover:text-blue-400">
+                  <RefreshCw size={11} className={showsLoading ? 'animate-spin' : ''} /> Refresh
+                </button>
+              </div>
+
+              {mode !== 'cloud' ? (
+                <p className="rounded-2xl border border-black/[0.06] bg-white p-10 text-center text-sm text-[#3C3C43]/45 dark:border-white/[0.06] dark:bg-[#1C1C1E] dark:text-white/40">
+                  Shows are stored in the cloud. Switch to <strong>Cloud</strong> mode and sign in to manage them.
+                </p>
+              ) : showsLoading ? (
+                <p className="py-10 text-center text-sm text-[#3C3C43]/40 dark:text-white/30">Loading shows…</p>
+              ) : showsList.length === 0 ? (
+                <div className="rounded-2xl border border-black/[0.06] bg-white p-10 text-center dark:border-white/[0.06] dark:bg-[#1C1C1E]">
+                  <ListMusic size={28} className="mx-auto mb-3 text-[#3C3C43]/30 dark:text-white/20" />
+                  <p className="font-semibold text-[#1C1C1E] dark:text-white">No saved shows yet</p>
+                  <p className="mx-auto mt-1 max-w-sm text-sm text-[#3C3C43]/45 dark:text-white/40">
+                    Build your sets in the <strong>Sets</strong> tab, then hit <strong>Save Show</strong> to name and store the whole night here.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {showsList.map((show) => {
+                    const isLoaded    = currentShowName === show.name;
+                    const isRenaming  = renamingShow === show.name;
+                    const isConfirming = confirmDeleteShow === show.name;
+                    return (
+                      <div key={show.path}
+                        style={isLoaded ? { borderColor: SET_BADGE_COLORS[1].fg + '55' } : {}}
+                        className={`flex flex-col rounded-2xl border bg-white px-4 py-3 dark:bg-[#1C1C1E] ${
+                          isLoaded ? '' : 'border-black/[0.06] dark:border-white/[0.06]'
+                        }`}>
+                        {/* Title row */}
+                        <div className="flex items-start gap-2.5">
+                          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-500 dark:bg-blue-500/10 dark:text-blue-400">
+                            <ListMusic size={16} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            {isRenaming ? (
+                              <form onSubmit={(e) => { e.preventDefault(); void handleRenameShow(show.name, renameInput); }}>
+                                <input autoFocus value={renameInput} onChange={(e) => setRenameInput(e.target.value)}
+                                  onKeyDown={(e) => { if (e.key === 'Escape') setRenamingShow(null); }}
+                                  onBlur={() => void handleRenameShow(show.name, renameInput)}
+                                  className="w-full rounded-lg border border-blue-300 bg-white px-2 py-1 text-sm text-[#1C1C1E] outline-none focus:border-blue-500 dark:border-blue-500/40 dark:bg-white/[0.06] dark:text-white" />
+                              </form>
+                            ) : (
+                              <>
+                                <div className="truncate text-sm font-semibold text-[#1C1C1E] dark:text-white">{show.name}</div>
+                                <div className="text-xs text-[#3C3C43]/45 dark:text-white/35">
+                                  {show.total} song{show.total !== 1 ? 's' : ''}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                          {isLoaded && (
+                            <span className="shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700 dark:bg-blue-500/20 dark:text-blue-400">
+                              loaded
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Per-set counts */}
+                        <div className="mt-2.5 flex flex-wrap gap-1.5">
+                          {[1, 2, 3, 4].map((n) => (
+                            <span key={n} style={{ background: SET_BADGE_COLORS[n].bg, color: SET_BADGE_COLORS[n].fg }}
+                              className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${show.counts[n - 1] === 0 ? 'opacity-35' : ''}`}>
+                              S{n} · {show.counts[n - 1]}
+                            </span>
+                          ))}
+                        </div>
+
+                        {/* Actions */}
+                        {isConfirming ? (
+                          <div className="mt-3 flex items-center gap-2 border-t border-black/[0.05] pt-2.5 dark:border-white/[0.05]">
+                            <span className="flex-1 text-xs text-red-500 dark:text-red-400">Delete "{show.name}"?</span>
+                            <button onClick={() => setConfirmDeleteShow(null)}
+                              className="rounded-lg border border-black/[0.10] px-2.5 py-1 text-xs font-medium text-[#3C3C43]/60 transition hover:bg-black/[0.04] dark:border-white/[0.10] dark:text-white/50 dark:hover:bg-white/[0.06]">
+                              Cancel
+                            </button>
+                            <button onClick={() => void handleDeleteShow(show.name)}
+                              className="rounded-lg bg-red-500 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-red-400">
+                              Delete
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="mt-3 flex items-center gap-1.5 border-t border-black/[0.05] pt-2.5 dark:border-white/[0.05]">
+                            <button onClick={() => void handleLoadShowFromTab(show.name)}
+                              className="flex items-center gap-1.5 rounded-lg bg-blue-500 px-3 py-1 text-xs font-semibold text-white transition hover:bg-blue-400">
+                              <FolderOpen size={11} /> Load
+                            </button>
+                            <button onClick={() => { setRenameInput(show.name); setRenamingShow(show.name); }}
+                              title="Rename" className="flex items-center gap-1 rounded-lg border border-black/[0.08] px-2.5 py-1 text-xs font-medium text-[#3C3C43]/50 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:border-white/[0.08] dark:text-white/30 dark:hover:border-blue-500/40 dark:hover:bg-blue-500/10 dark:hover:text-blue-400">
+                              <Pencil size={11} /> Rename
+                            </button>
+                            <button onClick={() => void handleDuplicateShow(show.name)}
+                              title="Duplicate" className="flex items-center gap-1 rounded-lg border border-black/[0.08] px-2.5 py-1 text-xs font-medium text-[#3C3C43]/50 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:border-white/[0.08] dark:text-white/30 dark:hover:border-blue-500/40 dark:hover:bg-blue-500/10 dark:hover:text-blue-400">
+                              <Copy size={11} /> Duplicate
+                            </button>
+                            <button onClick={() => setConfirmDeleteShow(show.name)}
+                              title="Delete" className="ml-auto flex items-center gap-1 rounded-lg border border-red-200 px-2.5 py-1 text-xs font-medium text-red-500 transition hover:bg-red-50 dark:border-red-500/20 dark:text-red-400 dark:hover:bg-red-500/10">
+                              <Trash2 size={11} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ── Health tab ── */}
           {activeTab === 'health' && (
             <div className="flex-1 overflow-y-auto p-6">
@@ -2219,6 +2608,215 @@ export default function App() {
                 {f.name}
               </button>
             ))}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ── Add Song modal (paste / blank / AI) ── */}
+    {showAddModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+        onClick={(e) => { if (e.target === e.currentTarget) closeAddModal(); }}>
+        <div className="flex w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-black/[0.08] bg-white shadow-2xl dark:border-white/[0.10] dark:bg-[#1C1C1E]" style={{ maxHeight: '88vh' }}>
+
+          {/* Header */}
+          <div className="flex shrink-0 items-center justify-between border-b border-black/[0.06] px-5 py-4 dark:border-white/[0.06]">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-[#1C1C1E] dark:text-white">
+              <Plus size={15} /> Add Song
+            </h2>
+            <button onClick={closeAddModal}
+              className="rounded-lg p-1.5 text-[#3C3C43]/40 hover:bg-black/[0.06] hover:text-[#3C3C43]/80 dark:text-white/30 dark:hover:bg-white/10 dark:hover:text-white/70">
+              <X size={15} />
+            </button>
+          </div>
+
+          {/* Method tabs */}
+          <div className="flex shrink-0 gap-1 border-b border-black/[0.06] px-4 pt-3 dark:border-white/[0.06]">
+            {([['paste', 'Paste sheet', ClipboardPaste], ['blank', 'From scratch', FileText], ['ai', 'AI generate', Sparkles]] as const).map(([t, label, Icon]) => (
+              <button key={t} onClick={() => setAddTab(t)}
+                className={`flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-medium transition ${
+                  addTab === t
+                    ? 'border-blue-500 text-blue-600 dark:text-white'
+                    : 'border-transparent text-[#3C3C43]/50 hover:text-[#1C1C1E] dark:text-white/40 dark:hover:text-white/70'
+                }`}>
+                <Icon size={12} /> {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Body */}
+          <div className="flex-1 space-y-3 overflow-y-auto p-5">
+            {/* Shared metadata */}
+            <div className="flex flex-wrap gap-2">
+              <input placeholder={addTab === 'paste' ? 'Title (optional)' : 'Song title *'} value={addTitle} onChange={(e) => setAddTitle(e.target.value)}
+                className="min-w-[140px] flex-1 rounded-lg border border-black/[0.08] bg-[#F2F2F7] px-3 py-2 text-sm text-[#1C1C1E] outline-none focus:ring-2 focus:ring-blue-400/50 dark:border-white/[0.08] dark:bg-white/[0.06] dark:text-white dark:focus:ring-blue-500/40" />
+              <input placeholder={addTab === 'paste' ? 'Artist (optional)' : 'Artist *'} value={addArtist} onChange={(e) => setAddArtist(e.target.value)}
+                className="min-w-[120px] flex-1 rounded-lg border border-black/[0.08] bg-[#F2F2F7] px-3 py-2 text-sm text-[#1C1C1E] outline-none focus:ring-2 focus:ring-blue-400/50 dark:border-white/[0.08] dark:bg-white/[0.06] dark:text-white dark:focus:ring-blue-500/40" />
+            </div>
+            <div className="flex gap-2">
+              <label className="flex flex-1 items-center gap-2">
+                <span className="text-xs font-medium text-[#3C3C43]/50 dark:text-white/40">Key</span>
+                <select value={addKey} onChange={(e) => setAddKey(e.target.value)}
+                  className="flex-1 rounded-lg border border-black/[0.08] bg-[#F2F2F7] px-2 py-2 text-sm text-[#1C1C1E] outline-none dark:border-white/[0.08] dark:bg-[#2C2C2E] dark:text-white">
+                  {ALL_KEYS.map((k) => <option key={k} value={k}>{k}</option>)}
+                </select>
+              </label>
+              <label className="flex items-center gap-2">
+                <span className="text-xs font-medium text-[#3C3C43]/50 dark:text-white/40">Capo</span>
+                <input type="number" min={0} max={12} placeholder="—" value={addCapo} onChange={(e) => setAddCapo(e.target.value)}
+                  className="w-16 rounded-lg border border-black/[0.08] bg-[#F2F2F7] px-2 py-2 text-sm text-[#1C1C1E] outline-none placeholder:text-[#3C3C43]/30 dark:border-white/[0.08] dark:bg-white/[0.06] dark:text-white dark:placeholder:text-white/20" />
+              </label>
+            </div>
+
+            {/* Paste tab */}
+            {addTab === 'paste' && (
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-dashed border-black/[0.14] bg-[#F2F2F7] px-3 py-2 text-xs text-[#3C3C43]/55 dark:border-white/[0.14] dark:bg-white/[0.04] dark:text-white/45">
+                  <FileText size={13} className="text-blue-500" />
+                  Drag <strong>.md</strong> files anywhere to load them, or
+                  <button onClick={() => mdFileRef.current?.click()}
+                    className="font-semibold text-blue-600 hover:underline dark:text-blue-400">browse</button>
+                  <input ref={mdFileRef} type="file" accept=".md,.markdown,.txt,text/markdown" multiple className="hidden"
+                    onChange={(e) => {
+                      const fs = Array.from(e.target.files ?? []);
+                      if (fs.length === 1) void loadMdFile(fs[0]);
+                      else if (fs.length > 1) void openBulkImport(fs);
+                      if (mdFileRef.current) mdFileRef.current.value = '';
+                    }} />
+                </div>
+                <textarea placeholder="Paste a chord sheet here — chords over lyrics, inline, or a full Encore .md all work…"
+                  value={addBody} onChange={(e) => setAddBody(e.target.value)} rows={9} spellCheck={false}
+                  className="w-full resize-none rounded-lg border border-black/[0.08] bg-[#F2F2F7] px-3 py-2 font-mono text-xs leading-6 text-[#1C1C1E] outline-none focus:ring-2 focus:ring-blue-400/50 dark:border-white/[0.08] dark:bg-white/[0.06] dark:text-white/90 dark:focus:ring-blue-500/40" />
+                <button onClick={() => void handleCleanupPaste()} disabled={isGenerating || isBusy || !addBody.trim()}
+                  className="flex items-center gap-1.5 rounded-lg border border-purple-300 bg-purple-50 px-3 py-1.5 text-xs font-medium text-purple-700 transition hover:bg-purple-100 disabled:opacity-40 dark:border-purple-500/30 dark:bg-purple-500/10 dark:text-purple-400 dark:hover:bg-purple-500/20">
+                  {isGenerating ? <><RefreshCw size={12} className="animate-spin" /> Cleaning…</> : <><Wand2 size={12} /> Clean up with AI</>}
+                </button>
+              </div>
+            )}
+
+            {/* Blank tab */}
+            {addTab === 'blank' && (
+              <p className="rounded-lg bg-[#F2F2F7] px-3 py-3 text-xs text-[#3C3C43]/55 dark:bg-white/[0.04] dark:text-white/40">
+                Creates an empty song with this metadata and opens it in the editor. Saved to the cloud immediately.
+              </p>
+            )}
+
+            {/* AI tab */}
+            {addTab === 'ai' && (
+              <div className="space-y-2">
+                <p className="flex items-center gap-1.5 text-xs font-medium text-purple-700 dark:text-purple-400">
+                  <Sparkles size={11} /> ChordSidekick will write a full chart from the title, artist, and key.
+                </p>
+                <textarea placeholder="Optional: paste existing lyrics/chords or add notes to guide the AI…"
+                  value={addBody} onChange={(e) => setAddBody(e.target.value)} rows={5}
+                  className="w-full resize-none rounded-lg border border-black/[0.08] bg-[#F2F2F7] px-3 py-2 text-xs leading-6 text-[#1C1C1E] outline-none focus:ring-2 focus:ring-purple-300 dark:border-white/[0.08] dark:bg-white/[0.06] dark:text-white/90 dark:focus:ring-purple-500/30" />
+              </div>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div className="flex shrink-0 items-center justify-end gap-2 border-t border-black/[0.06] px-5 py-4 dark:border-white/[0.06]">
+            <button onClick={closeAddModal}
+              className="rounded-xl border border-black/[0.10] px-4 py-2 text-sm font-medium text-[#3C3C43]/60 transition hover:bg-black/[0.04] dark:border-white/[0.10] dark:text-white/50 dark:hover:bg-white/[0.06]">
+              Cancel
+            </button>
+            {addTab === 'paste' && (
+              <button onClick={() => void handleAddPaste()} disabled={isBusy || isGenerating || !addBody.trim()}
+                className="flex items-center gap-2 rounded-xl bg-blue-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-400 disabled:opacity-40">
+                {isBusy ? <><RefreshCw size={13} className="animate-spin" /> Saving…</> : <><Plus size={14} /> Add Song</>}
+              </button>
+            )}
+            {addTab === 'blank' && (
+              <button onClick={() => void handleAddBlank()} disabled={isBusy || !addTitle.trim()}
+                className="flex items-center gap-2 rounded-xl bg-blue-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-400 disabled:opacity-40">
+                {isBusy ? <><RefreshCw size={13} className="animate-spin" /> Saving…</> : <><Plus size={14} /> Create</>}
+              </button>
+            )}
+            {addTab === 'ai' && (
+              <button onClick={() => void handleGenerateAI()} disabled={isBusy || isGenerating || !addTitle.trim() || !addArtist.trim()}
+                className="flex items-center gap-2 rounded-xl bg-purple-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-purple-500 disabled:opacity-40">
+                {isGenerating ? <><RefreshCw size={13} className="animate-spin" /> Generating…</> : isBusy ? <><RefreshCw size={13} className="animate-spin" /> Saving…</> : <><Sparkles size={14} /> Generate &amp; Save</>}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ── Bulk .md import modal ── */}
+    {showBulkModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-6"
+        onClick={(e) => { if (e.target === e.currentTarget && !bulkBusy) setShowBulkModal(false); }}>
+        <div className="flex w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-black/[0.08] bg-white shadow-2xl dark:border-white/10 dark:bg-[#1C1C1E]" style={{ maxHeight: '82vh' }}>
+
+          {/* Header */}
+          <div className="flex shrink-0 items-center justify-between border-b border-black/[0.06] px-5 py-4 dark:border-white/[0.06]">
+            <div>
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-[#1C1C1E] dark:text-white">
+                <FileText size={15} /> Import {bulkRows.length} song{bulkRows.length !== 1 ? 's' : ''}
+              </h2>
+              <p className="mt-0.5 text-xs text-[#3C3C43]/50 dark:text-white/40">
+                Metadata is read from each file's front matter. Uncheck any you want to skip.
+              </p>
+            </div>
+            <button onClick={() => { if (!bulkBusy) setShowBulkModal(false); }}
+              className="rounded-lg p-1.5 text-[#3C3C43]/40 hover:bg-black/[0.06] disabled:opacity-40 dark:text-white/30 dark:hover:bg-white/10" disabled={bulkBusy}>
+              <X size={15} />
+            </button>
+          </div>
+
+          {/* Rows */}
+          <div className="flex-1 overflow-y-auto">
+            {bulkRows.map((row, idx) => {
+              const missing = !row.meta.title.trim() || UUID_RE.test(row.meta.title);
+              return (
+                <label key={idx}
+                  className={`flex cursor-pointer items-center gap-3 border-b border-black/[0.04] px-5 py-2.5 dark:border-white/[0.04] ${
+                    row.include ? '' : 'opacity-45'
+                  } ${missing ? 'bg-amber-50/50 dark:bg-amber-500/5' : ''}`}>
+                  <input type="checkbox" checked={row.include}
+                    onChange={(e) => setBulkRows((rs) => rs.map((r, i) => i === idx ? { ...r, include: e.target.checked } : r))}
+                    className="h-4 w-4 shrink-0 accent-blue-500" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate text-sm font-medium text-[#1C1C1E] dark:text-white">
+                        {row.meta.title.trim() && !UUID_RE.test(row.meta.title) ? row.meta.title : <span className="italic text-amber-600 dark:text-amber-400">No title in file</span>}
+                      </span>
+                      {missing && <AlertCircle size={11} className="shrink-0 text-amber-500" />}
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-[#3C3C43]/45 dark:text-white/35">
+                      <span className="truncate">{row.meta.artist || 'No artist'}</span>
+                      <span className="truncate text-[#3C3C43]/30 dark:text-white/20">· {row.name}</span>
+                    </div>
+                  </div>
+                  {row.meta.display_key && (
+                    <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
+                      {row.meta.display_key}
+                    </span>
+                  )}
+                </label>
+              );
+            })}
+          </div>
+
+          {/* Footer */}
+          <div className="flex shrink-0 items-center justify-between border-t border-black/[0.06] px-5 py-4 dark:border-white/[0.06]">
+            <p className="text-xs text-[#3C3C43]/40 dark:text-white/30">
+              {bulkBusy ? bulkProgress : `${bulkRows.filter((r) => r.include).length} of ${bulkRows.length} selected`}
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setShowBulkModal(false)} disabled={bulkBusy}
+                className="rounded-xl border border-black/[0.10] px-4 py-2 text-sm font-medium text-[#3C3C43]/60 transition hover:bg-black/[0.04] disabled:opacity-40 dark:border-white/10 dark:text-white/50 dark:hover:bg-white/[0.06]">
+                Cancel
+              </button>
+              <button onClick={() => void commitBulkImport()}
+                disabled={bulkBusy || bulkRows.filter((r) => r.include).length === 0}
+                className="flex items-center gap-2 rounded-xl bg-blue-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-400 disabled:opacity-40">
+                {bulkBusy
+                  ? <><RefreshCw size={13} className="animate-spin" /> Importing…</>
+                  : <><Plus size={14} /> Import {bulkRows.filter((r) => r.include).length} songs</>}
+              </button>
+            </div>
           </div>
         </div>
       </div>

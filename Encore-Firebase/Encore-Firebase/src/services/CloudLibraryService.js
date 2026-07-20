@@ -151,6 +151,16 @@ export const CloudLibraryService = {
   },
 
   /**
+   * List saved *show* files under {userEmail}/sets/ — i.e. all named shows,
+   * excluding the four numbered working files (set_1.json … set_4.json).
+   * Returns array of { name, path } sorted by name.
+   */
+  async listShowFiles(userEmail, token) {
+    const all = await this.listSetFiles(userEmail, token);
+    return all.filter((f) => !/^set_[1-4]$/i.test(f.name));
+  },
+
+  /**
    * Download a named set from {userEmail}/sets/{name}.json.
    * Returns the parsed JSON object or null if not found.
    */

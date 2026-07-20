@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Close
@@ -93,6 +94,8 @@ import com.encore.core.ui.theme.setCoverColors
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.unit.sp
@@ -421,6 +424,7 @@ fun CommandCenterScreen(
     var cloudSetName by remember { mutableStateOf("") }
     val cloudSets by setViewModel.cloudSets.collectAsState()
     val cloudSetsLoading by setViewModel.cloudSetsLoading.collectAsState()
+    val currentShowName by setViewModel.currentShowName.collectAsState()
     val profileSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
 
@@ -657,10 +661,18 @@ fun CommandCenterScreen(
                 } else {
                     LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
                         items(cloudSets) { name ->
+                            val isCurrent = name == currentShowName
                             androidx.compose.material3.ListItem(
                                 headlineContent = { Text(name) },
+                                supportingContent = if (isCurrent) {
+                                    { Text("Currently loaded", color = Color(0xFF3B82F6)) }
+                                } else null,
                                 trailingContent = {
-                                    Icon(Icons.Default.FileOpen, contentDescription = "Load")
+                                    Icon(
+                                        imageVector = if (isCurrent) Icons.Default.Check else Icons.Default.FileOpen,
+                                        contentDescription = if (isCurrent) "Currently loaded" else "Load",
+                                        tint = if (isCurrent) Color(0xFF3B82F6) else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 },
                                 modifier = Modifier.clickable {
                                     setViewModel.loadCloudShow(name)
@@ -847,13 +859,52 @@ fun CommandCenterScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(
-                    text = "Tonight's Sets",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.5).sp,
-                    color = encoreColors.titleText
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Tonight's Sets",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.5).sp,
+                        color = encoreColors.titleText
+                    )
+                    // Loaded-show indicator + quick switch — tap to pick another show.
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable {
+                                setViewModel.refreshCloudSets()
+                                showCloudSetPicker = true
+                            }
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.LibraryMusic,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = if (currentShowName != null) Color(0xFF3B82F6)
+                                   else encoreColors.titleText.copy(alpha = 0.4f)
+                        )
+                        Text(
+                            text = currentShowName ?: "No show loaded — tap to choose",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (currentShowName != null) Color(0xFF3B82F6)
+                                    else encoreColors.titleText.copy(alpha = 0.5f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowDown,
+                            contentDescription = "Switch show",
+                            modifier = Modifier.size(16.dp),
+                            tint = if (currentShowName != null) Color(0xFF3B82F6)
+                                   else encoreColors.titleText.copy(alpha = 0.4f)
+                        )
+                    }
+                }
                 TextButton(
                     onClick = { selectedSetFilter = null },
                     contentPadding = PaddingValues(0.dp)

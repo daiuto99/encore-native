@@ -623,7 +623,10 @@ class SetlistRepositoryImpl(
     }
 
     override suspend fun listCloudSets(userId: String): List<String> =
-        syncProvider?.listSetFiles(userId) ?: emptyList()
+        syncProvider?.listSetFiles(userId)
+            // Exclude the numbered working files (set_1..4.json) — only real named shows.
+            ?.filter { !Regex("^set_[1-4]$", RegexOption.IGNORE_CASE).matches(it) }
+            ?: emptyList()
 
     override suspend fun loadCloudShow(userId: String, showName: String): Map<Int, List<String>>? {
         val provider = syncProvider ?: return null

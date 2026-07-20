@@ -56,6 +56,10 @@ class SetViewModel(
     val setlists: StateFlow<List<SetlistEntity>> = setlistRepository.getSetlists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /** Name of the show currently loaded into the four sets, or null. Survives restart. */
+    val currentShowName: StateFlow<String?> = userPrefs.currentShowName
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
     private val _statusMessage = MutableStateFlow<String?>(null)
     val statusMessage: StateFlow<String?> = _statusMessage.asStateFlow()
 
@@ -106,6 +110,7 @@ class SetViewModel(
             // source:"tablet" so checkAndApplyWebSetChanges skips them and cannot
             // restore stale web set data over what we just loaded.
             setlistRepository.stampAllSetsAsTablet(userId)
+            userPrefs.saveCurrentShowName(showName)
             _statusMessage.value = if (totalSongs > 0)
                 "Loaded \"$showName\" ($totalSongs songs)"
             else
@@ -117,6 +122,7 @@ class SetViewModel(
         viewModelScope.launch {
             val userId = userPrefs.persistedUser.first()?.googleAccountId ?: return@launch
             setlistRepository.saveCloudShow(userId, showName)
+            userPrefs.saveCurrentShowName(showName)
             _statusMessage.value = "Saved \"$showName\" to cloud"
         }
     }

@@ -41,6 +41,7 @@ class UserPreferencesRepository(private val context: Context) {
         val PROFILE_PICTURE_URI   = stringPreferencesKey("profile_picture_uri")
         val CONNECTED_FOLDER_URI  = stringPreferencesKey("connected_folder_uri")
         val LAST_SYNC_TIMESTAMP   = longPreferencesKey("last_sync_timestamp")
+        val CURRENT_SHOW_NAME     = stringPreferencesKey("current_show_name")
     }
 
     /**
@@ -96,6 +97,22 @@ class UserPreferencesRepository(private val context: Context) {
 
     suspend fun saveLastSyncTimestamp(timestamp: Long) {
         context.userDataStore.edit { it[Keys.LAST_SYNC_TIMESTAMP] = timestamp }
+    }
+
+    /**
+     * Name of the show whose sets are currently loaded into the four numbered sets,
+     * or null if none has been loaded. Shown in the "Tonight's Sets" header.
+     */
+    val currentShowName: Flow<String?> = context.userDataStore.data.map { prefs ->
+        prefs[Keys.CURRENT_SHOW_NAME]
+    }
+
+    /** Persist (or clear, when [name] is null/blank) the currently-loaded show name. */
+    suspend fun saveCurrentShowName(name: String?) {
+        context.userDataStore.edit { prefs ->
+            if (name.isNullOrBlank()) prefs.remove(Keys.CURRENT_SHOW_NAME)
+            else prefs[Keys.CURRENT_SHOW_NAME] = name
+        }
     }
 
     /**

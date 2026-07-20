@@ -487,6 +487,29 @@ class GcpSyncProvider(
         }
     }
 
+    override suspend fun listRemoteSongIds(userId: String): List<String> = withContext(Dispatchers.IO) {
+        try {
+            val tok = token()
+            val prefix = "$userId/songs/"
+            val encodedPrefix = URLEncoder.encode(prefix, "UTF-8").replace("+", "%20")
+            val url = "$BASE_URL/b/$BUCKET/o?prefix=$encodedPrefix&maxResults=1000"
+            val request = Request.Builder().url(url).addHeader("Authorization", "Bearer $tok").get().build()
+            http.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext emptyList()
+                val body = response.body?.string() ?: return@withContext emptyList()
+                val items = org.json.JSONObject(body).optJSONArray("items") ?: return@withContext emptyList()
+                (0 until items.length())
+                    .map { items.getJSONObject(it).getString("name") }
+                    .filter { it.endsWith(".md", ignoreCase = true) }
+                    .map { it.removePrefix(prefix).removeSuffix(".md") }
+                    .filter { it.isNotBlank() && !it.contains('/') }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "listRemoteSongIds failed: ${e.message}")
+            emptyList()
+        }
+    }
+
     override suspend fun downloadNamedSet(userId: String, setName: String): String? =
         withContext(Dispatchers.IO) {
             try { readObject(token(), namedSetPath(userId, setName)) }

@@ -94,6 +94,16 @@ interface SyncProvider : EncoreApiService {
     /** List all set file names (without .json) under `{userId}/sets/`. */
     suspend fun listSetFiles(userId: String): List<String>
 
+    /**
+     * List the IDs (bare UUIDs, without `.md`) of every song object under
+     * `{userId}/songs/` in the bucket. Drives cloud-song discovery so songs added on
+     * another client (e.g. the web app) can be pulled down.
+     *
+     * @return the remote song IDs, or an empty list if the bucket is unreachable —
+     *         callers treat an empty list as "nothing new", never as "delete everything".
+     */
+    suspend fun listRemoteSongIds(userId: String): List<String>
+
     /** Download a named set from `{userId}/sets/{setName}.json`. Returns null if not found. */
     suspend fun downloadNamedSet(userId: String, setName: String): String?
 

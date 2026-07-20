@@ -90,6 +90,8 @@ class SyncViewModel(
 
     private suspend fun pullRemoteChanges() {
         val userId = userPrefs.persistedUser.first()?.googleAccountId ?: return
+        // Cloud is the source of truth: pull down songs added on the web / another device.
+        songRepository.importNewRemoteSongs(userId)
         val songs = songRepository.getAllSongsOnce()
         for (song in songs) {
             if (song.lastSyncedHash == null) continue
@@ -150,9 +152,17 @@ class SyncViewModel(
         if (_syncHudState.value is SyncHudState.InProgress) return
         viewModelScope.launch {
             val userId = userPrefs.persistedUser.first()?.googleAccountId ?: return@launch
+            // Cloud is the source of truth: discover + import songs added on the web app or
+            // another device BEFORE the local loop, so even an empty device pulls the library.
+            songRepository.importNewRemoteSongs(userId)
             val songs = songRepository.getAllSongsOnce()
             val total = songs.size
-            if (total == 0) return@launch
+            if (total == 0) {
+                val ts = System.currentTimeMillis()
+                userPrefs.saveLastSyncTimestamp(ts)
+                _lastSyncTimestamp.value = ts
+                return@launch
+            }
 
             var consecutiveUploadFailures = 0
             for ((index, song) in songs.withIndex()) {

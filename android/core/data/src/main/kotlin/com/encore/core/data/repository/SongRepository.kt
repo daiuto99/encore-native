@@ -217,6 +217,19 @@ interface SongRepository {
      */
     suspend fun pullSongFromCloud(userId: String, songId: String): Boolean
 
+    /**
+     * Discover songs that exist in the cloud but not in the local DB (e.g. added on the
+     * web app or another device) and insert them into Room. Cloud is the source of truth
+     * for the library.
+     *
+     * Additive only — never deletes local songs. If the remote listing is empty (offline
+     * or unreachable) this is a no-op, so the last-synced library stays intact.
+     *
+     * @param userId Owner's account ID (GCS path scope).
+     * @return the number of new songs imported.
+     */
+    suspend fun importNewRemoteSongs(userId: String): Int
+
     /** Reactive single-song stream — emits whenever the DB row changes. */
     fun observeSong(songId: String): Flow<SongEntity?>
 
@@ -486,6 +499,51 @@ class SongRepositoryImpl(
             try { songDao.update(existing.copy(syncStatus = SyncStatus.CONFLICT)) } catch (_: Exception) {}
             false
         }
+    }
+
+    override suspend fun importNewRemoteSongs(userId: String): Int {
+        val remoteIds = syncProvider.listRemoteSongIds(userId)
+        if (remoteIds.isEmpty()) return 0 // offline / unreachable → keep last-synced cache
+
+        val localIds = songDao.getAllSongsOnce().mapTo(HashSet()) { it.id }
+        val newIds = remoteIds.filter { it !in localIds }
+        if (newIds.isEmpty()) return 0
+
+        var imported = 0
+        for (songId in newIds) {
+            val rawContent = syncProvider.downloadSong(userId, songId) ?: continue
+            val (yaml, markdownBody) = parseYamlFrontMatter(rawContent)
+            val trimmedBody = markdownBody.trim()
+            val now = System.currentTimeMillis()
+            val entity = SongEntity(
+                id                 = songId,
+                userId             = LOCAL_USER_ID,
+                title              = yaml["title"]?.takeIf { it.isNotBlank() }?.take(200) ?: "Untitled",
+                artist             = yaml["artist"]?.takeIf { it.isNotBlank() }?.take(200) ?: "",
+                displayKey         = yaml["display_key"]?.takeIf { it.isNotBlank() }?.take(20),
+                originalKey        = yaml["original_key"]?.takeIf { it.isNotBlank() }?.take(20),
+                markdownBody       = trimmedBody,
+                originalImportBody = trimmedBody,
+                isLeadGuitar       = yaml["is_lead_guitar"]?.lowercase() == "true",
+                createdAt          = now,
+                updatedAt          = now,
+                localUpdatedAt     = now,
+                lastSyncedAt       = now,
+                lastSyncedHash     = FileHashUtils.hashMarkdownBody(trimmedBody),
+                isDirty            = false,
+                syncStatus         = SyncStatus.SYNCED,
+            )
+            try {
+                songDao.insert(entity)
+                imported++
+            } catch (e: Exception) {
+                // Unique (user_id, title, artist) collision with an existing local song, or
+                // any other insert error — skip this one, non-fatal.
+                Log.w(TAG, "importNewRemoteSongs — skipped $songId: ${e.message}")
+            }
+        }
+        if (imported > 0) Log.d(TAG, "importNewRemoteSongs — imported $imported new song(s)")
+        return imported
     }
 
     override suspend fun markConflict(songId: String) {
